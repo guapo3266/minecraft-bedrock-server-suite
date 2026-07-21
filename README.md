@@ -29,8 +29,6 @@ restore_backup.py             # Restauración de backups .zip
 
 enable_beta_apis.py           # Inyecta flags experimentales en level.dat (NBT)
 enable_beta_apis_v2.py        # Versión con soporte para NBT binario/header
-update_items.py               # Actualiza manifiestos y JSONs de behavior/resource packs
-update_items_v2.py            # Registra custom components vía Scripting API
 
 server.properties.example     # Plantilla de configuración
 ```
@@ -93,7 +91,6 @@ Si algo falla (timeout de 120s en compresión, archivo corrupto, snapshot incomp
 - Las detecciones de jugadores dependen de strings en inglés en el log de BDS. Si cambia el formato en futuras versiones, el wrapper no detectará jugadores y no hará backups en caliente (solo el de inicio y cierre).
 - `rotate_backups()` corre dentro del lock de backup. Si el directorio de backups tiene miles de archivos y el disco es lento, puede retrasar la liberación del lock.
 - Los scripts `enable_beta_apis*.py` requieren `amulet-nbt`. Si no está instalado, fallan con error claro.
-- Los scripts `update_items*.py` asumen una estructura de directorios específica para el behavior pack (`guardian_robot_BP`/`guardian_robot_RP`).
 
 ## Auditoría
 
