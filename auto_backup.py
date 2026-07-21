@@ -9,7 +9,7 @@ import multiprocessing
 # Lock por defecto (multiprocessing safe)
 _backup_lock = multiprocessing.Lock()
 
-# Configuración dinámicamente resuelta para máxima portabilidad
+# Configuracion (resuelta dinamicamente)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def get_world_name():
     props_path = os.path.join(BASE_DIR, "server.properties")
@@ -29,7 +29,7 @@ WORLD_DIR = os.path.join(BASE_DIR, "worlds", WORLD_NAME)
 WORLD_PARENT_DIR = os.path.join(BASE_DIR, "worlds")
 BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups"))
 
-# Retención de Doble Capa
+# Politica de retencion
 MAX_RECENT_BACKUPS = 15
 DAYS_TO_KEEP_DAILY = 7
 
@@ -89,7 +89,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
     tmp_filepath = None
 
     try:
-        # Limpieza proactiva de .tmp huérfanos SOLO tras adquirir el lock de forma exclusiva
+        # Limpiar .tmp huerfanos (solo con el lock adquirido)
         if os.path.exists(BACKUP_DIR):
             for orphan_tmp in glob.glob(os.path.join(BACKUP_DIR, "*.tmp")):
                 try:
@@ -195,7 +195,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         print(f"[ERROR] No se pudo crear el backup: {e}")
         return False
     finally:
-        # Garantía antirresiduos: Si ocurrió un error o la compresión no se completó, borrar ZIP corrupto/incompleto
+        # Limpiar archivos parciales o corruptos
         for cleanup_path in (tmp_filepath, zip_filepath if not success else None):
             if cleanup_path and os.path.exists(cleanup_path):
                 try:

@@ -1,6 +1,6 @@
-# Documentación de Arquitectura y Refactorización V5.1
+# Notas de diseno del wrapper y sistema de backups
 
-Este documento detalla los problemas de concurrencia, cuelgues I/O y errores lógicos descubiertos en las versiones anteriores del `server_wrapper.py`, así como las soluciones definitivas implementadas para alcanzar una robustez de grado industrial.
+Este documento detalla los problemas de concurrencia, cuelgues I/O y errores lógicos descubiertos en las versiones anteriores del `server_wrapper.py`, así como los cambios aplicados para resolverlos.
 
 ---
 
@@ -11,7 +11,7 @@ Anteriormente, el proceso de copia y compresión ZIP se ejecutaba en un hilo sec
 
 ### La Solución
 Se aisló el núcleo de compresión usando la librería `multiprocessing`. Ahora, el backup se lanza en un proceso del sistema operativo completamente independiente.
-- Si el proceso se excede del tiempo máximo asignado (`WORKER_COMPRESSION_TIMEOUT_SEC = 120s`), el wrapper principal ejecuta un implacable `process.kill()` (el equivalente a `TerminateProcess` en Windows), aniquilando el proceso defectuoso instantáneamente sin importar qué tan profundo estuviera atascado en el disco.
+- Si el proceso se excede del tiempo máximo asignado (`WORKER_COMPRESSION_TIMEOUT_SEC = 120s`), el wrapper principal ejecuta un `process.kill()` (el equivalente a `TerminateProcess` en Windows), aniquilando el proceso defectuoso instantáneamente sin importar qué tan profundo estuviera atascado en el disco.
 
 ---
 
@@ -20,11 +20,11 @@ Se aisló el núcleo de compresión usando la librería `multiprocessing`. Ahora
 ### El Problema
 Al usar `multiprocessing` en Windows (método `spawn`), el nuevo subproceso arranca un intérprete de Python en blanco e importa el módulo `auto_backup.py` desde cero. Esto provocaba que el `_backup_lock = threading.Lock()` se instanciara dos veces (uno en el padre, uno en el hijo), permitiendo que múltiples backups ocurrieran a la vez sobreescribiendo los archivos, ya que no compartían la exclusión mutua.
 
-Además, si el wrapper aplicaba un `kill()` al proceso mientras éste tenía el lock adquirido, el semáforo del Sistema Operativo se quedaba "envenenado" (tomado para siempre), bloqueando el backup de cierre final de forma permanente.
+Además, si el wrapper aplicaba un `kill()` al proceso mientras éste tenía el lock adquirido, el semáforo del Sistema Operativo se quedaba "envenenado" (tomado), bloqueando el backup de cierre.
 
 ### La Solución
 - **IPC Lock Inyectado:** Se instanció un `multiprocessing.Lock()` global en el proceso maestro (`backup_ipc_lock`), el cual es transmitido a los subprocesos a través de sus argumentos. Ahora, el sistema operativo garantiza exclusión mutua a lo largo de todos los procesos.
-- **Renovación del Lock (Des-envenenamiento):** Si se detecta un proceso atascado y se le aplica `kill()`, el wrapper descarta la referencia al viejo lock envenenado y renueva la variable global creando un `multiprocessing.Lock()` totalmente fresco. Esto garantiza que el siguiente backup pueda ejecutarse inmediatamente.
+- **Renovación del Lock (Des-envenenamiento):** Si se detecta un proceso atascado y se le aplica `kill()`, el wrapper descarta la referencia al viejo lock envenenado y renueva la variable global creando un `multiprocessing.Lock()` nuevo. Esto garantiza que el siguiente backup pueda ejecutarse inmediatamente.
 
 ---
 
@@ -35,7 +35,7 @@ El tiempo máximo de espera para un backup atascado era de 120s (`WORKER_COMPRES
 
 ### La Solución
 - Se elevó la tolerancia del cierre maestro a `135s` (`WORKER_JOIN_ON_SHUTDOWN_SEC`).
-- Esto asegura estadísticamente (y se comprobó con fuzzer tests de 25 iteraciones) que el propio worker siempre procesará su suicidio primero (a los 120s), dejando a la rama de apagado maestro como una red de seguridad infalible que solo actuará en situaciones de colapso extremo de hilos.
+- Esto asegura estadísticamente (y se comprobó con fuzzer tests de 25 iteraciones) que el propio worker siempre procesará su suicidio primero (a los 120s), dejando a la rama de apagado maestro como una red de seguridad que solo actuará en situaciones de colapso extremo de hilos.
 - Se centralizó toda la lógica de aniquilación y renovación en una única función Thread-Safe: `_force_kill_compress_process(proc)`.
 
 ---
@@ -76,5 +76,4 @@ with state_lock:
 - **Barredora Segura de TMP**: `create_backup` escanea el disco y elimina archivos `.tmp` incompletos. **Nota de seguridad:** Esta limpieza ocurre estrictamente _después_ de haber adquirido el `backup_ipc_lock`, asegurando matemáticamente que el `.tmp` pertenece a un proceso muerto y no al proceso de un backup legítimo que esté corriendo simultáneamente.
 
 ---
-*Desarrollado y documentado con asistencia de inteligencia artificial.*
 
