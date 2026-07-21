@@ -1,0 +1,25 @@
+# Ejecutables y binarios oficiales de Minecraft BDS
+bedrock_server.exe
+bedrock_server.pdb
+*.dll
+
+# Datos de mundos y logs de juego
+worlds/
+logs/
+*.log
+packet-statistics.txt
+
+# Configuración local específica del servidor (usar server.properties.example como plantilla)
+server.properties
+allowlist.json
+permissions.json
+
+# Archivos de respaldo y temporales
+*.zip
+*.tmp
+Backups_Minecraft/
+_POSIBLEMENTE_CORRUPTO*
+
+# Python / Cache
+__pycache__/
+*.pyc
