@@ -13,6 +13,7 @@ Mejoras V5.0:
 
 import subprocess
 import threading
+import multiprocessing
 import sys
 import time
 import re
@@ -21,6 +22,14 @@ import os
 import auto_backup
 
 # ═══════════════════════════════════════════════════════════════
+# ADVERTENCIA: Las detecciones de jugadores y save query dependen de
+# strings literales en ingles. Si BDS cambia el formato de log o el
+# idioma, estas detecciones fallaran silenciosamente.
+#   - "Player connected:" / "Player disconnected:" -> players_online
+#   - "Data saved. Files are now ready to be copied." -> save_query_ready_seen
+#   - "There are X/Y players online:" -> list de jugadores
+# Si sospechas que esto fallo, revisa los backups en caliente.
+# ═══════════════════════════════════════════════════════════════
 # CONFIGURACIÓN
 # ═══════════════════════════════════════════════════════════════
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -28,9 +37,10 @@ SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 BACKUP_INTERVAL_SEC = 30 * 60           # 30 minutos entre backups
 WATCHDOG_HOLDING_TIMEOUT_SEC = 60       # Max segundos esperando respuesta de save query
 LIST_SYNC_INTERVAL_SEC = 5 * 60         # Cada 5 min, sincronizar jugadores con 'list'
-FINAL_BACKUP_TIMEOUT_SEC = 60           # Max segundos para el backup de cierre
+FINAL_BACKUP_LOCK_WAIT_SEC = 5          # Espera mínima por el lock (el fantasma fue aniquilado)
+FINAL_BACKUP_TIMEOUT_SEC = 240          # Max segundos para el backup de cierre (espera + compresión)
 WORKER_COMPRESSION_TIMEOUT_SEC = 120    # Tiempo máximo para la compresión del backup
-WORKER_JOIN_ON_SHUTDOWN_SEC = 120       # Alineado con timeout de compresión
+WORKER_JOIN_ON_SHUTDOWN_SEC = 135       # Mayor que el timeout del worker para evitar colisión
 
 # ═══════════════════════════════════════════════════════════════
 # ESTADO GLOBAL SINCRONIZADO
@@ -46,9 +56,13 @@ shutting_down = False
 last_backup_completed_time = 0          # Cuándo terminó el último ciclo de backup
 save_hold_timestamp = 0                 # Cuándo se envió save hold (para el watchdog)
 backup_thread = None                    # Referencia al hilo worker actual
+active_compress_process = None          # Referencia al proceso de compresión para aniquilación
+backup_ipc_lock = multiprocessing.Lock() # Lock IPC compartido entre proceso maestro e hijo
 last_save_snapshot = []                 # Lista de tuplas (rel_path, byte_length) parseadas de save query
 save_query_ready_seen = False           # True si llegó "Data saved" y falta capturar la lista de archivos
 backup_cancel_event = None              # Señal cooperativa para cancelar la compresión actual
+expecting_list_names = False            # True si se recibió encabezado 'There are X players' y falta leer nombres
+last_snapshot_update_time = 0.0         # Timestamp de la última adición a last_save_snapshot
 
 server_process = None
 
@@ -72,7 +86,9 @@ def send_command(cmd):
 def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
     """Renombra un archivo .zip a _POSIBLEMENTE_CORRUPTO si ocurrió una anomalia."""
     if zip_filepath and isinstance(zip_filepath, str) and os.path.exists(zip_filepath):
-        corrupt_name = zip_filepath.replace(".zip", f"_{reason}.zip")
+        # Usar rsplit para reemplazar solo la extension final, no .zip intermedios
+        base = zip_filepath.rsplit(".zip", 1)[0]
+        corrupt_name = f"{base}_{reason}.zip"
         try:
             os.rename(zip_filepath, corrupt_name)
             print(f"[Worker] Backup marcado por desincronización: {os.path.basename(corrupt_name)}")
@@ -82,7 +98,10 @@ def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
 
 def parse_save_query_files(line):
     """Extrae pares (ruta_relativa, bytes) de una línea de save query."""
-    if ":" not in line or ("/" not in line and "\\" not in line):
+    # Limpiar múltiples prefijos estándar de log de Bedrock si la consola los añade
+    line = re.sub(r'^(?:\[.*?\]\s*)+', '', line)
+
+    if ":" not in line:
         return []
 
     parsed = []
@@ -94,100 +113,156 @@ def parse_save_query_files(line):
 
 
 # ═══════════════════════════════════════════════════════════════
-# HILO WORKER: Compresión de archivos (Snapshot Bedrock Nativo)
+# PROCESO WORKER: Compresión en E/S aislada
+# ═══════════════════════════════════════════════════════════════
+def _run_backup_process(trigger_name, file_snapshot, cancel_event, result_queue, external_lock):
+    """Función de nivel superior (picklable) para ejecutar en un proceso aislado."""
+    import auto_backup
+    try:
+        zip_path = auto_backup.create_backup(
+            trigger_name,
+            file_snapshot=file_snapshot,
+            cancel_event=cancel_event,
+            external_lock=external_lock
+        )
+        result_queue.put({"zip": zip_path, "error": None})
+    except Exception as e:
+        result_queue.put({"zip": None, "error": str(e)})
+
+# ═══════════════════════════════════════════════════════════════
+# FUNCIÓN AUXILIAR: Aniquilación segura y renovación de Lock
+# ═══════════════════════════════════════════════════════════════
+def _force_kill_compress_process(proc):
+    """Aniquila un proceso atascado de forma segura y renueva el lock IPC."""
+    global backup_ipc_lock, active_compress_process
+    if not proc or not proc.is_alive():
+        return
+        
+    with state_lock:
+        if active_compress_process is not proc:
+            return # Ya fue aniquilado por otro
+            
+        try:
+            proc.kill()
+            proc.join()
+        except Exception as e:
+            print(f"[Wrapper] Error forzando kill del proceso de compresión: {e}")
+            
+        # Reemplazar el lock IPC envenenado por el kill del subproceso
+        backup_ipc_lock = multiprocessing.Lock()
+        active_compress_process = None
+
+# ═══════════════════════════════════════════════════════════════
+# HILO WORKER: Orquestador de la compresión
 # ═══════════════════════════════════════════════════════════════
 def execute_backup_worker(file_snapshot=None, cancel_event=None):
-    """Hilo efímero que comprime el mundo usando el snapshot de Bedrock."""
-    global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event
+    """Hilo efímero que orquesta el proceso de compresión de Bedrock."""
+    global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock
+    try:
 
-    print("[Worker] Iniciando compresión de archivos en hilo separado...")
+        print("[Worker] Iniciando compresión de archivos en proceso separado (multiprocessing)...")
 
-    result = {"zip": None, "error": None}
+        ctx = multiprocessing.get_context("spawn")
+        queue = ctx.Queue()
+    
+        comp_proc = ctx.Process(
+            target=_run_backup_process, 
+            args=("periodico", file_snapshot, cancel_event, queue, backup_ipc_lock),
+            daemon=True
+        )
 
-    def _compress():
+        with state_lock:
+            active_compress_process = comp_proc
+        
+        comp_proc.start()
+        comp_proc.join(timeout=WORKER_COMPRESSION_TIMEOUT_SEC)
+
+        # --- CASO A: Compresión excedió el tiempo máximo (Timeout interno) ---
+        if comp_proc.is_alive():
+            print(f"[Worker] [CRITICO] Timeout de compresión ({WORKER_COMPRESSION_TIMEOUT_SEC}s).")
+            print("[Worker]          Matando proceso de compresión a nivel de SO...")
+        
+            _force_kill_compress_process(comp_proc)
+
+            with state_lock:
+                was_watchdog = watchdog_fired
+                watchdog_fired = True
+
+            if cancel_event:
+                cancel_event.set()
+
+            if not was_watchdog:
+                send_command("save resume")
+
+            with state_lock:
+                backup_in_progress = False
+                backup_dispatched = False
+                save_query_ready_seen = False
+                backup_cancel_event = None
+                last_backup_completed_time = time.time()
+            
+            return
+
+        # --- CASO B: Compresión terminó a tiempo ---
+        with state_lock:
+            active_compress_process = None
+
         try:
-            result["zip"] = auto_backup.create_backup(
-                "periodico",
-                file_snapshot=file_snapshot,
-                cancel_event=cancel_event,
-            )
-        except Exception as e:
-            result["error"] = e
+            result = queue.get(timeout=2)  # Fix: timeout evita race condition con feeder thread interno
+        except Exception:
+            result = {"zip": None, "error": "El proceso terminó sin devolver un resultado"}
 
-    comp_thread = threading.Thread(target=_compress, daemon=True)
-    comp_thread.start()
-    comp_thread.join(timeout=WORKER_COMPRESSION_TIMEOUT_SEC)
-
-    # --- CASO A: Compresión excedió el tiempo máximo (Timeout interno) ---
-    if comp_thread.is_alive():
-        print(f"[Worker] [CRITICO] Timeout de compresión ({WORKER_COMPRESSION_TIMEOUT_SEC}s).")
-        print("[Worker]          Liberando escritura del servidor para evitar congelamiento...")
-
-        if cancel_event:
-            cancel_event.set()
+        if result["error"]:
+            print(f"[Worker] [ERROR] Falló la compresión: {result['error']}")
+        elif not result["zip"]:
+            print("[Worker] [ERROR] El backup no produjo un ZIP válido.")
 
         with state_lock:
             was_watchdog = watchdog_fired
-            watchdog_fired = True
 
-        if not was_watchdog:
+        if was_watchdog:
+            print("[Worker] El watchdog ya había reanudado escrituras previamente.")
+            if result["zip"]:
+                mark_corrupt_zip(result["zip"], "POSIBLEMENTE_CORRUPTO")
+        else:
+            if result["zip"]:
+                print("[Worker] Compresión exitosa. Reanudando escritura (save resume)...")
+            else:
+                print("[Worker] Reanudando escritura tras fallo de backup (save resume)...")
             send_command("save resume")
 
         with state_lock:
             backup_in_progress = False
             backup_dispatched = False
+            watchdog_fired = False
             save_query_ready_seen = False
             backup_cancel_event = None
             last_backup_completed_time = time.time()
 
-        def _late_cleanup_watcher():
-            try:
-                comp_thread.join(timeout=180)
-                if comp_thread.is_alive():
-                    print("[Worker] [ALERTA] Compresión en segundo plano abandonada definitivamente.")
-                elif result["zip"]:
-                    mark_corrupt_zip(result["zip"], "TIMEOUT_EXCEDIDO")
-            except Exception:
-                pass
 
-        threading.Thread(target=_late_cleanup_watcher, daemon=True).start()
-        return
 
-    # --- CASO B: Compresión terminó a tiempo ---
-    if result["error"]:
-        print(f"[Worker] [ERROR] Falló la compresión: {result['error']}")
-    elif not result["zip"]:
-        print("[Worker] [ERROR] El backup no produjo un ZIP válido.")
-
-    with state_lock:
-        was_watchdog = watchdog_fired
-
-    if was_watchdog:
-        print("[Worker] El watchdog ya había reanudado escrituras previamente.")
-        if result["zip"]:
-            mark_corrupt_zip(result["zip"], "POSIBLEMENTE_CORRUPTO")
-    else:
-        if result["zip"]:
-            print("[Worker] Compresión exitosa. Reanudando escritura (save resume)...")
-        else:
-            print("[Worker] Reanudando escritura tras fallo de backup (save resume)...")
+    except Exception as e:
+        print(f"[Worker] [CRITICO] Excepcion fatal en worker de backup: {type(e).__name__}: {e}")
+        print("[Worker]          Forzando limpieza de emergencia...")
+        with state_lock:
+            backup_in_progress = False
+            backup_dispatched = False
+            save_query_ready_seen = False
+            backup_cancel_event = None
+            watchdog_fired = True
+            last_backup_completed_time = time.time()
         send_command("save resume")
 
-    with state_lock:
-        backup_in_progress = False
-        backup_dispatched = False
-        watchdog_fired = False
-        save_query_ready_seen = False
-        backup_cancel_event = None
-        last_backup_completed_time = time.time()
-
-
+        with state_lock:
+            active_compress_process = None
 # ═══════════════════════════════════════════════════════════════
 # HILO read_stdout: Lector de la consola del servidor
 # ═══════════════════════════════════════════════════════════════
 def read_stdout():
     """Lee la salida del servidor, detecta eventos, parsea save query y despacha worker."""
-    global players_online, backup_dispatched, backup_thread, last_save_snapshot, save_query_ready_seen, backup_cancel_event
+    global players_online, backup_dispatched, backup_thread, last_save_snapshot, save_query_ready_seen, backup_cancel_event, expecting_list_names, last_snapshot_update_time
+
+    lines_waited_for_list = 0
 
     while True:
         try:
@@ -217,6 +292,9 @@ def read_stdout():
                     players_online.discard(name)
 
             # --- Sincronización con comando 'list' ---
+            with state_lock:
+                is_expecting_list = expecting_list_names
+
             match_list = re.search(r"There are (\d+)/\d+ players online:(.*)", line)
             if match_list:
                 count = int(match_list.group(1))
@@ -224,48 +302,58 @@ def read_stdout():
                 with state_lock:
                     if count == 0:
                         players_online.clear()
+                        expecting_list_names = False
                     elif names_str:
-                        # Extraer lista exacta de nombres devueltos por BDS y actualizar el set in-place
                         parsed_names = {n.strip() for n in names_str.split(",") if n.strip()}
                         if parsed_names:
                             players_online.clear()
                             players_online.update(parsed_names)
+                        expecting_list_names = False
+                    else:
+                        expecting_list_names = True
+                        lines_waited_for_list = 0
+            elif is_expecting_list:
+                lines_waited_for_list += 1
+                if lines_waited_for_list > 10:
+                    with state_lock:
+                        expecting_list_names = False
+                else:
+                    # Limpiar prefijos de log antes de parsear los nombres
+                    cleaned_line = re.sub(r'^(?:\[.*?\]\s*)+', '', line)
+                    if cleaned_line.startswith("["):
+                        pass
+                    else:
+                        stripped = cleaned_line.strip()
+                        if stripped and stripped.lower() not in ("quit correctly",):
+                            parsed_names = {n.strip() for n in stripped.split(",") if n.strip()}
+                            if parsed_names:
+                                with state_lock:
+                                    players_online.clear()
+                                    players_online.update(parsed_names)
+                                    expecting_list_names = False
 
             # --- Detectar respuesta exitosa de save query ---
             save_ready_in_line = "Data saved. Files are now ready to be copied." in line
 
             # --- Parsear líneas de respuesta de 'save query' (Archivos y truncado de bytes) ---
             parsed_files = parse_save_query_files(line)
-            worker_to_start = None
-            snapshot_len = 0
 
-            if save_ready_in_line or parsed_files:
+            if save_ready_in_line or parsed_files or save_query_ready_seen:
                 with state_lock:
                     is_waiting = backup_in_progress and not backup_dispatched
 
                     if is_waiting and save_ready_in_line:
                         save_query_ready_seen = True
+                        last_save_snapshot = []
+                        last_snapshot_update_time = time.time()
 
                     if is_waiting and parsed_files and save_query_ready_seen:
-                        last_save_snapshot.extend(parsed_files)
-
-                    should_dispatch = is_waiting and save_query_ready_seen and len(last_save_snapshot) > 0
-                    if should_dispatch:
-                        snapshot_copy = list(last_save_snapshot)
-                        backup_dispatched = True
-                        save_query_ready_seen = False
-                        backup_cancel_event = threading.Event()
-                        snapshot_len = len(snapshot_copy)
-                        worker_to_start = threading.Thread(
-                            target=execute_backup_worker,
-                            args=(snapshot_copy, backup_cancel_event),
-                            daemon=True
-                        )
-                        backup_thread = worker_to_start
-
-            if worker_to_start:
-                print(f"[Wrapper] Servidor listo. Despachando worker con snapshot ({snapshot_len} archivos)...")
-                worker_to_start.start()
+                        existing_paths = {path for path, _ in last_save_snapshot}
+                        for item in parsed_files:
+                            if item[0] not in existing_paths:
+                                last_save_snapshot.append(item)
+                                existing_paths.add(item[0])
+                        last_snapshot_update_time = time.time()
 
         except Exception as e:
             try:
@@ -279,7 +367,7 @@ def read_stdout():
 # ═══════════════════════════════════════════════════════════════
 def backup_scheduler():
     """Reloj maestro defensivo con evaluación e intervenciones de estado 100% atómicas."""
-    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event
+    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread
 
     last_list_sync = time.time()
     last_save_query = 0.0
@@ -310,8 +398,23 @@ def backup_scheduler():
 
                 if backup_in_progress:
                     if not backup_dispatched:
+                        # Respaldo de seguridad: si tenemos archivos recolectados y pasaron >1.5s sin nuevas líneas, despachar worker
+                        if save_query_ready_seen and len(last_save_snapshot) > 0 and (now - last_snapshot_update_time) >= 5.0:  # Aumentado de 1.5s a 5s para evitar snapshots incompletos bajo carga
+                            snapshot_copy = list(last_save_snapshot)
+                            backup_dispatched = True
+                            save_query_ready_seen = False
+                            backup_cancel_event = multiprocessing.Event()
+                            snapshot_len = len(snapshot_copy)
+                            worker_to_start = threading.Thread(
+                                target=execute_backup_worker,
+                                args=(snapshot_copy, backup_cancel_event),
+                                daemon=True
+                            )
+                            backup_thread = worker_to_start
+                            print(f"[Wrapper] Despachando worker (vía timeout de resguardo) con snapshot ({snapshot_len} archivos)...")
+                            worker_to_start.start()
                         # Estado HOLDING: verificar Watchdog de 60s
-                        if (now - save_hold_timestamp) > WATCHDOG_HOLDING_TIMEOUT_SEC:
+                        elif (now - save_hold_timestamp) > WATCHDOG_HOLDING_TIMEOUT_SEC:
                             print("[Wrapper] [PANICO] Servidor no respondió a save query en 60s.")
                             print("[Wrapper]          Forzando save resume de emergencia.")
                             backup_in_progress = False
@@ -361,6 +464,50 @@ def backup_scheduler():
 
 
 # ═══════════════════════════════════════════════════════════════
+# FUNCIÓN AUXILIAR: Apagado Unificado y Seguro
+# ═══════════════════════════════════════════════════════════════
+def initiate_shutdown(reason="shutdown"):
+    """
+    Inicia un apagado coordinado y seguro del servidor:
+    1. Marca shutting_down = True de forma atómica.
+    2. Cancela cualquier backup caliente en curso y libera save hold (save resume).
+    3. Envía el comando 'stop' al proceso del servidor si aún sigue vivo.
+    """
+    global shutting_down, backup_in_progress, backup_dispatched, save_query_ready_seen, backup_cancel_event, watchdog_fired
+
+    cancel_worker = None
+    should_send_resume = False
+    should_send_stop = False
+
+    with state_lock:
+        if not shutting_down:
+            shutting_down = True
+            print(f"\n[Wrapper] Cierre seguro iniciado ({reason}).")
+            if backup_in_progress:
+                print("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...")
+                cancel_worker = backup_cancel_event
+                should_send_resume = True
+                backup_in_progress = False
+                backup_dispatched = False
+                save_query_ready_seen = False
+                backup_cancel_event = None
+                watchdog_fired = True
+            should_send_stop = True
+        else:
+            print(f"\n[Wrapper] Apagado ya en progreso, ignorando ({reason})...")
+
+    if cancel_worker:
+        cancel_worker.set()
+
+    if should_send_resume:
+        send_command("save resume")
+
+    if should_send_stop:
+        print("[Wrapper] Enviando comando 'stop' al servidor...")
+        send_command("stop")
+
+
+# ═══════════════════════════════════════════════════════════════
 # HILO read_stdin: Lector de teclado del usuario
 # ═══════════════════════════════════════════════════════════════
 def read_stdin():
@@ -378,9 +525,11 @@ def read_stdin():
                 if shutting_down:
                     break
 
-            send_command(cmd)
             if cmd.lower() == "stop":
+                initiate_shutdown("comando 'stop' en consola")
                 break
+            else:
+                send_command(cmd)
         except Exception:
             break
 
@@ -391,9 +540,9 @@ def read_stdin():
 def execute_final_backup():
     """Hilo efímero para el backup de cierre."""
     try:
-        result = auto_backup.create_backup("cierre", file_snapshot=None)
+        result = auto_backup.create_backup("cierre", file_snapshot=None, wait_lock_timeout_sec=FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=backup_ipc_lock)
         if not result:
-            print("[Wrapper] El backup final no produjo un ZIP válido.")
+            print("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.")
     except Exception as e:
         print(f"[Wrapper] Falló el backup final: {e}")
 
@@ -408,7 +557,7 @@ if __name__ == "__main__":
 
     # Backup inicial (antes de arrancar el proceso de Bedrock)
     try:
-        auto_backup.create_backup("inicio", file_snapshot=None)
+        auto_backup.create_backup("inicio", file_snapshot=None, external_lock=backup_ipc_lock)
     except Exception as e:
         print(f"[Wrapper] Error en backup inicial: {e}")
 
@@ -443,36 +592,7 @@ if __name__ == "__main__":
             time.sleep(0.5)
 
     except KeyboardInterrupt:
-        should_send_stop = False
-        should_send_resume = False
-        cancel_worker = None
-
-        with state_lock:
-            if not shutting_down:
-                shutting_down = True
-                print("\n[Wrapper] Cierre seguro iniciado (Ctrl+C).")
-                if backup_in_progress:
-                    print("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...")
-                    cancel_worker = backup_cancel_event
-                    should_send_resume = True
-                    backup_in_progress = False
-                    backup_dispatched = False
-                    save_query_ready_seen = False
-                    backup_cancel_event = None
-                    watchdog_fired = True
-                should_send_stop = True
-            else:
-                print("\n[Wrapper] Ignorando Ctrl+C múltiple...")
-
-        if cancel_worker:
-            cancel_worker.set()
-
-        if should_send_resume:
-            send_command("save resume")
-
-        if should_send_stop:
-            print("[Wrapper] Mandando stop...")
-            send_command("stop")
+        initiate_shutdown("Ctrl+C")
 
         # Esperar cierre del servidor con protección contra doble Ctrl+C
         try:
@@ -510,7 +630,13 @@ if __name__ == "__main__":
                     print("[Wrapper] Interrupción por teclado durante join del worker.")
 
                 if current_worker.is_alive():
-                    print("[Wrapper] Worker de compresión excedió el tiempo máximo de cierre. Liberando servidor...")
+                    print("[Wrapper] Worker de compresión excedió el tiempo máximo de cierre. ANIQUILANDO PROCESO FANTASMA...")
+                    
+                    with state_lock:
+                        proc_to_kill = active_compress_process
+                    if proc_to_kill:
+                        _force_kill_compress_process(proc_to_kill)
+                            
                     should_send_resume = False
                     cancel_worker = None
                     with state_lock:

@@ -1,200 +1,111 @@
-# 🎮 Minecraft Bedrock Dedicated Server — Management & Auto-Backup Suite
+# Minecraft Bedrock Server Suite
 
-[![Python Version](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://microsoft.com)
-[![Minecraft BDS](https://img.shields.io/badge/Minecraft-Bedrock%20Dedicated%20Server-green?style=for-the-badge&logo=minecraft&logoColor=white)](https://www.minecraft.net/download/server/bedrock)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+Wrapper, auto-backups en caliente, y herramientas de administración para Minecraft Bedrock Dedicated Server en Windows. Soporta backups sin desconectar jugadores usando el protocolo nativo `save hold`/`save query`/`save resume`.
 
-Sistema completo de administración, wrappers y respaldos automáticos en caliente con cero lag para **Minecraft Bedrock Dedicated Server (BDS)** en Windows.
+Probado en Windows 10/11 con Python 3.10+. Auditado en julio 2026 — 20 bugs corregidos.
 
----
+## Qué hace
 
-## 📌 Tabla de Contenidos
-- [Características Principales](#-características-principales)
-- [Estructura del Proyecto](#-estructura-del-proyecto)
-- [Requisitos del Sistema](#-requisitos-del-sistema)
-- [Instalación y Configuración](#-instalación-y-configuración)
-- [Modo de Uso](#-modo-de-uso)
-- [Sistema de Backups Automáticos (Wrapper V5.0)](#-sistema-de-backups-automáticos-wrapper-v50)
-- [Herramientas de Backup y Restauración Manual](#-herramientas-de-backup-y-restauración-manual)
-- [Configuración de Firewall](#-configuración-de-firewall)
-- [Herramientas Avanzadas y Scripting API](#-herramientas-avanzadas-y-scripting-api)
-- [Recomendaciones para Git / `.gitignore`](#-recomendaciones-para-git--gitignore)
-- [Licencia](#-licencia)
+- **Backups en caliente** cada 30 minutos sin echar jugadores
+- **Retención automática**: 15 recientes + 1 diario por 7 días
+- **Backup inicial** al arrancar y **backup de cierre** al detener
+- **Restauración interactiva** estilo Realms desde consola
+- **Configuración de firewall** automática para puertos 19132-19133
+- **Inyección de APIs experimentales** en `level.dat` (gametest, custom items, etc.)
+- **Registro de componentes personalizados** para behavior packs con Scripting API
 
----
+## Archivos
 
-## ✨ Características Principales
+```
+iniciar_servidor.bat          # Arranca el servidor con el wrapper
+01_hacer_backup.bat           # Backup manual (Robocopy)
+02_restaurar_backup.bat       # Restaurar backup desde menú interactivo
+03_regresar_al_anterior.bat   # Volver al último backup en un clic
+configurar_firewall.bat       # Abrir puertos UDP/TCP (requiere admin)
 
-- ⚡ **Respaldos en Caliente (Protocolo Nativo Bedrock):** Implementa `save hold`, polling periódico de `save query` y `save resume` para realizar congelamiento atómico del mundo en tiempo real sin desconectar a los jugadores.
-- 🛡️ **Doble Capa de Retención:** Mantiene los **15 respaldos** más recientes y conserva **1 respaldo diario por 7 días**, eliminando archivos antiguos de forma automática.
-- 🔒 **Inmunidad contra Corrupción:** Valida la integridad del snapshot y la cantidad exacta de bytes antes de empaquetar. Si ocurre un fallo, renombra el archivo como `_POSIBLEMENTE_CORRUPTO.zip`.
-- 🛑 **Cierre Protegido (Ctrl+C / stop):** Intercepta señales de apagado, fuerza el guardado del juego y genera un **Backup Final de Cierre** antes de salir.
-- 🔄 **Restauración Interactiva Estilo Realms:** Menú interactivo en consola para explorar y restaurar cualquier copia de seguridad en un solo clic.
+server_wrapper.py             # Wrapper principal — gestiona BDS y orquesta backups
+auto_backup.py                # Motor de compresión ZIP, retención y validación
+restore_backup.py             # Restauración de backups .zip
 
----
+enable_beta_apis.py           # Inyecta flags experimentales en level.dat (NBT)
+enable_beta_apis_v2.py        # Versión con soporte para NBT binario/header
+update_items.py               # Actualiza manifiestos y JSONs de behavior/resource packs
+update_items_v2.py            # Registra custom components vía Scripting API
 
-## 📁 Estructura del Proyecto
-
-```text
-.
-├── 🚀 iniciar_servidor.bat        # Punto de entrada principal (Lanza el wrapper)
-├── 📦 01_hacer_backup.bat         # Backup manual en frío/caliente con Robocopy
-├── 🔄 02_restaurar_backup.bat     # Menú interactivo estilo Realms para restaurar ZIPs
-├── ↩️ 03_regresar_al_anterior.bat # Reversión rápida en un clic al último backup
-├── ⚙️ configurar_firewall.bat     # Abre automáticamente los puertos UDP/TCP 19132-19133
-│
-├── 🧠 server_wrapper.py           # Wrapper V5.0 (Gestión de subproceso BDS y comandos)
-├── 💾 auto_backup.py              # Motor de compresión ZIP y política de retención
-├── 🛠️ restore_backup.py           # Motor Python de descompresión y restauración interactiva
-│
-├── 🧪 enable_beta_apis_v2.py      # Inyector NBT de APIs experimentales en level.dat
-├── 🛠️ update_items_v2.py          # Registrador de Scripting API / Componentes personalizados
-│
-├── 📄 server.properties.example   # Plantilla de configuración del servidor
-├── 📄 .gitignore                  # Exclusión de binarios BDS, respaldos y configs locales
-├── 📂 worlds/                     # Carpeta contenedora de mundos Bedrock
-└── 🌐 behavior_packs / resource_packs # Addons y paquetes de recursos
+server.properties.example     # Plantilla de configuración
 ```
 
----
+## Requisitos
 
-## 💻 Requisitos del Sistema
+- Windows 10/11 o Windows Server
+- Python 3.10 o superior
+- [Minecraft Bedrock Dedicated Server](https://www.minecraft.net/download/server/bedrock) (`bedrock_server.exe` en la raíz)
+- `amulet-nbt` (solo para `enable_beta_apis*.py`): `pip install amulet-nbt`
 
-- **Sistema Operativo:** Windows 10 / 11 / Windows Server
-- **Python:** Version 3.10 o superior (asegúrate de marcar *"Add Python to PATH"* al instalar).
-- **Minecraft Bedrock Dedicated Server:** Descargable desde la web oficial de Minecraft.
-- **Librerías Python opcionales (para scripts NBT avanzados):** `amulet-nbt`
-
----
-
-## 🚀 Instalación y Configuración
-
-1. **Clonar el repositorio:**
-   ```bash
-   git clone https://github.com/guapo3266/minecraft-bedrock-server-suite.git
-   cd minecraft-bedrock-server-suite
-   ```
-
-2. **Preparar Configuración:**
-   Copia `server.properties.example` a `server.properties` y ajusta tus preferencias.
-   ```cmd
-   copy server.properties.example server.properties
-   ```
-
-3. **Descargar Bedrock Dedicated Server:**
-   Descarga la versión oficial de BDS para Windows y coloca el ejecutable `bedrock_server.exe` y sus DLLs en la raíz del proyecto.
-
-4. **Configurar Firewall (Solo la primera vez):**
-   Ejecuta `configurar_firewall.bat` como **Administrador** para habilitar los puertos `19132` (UDP/TCP).
-
----
-
-## 🎮 Modo de Uso
-
-> [!TIP]
-> **Para Iniciar el Servidor:**  
-> Ejecuta `iniciar_servidor.bat`. Esto iniciará el wrapper inteligente en Python, creará un respaldo inicial y levantará el servidor.
-
-> [!IMPORTANT]
-> **Para Apagar el Servidor de forma Segura:**  
-> Escribe `stop` en la consola o presiona `Ctrl + C`. El wrapper se encargará de pausar el servidor, ejecutar un **Backup Final de Cierre** y cerrar el proceso limpiamente.
-
----
-
-## 🛡️ Sistema de Backups Automáticos (Wrapper V5.0)
-
-El motor está coordinado por [`server_wrapper.py`](./server_wrapper.py) y [`auto_backup.py`](./auto_backup.py).
-
-### Ubicación de los Respaldos
-Por defecto, los respaldos comprimidos se guardan en la carpeta:
-`../../Backups_Minecraft/auto_backups/` (resolución dinámica basada en la estructura del directorio).
-
-### Flujo del Protocolo Nativo de Bedrock
-```mermaid
-sequenceDiagram
-    autonumber
-    participant W as Server Wrapper
-    participant BDS as Bedrock Server (BDS)
-    participant B as Auto Backup Worker
-
-    W->>BDS: send_command("save hold")
-    loop Polling de Estado (cada ~3s)
-        W->>BDS: send_command("save query")
-        BDS-->>W: "Data saved..." (Lista de archivos + bytes)
-    end
-    W->>B: Dispara hilo de compresión con Snapshot
-    Note over B: Lee truncados exactos de bytes<br/>y genera el archivo .zip
-    B-->>W: Finaliza compresión
-    W->>BDS: send_command("save resume")
-    Note over BDS: Servidor reanuda escrituras en disco
-```
-
----
-
-## 🛠️ Herramientas de Backup y Restauración Manual
-
-- **📦 Backup Manual (`01_hacer_backup.bat`):** Usa `Robocopy` para hacer respaldos por carpeta (`backup_001`, `backup_002`...) registrando fecha y hora en `BACKUP_INFO.txt`.
-- **🔄 Restauración Interactiva (`02_restaurar_backup.bat`):** Ejecuta [`restore_backup.py`](./restore_backup.py) mostrando una lista numerada de copias disponibles para restaurar rápidamente.
-- **↩️ Reversión Instantánea (`03_regresar_al_anterior.bat`):** Regresa al último backup realizado y genera automáticamente una copia de seguridad preventiva del estado actual antes de restaurar.
-
----
-
-## 🌐 Configuración de Firewall
-
-El script [`configurar_firewall.bat`](./configurar_firewall.bat) ejecuta comandos `netsh` para permitir el tráfico entrante:
+## Instalación
 
 ```cmd
-netsh advfirewall firewall add rule name="Minecraft Bedrock Server UDP" dir=in action=allow protocol=UDP localport=19132,19133
-netsh advfirewall firewall add rule name="Minecraft Bedrock Server TCP" dir=in action=allow protocol=TCP localport=19132,19133
+git clone https://github.com/guapo3266/minecraft-bedrock-server-suite.git
+cd minecraft-bedrock-server-suite
+
+# Configurar el servidor
+copy server.properties.example server.properties
+
+# Descargar BDS y colocar bedrock_server.exe + DLLs en la raíz
+
+# Abrir puertos (como Administrador)
+configurar_firewall.bat
 ```
 
----
+## Uso
 
-## 🧪 Herramientas Avanzadas y Scripting API
+```cmd
+# Iniciar
+iniciar_servidor.bat
 
-- **[`enable_beta_apis_v2.py`](./enable_beta_apis_v2.py):** Modifica el NBT binario de `level.dat` para activar capacidades experimentales como `gametest`, `data_driven_items` y `experimental_custom_ui`.
-- **[`update_items_v2.py`](./update_items_v2.py):** Registra componentes personalizados de ítems mediante la Scripting API oficial de Bedrock (por ejemplo, comportamientos de entidades personalizadas o ítems de control).
-
----
-
-## 📝 Recomendaciones para Git / `.gitignore`
-
-El archivo [`.gitignore`](./.gitignore) excluye binarios pesados y configuraciones locales sensibles:
-
-```gitignore
-# Ejecutables y binarios oficiales de Minecraft BDS
-bedrock_server.exe
-bedrock_server.pdb
-*.dll
-
-# Datos de mundos y logs
-worlds/
-logs/
-*.log
-packet-statistics.txt
-
-# Configuración local específica del servidor
-server.properties
-allowlist.json
-permissions.json
-
-# Archivos de respaldo
-*.zip
-*.tmp
-Backups_Minecraft/
-_POSIBLEMENTE_CORRUPTO*
-
-# Python / Cache
-__pycache__/
-*.pyc
+# Detener (escribe en la consola del servidor)
+stop
 ```
 
+El wrapper hace un backup inicial al arrancar y un backup final al apagar. Los backups en caliente se disparan automáticamente cada 30 minutos mientras haya jugadores conectados.
+
+Los backups se guardan en `../../Backups_Minecraft/auto_backups/` relativo a la carpeta del servidor.
+
+## Backups manuales
+
+- `01_hacer_backup.bat` — copia la carpeta del mundo con Robocopy (funciona con servidor encendido o apagado)
+- `02_restaurar_backup.bat` — menú interactivo de restauración
+- `03_regresar_al_anterior.bat` — revierte al backup más reciente (hace copia de seguridad del estado actual antes)
+
+## Cómo funciona el backup en caliente
+
+1. El wrapper envía `save hold` al servidor — el mundo se congela en disco
+2. Cada 3 segundos envía `save query` — BDS responde con la lista de archivos y sus tamaños exactos
+3. Cuando dejan de llegar archivos nuevos (5s de silencio), se lanza un proceso hijo que comprime los archivos
+4. Se valida que cada archivo tenga exactamente los bytes reportados — si no coincide, el backup se aborta
+5. Se valida que el snapshot cubra al menos el 70% de los archivos en `worlds/<mundo>/db/`
+6. Al terminar, se envía `save resume` y el servidor sigue normalmente
+
+Si algo falla (timeout de 120s en compresión, archivo corrupto, snapshot incompleto), el backup se descarta y el servidor reanuda escrituras. No se generan backups silenciosamente corruptos.
+
+## Límites conocidos
+
+- Las detecciones de jugadores dependen de strings en inglés en el log de BDS. Si cambia el formato en futuras versiones, el wrapper no detectará jugadores y no hará backups en caliente (solo el de inicio y cierre).
+- `rotate_backups()` corre dentro del lock de backup. Si el directorio de backups tiene miles de archivos y el disco es lento, puede retrasar la liberación del lock.
+- Los scripts `enable_beta_apis*.py` requieren `amulet-nbt`. Si no está instalado, fallan con error claro.
+- Los scripts `update_items*.py` asumen una estructura de directorios específica para el behavior pack (`guardian_robot_BP`/`guardian_robot_RP`).
+
+## Auditoría
+
+Julio 2026 — 20 bugs encontrados y corregidos. Ver [`INFORME_AUDITORIA.md`](INFORME_AUDITORIA.md) para detalle de cada bug, y [`REGISTRO_TESTS.md`](REGISTRO_TESTS.md) para el registro completo de tests.
+
+## Licencia
+
+MIT. Ver [`LICENSE`](LICENSE).
+
+Minecraft es marca registrada de Mojang/Microsoft. Este proyecto no está afiliado.
+
 ---
 
-## 📄 Licencia
+**Nota de desarrollo:** Este repositorio fue desarrollado, refactorizado y documentado con asistencia de herramientas de Inteligencia Artificial (IA), acompañado de pruebas y auditorías en entornos de prueba locales.
 
-Este proyecto está bajo la Licencia **MIT**. Consulta el archivo `LICENSE` para obtener más información.
-
-> [!NOTE]
-> *Minecraft es una marca registrada de Mojang Synergies AB / Microsoft. Este proyecto no está afiliado ni respaldado por Mojang ni Microsoft.*

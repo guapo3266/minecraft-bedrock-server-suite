@@ -6,9 +6,8 @@ color 0c
 :: ====================================================
 ::  CONFIGURACION
 :: ====================================================
-set BASE_DIR=%~dp0
-set WORLD_DIR=%BASE_DIR%worlds\Bedrock level
-set BACKUP_BASE=%BASE_DIR%..\..\Backups_Minecraft
+set WORLD_DIR=%~dp0worlds\Bedrock level
+set BACKUP_BASE=%~dp0..\..\Backups_Minecraft
 
 :: ====================================================
 ::  HEADER
