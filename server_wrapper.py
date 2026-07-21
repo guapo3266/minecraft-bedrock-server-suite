@@ -1,14 +1,14 @@
 """
-server_wrapper.py — V5.0 PRODUCCIÓN ROBUSTA & ATÓMICA
+server_wrapper.py — Wrapper para Bedrock Dedicated Server con backups en caliente
 ==================================================================
 Wrapper de consola para Bedrock Dedicated Server con backups en caliente.
 
-Mejoras V5.0:
+Que hace:
   - Protocolo Nativo Bedrock: Extrae la lista de archivos y truncados de bytes de `save query`.
-  - Concurrencia Atómica: Evaluaciones y transiciones de estado 100% thread-safe (anti-TOCTOU).
-  - Inmunidad contra Muerte Silenciosa: Bloques try-except globales en hilos maestros.
-  - Shutdown Protegido: Resiliente a múltiples Ctrl+C durante la fase de limpieza.
-  - Anti-Unicode Crash: Redirección segura de logs a stdout.
+  - Estado protegido con lock para evitar race conditions.
+  - try/except en hilos principales para evitar que un fallo silencioso cuelgue el wrapper.
+  - Intenta cerrar limpiamente incluso con multiples Ctrl+C.
+  - Redireccion de logs con manejo de errores de encoding.
 """
 
 import subprocess
@@ -37,13 +37,13 @@ SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 BACKUP_INTERVAL_SEC = 30 * 60           # 30 minutos entre backups
 WATCHDOG_HOLDING_TIMEOUT_SEC = 60       # Max segundos esperando respuesta de save query
 LIST_SYNC_INTERVAL_SEC = 5 * 60         # Cada 5 min, sincronizar jugadores con 'list'
-FINAL_BACKUP_LOCK_WAIT_SEC = 5          # Espera mínima por el lock (el fantasma fue aniquilado)
+FINAL_BACKUP_LOCK_WAIT_SEC = 5          # Espera mínima por el lock (ya no hay proceso activo)
 FINAL_BACKUP_TIMEOUT_SEC = 240          # Max segundos para el backup de cierre (espera + compresión)
 WORKER_COMPRESSION_TIMEOUT_SEC = 120    # Tiempo máximo para la compresión del backup
 WORKER_JOIN_ON_SHUTDOWN_SEC = 135       # Mayor que el timeout del worker para evitar colisión
 
 # ═══════════════════════════════════════════════════════════════
-# ESTADO GLOBAL SINCRONIZADO
+# ESTADO GLOBAL (protegido por state_lock)
 # ═══════════════════════════════════════════════════════════════
 state_lock = threading.Lock()           # Protege TODAS las variables de estado
 stdin_lock = threading.Lock()           # Protege escrituras al pipe de stdin del servidor
@@ -68,7 +68,7 @@ server_process = None
 
 
 # ═══════════════════════════════════════════════════════════════
-# FUNCIÓN AUXILIAR: Envío de comandos seguro
+# Envio de comandos al servidor
 # ═══════════════════════════════════════════════════════════════
 def send_command(cmd):
     """Envía un comando al servidor de forma segura ignorando tuberías rotas o stdin cerrado."""
@@ -130,17 +130,17 @@ def _run_backup_process(trigger_name, file_snapshot, cancel_event, result_queue,
         result_queue.put({"zip": None, "error": str(e)})
 
 # ═══════════════════════════════════════════════════════════════
-# FUNCIÓN AUXILIAR: Aniquilación segura y renovación de Lock
+# Forzar terminacion del proceso de compresion
 # ═══════════════════════════════════════════════════════════════
 def _force_kill_compress_process(proc):
-    """Aniquila un proceso atascado de forma segura y renueva el lock IPC."""
+    """Fuerza la terminacion de un proceso de compresion y reemplaza el lock IPC por uno nuevo."""
     global backup_ipc_lock, active_compress_process
     if not proc or not proc.is_alive():
         return
         
     with state_lock:
         if active_compress_process is not proc:
-            return # Ya fue aniquilado por otro
+            return # Ya fue terminado por otro hilo
             
         try:
             proc.kill()
@@ -148,12 +148,12 @@ def _force_kill_compress_process(proc):
         except Exception as e:
             print(f"[Wrapper] Error forzando kill del proceso de compresión: {e}")
             
-        # Reemplazar el lock IPC envenenado por el kill del subproceso
+        # Reemplazar el lock IPC (puede quedar en mal estado tras kill)
         backup_ipc_lock = multiprocessing.Lock()
         active_compress_process = None
 
 # ═══════════════════════════════════════════════════════════════
-# HILO WORKER: Orquestador de la compresión
+# Hilo worker de compresion
 # ═══════════════════════════════════════════════════════════════
 def execute_backup_worker(file_snapshot=None, cancel_event=None):
     """Hilo efímero que orquesta el proceso de compresión de Bedrock."""
@@ -179,8 +179,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
         # --- CASO A: Compresión excedió el tiempo máximo (Timeout interno) ---
         if comp_proc.is_alive():
-            print(f"[Worker] [CRITICO] Timeout de compresión ({WORKER_COMPRESSION_TIMEOUT_SEC}s).")
-            print("[Worker]          Matando proceso de compresión a nivel de SO...")
+            print(f"[Worker] [WARN] Timeout de compresion ({WORKER_COMPRESSION_TIMEOUT_SEC}s).")
+            print("[Worker]          Terminando proceso de compresion...")
         
             _force_kill_compress_process(comp_proc)
 
@@ -242,8 +242,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
 
     except Exception as e:
-        print(f"[Worker] [CRITICO] Excepcion fatal en worker de backup: {type(e).__name__}: {e}")
-        print("[Worker]          Forzando limpieza de emergencia...")
+        print(f"[Worker] [WARN] Excepcion en worker de backup: {type(e).__name__}: {e}")
+        print("[Worker]          Limpiando estado del worker...")
         with state_lock:
             backup_in_progress = False
             backup_dispatched = False
@@ -256,7 +256,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
         with state_lock:
             active_compress_process = None
 # ═══════════════════════════════════════════════════════════════
-# HILO read_stdout: Lector de la consola del servidor
+# Hilo lector de stdout del servidor
 # ═══════════════════════════════════════════════════════════════
 def read_stdout():
     """Lee la salida del servidor, detecta eventos, parsea save query y despacha worker."""
@@ -398,7 +398,7 @@ def backup_scheduler():
 
                 if backup_in_progress:
                     if not backup_dispatched:
-                        # Respaldo de seguridad: si tenemos archivos recolectados y pasaron >1.5s sin nuevas líneas, despachar worker
+                        # Si tenemos archivos recolectados y pasaron >1.5s sin nuevas líneas, despachar worker
                         if save_query_ready_seen and len(last_save_snapshot) > 0 and (now - last_snapshot_update_time) >= 5.0:  # Aumentado de 1.5s a 5s para evitar snapshots incompletos bajo carga
                             snapshot_copy = list(last_save_snapshot)
                             backup_dispatched = True
@@ -415,8 +415,8 @@ def backup_scheduler():
                             worker_to_start.start()
                         # Estado HOLDING: verificar Watchdog de 60s
                         elif (now - save_hold_timestamp) > WATCHDOG_HOLDING_TIMEOUT_SEC:
-                            print("[Wrapper] [PANICO] Servidor no respondió a save query en 60s.")
-                            print("[Wrapper]          Forzando save resume de emergencia.")
+                            print("[Wrapper] [WARN] Servidor no respondio a save query en 60s.")
+                            print("[Wrapper]          Forzando save resume.")
                             backup_in_progress = False
                             backup_dispatched = False
                             save_query_ready_seen = False
@@ -464,7 +464,7 @@ def backup_scheduler():
 
 
 # ═══════════════════════════════════════════════════════════════
-# FUNCIÓN AUXILIAR: Apagado Unificado y Seguro
+# Apagado del servidor
 # ═══════════════════════════════════════════════════════════════
 def initiate_shutdown(reason="shutdown"):
     """
@@ -482,7 +482,7 @@ def initiate_shutdown(reason="shutdown"):
     with state_lock:
         if not shutting_down:
             shutting_down = True
-            print(f"\n[Wrapper] Cierre seguro iniciado ({reason}).")
+            print(f"\n[Wrapper] Apagado iniciado ({reason}).")
             if backup_in_progress:
                 print("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...")
                 cancel_worker = backup_cancel_event
@@ -508,7 +508,7 @@ def initiate_shutdown(reason="shutdown"):
 
 
 # ═══════════════════════════════════════════════════════════════
-# HILO read_stdin: Lector de teclado del usuario
+# Hilo lector de stdin (comandos del usuario)
 # ═══════════════════════════════════════════════════════════════
 def read_stdin():
     """Lee comandos del usuario y los reenvía al servidor."""
@@ -535,7 +535,7 @@ def read_stdin():
 
 
 # ═══════════════════════════════════════════════════════════════
-# Backup final de cierre (ejecutado en hilo efímero con timeout)
+# Backup final de cierre
 # ═══════════════════════════════════════════════════════════════
 def execute_final_backup():
     """Hilo efímero para el backup de cierre."""
@@ -552,7 +552,7 @@ def execute_final_backup():
 # ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print("=========================================================")
-    print("  INICIANDO SERVIDOR CON WRAPPER V5.0 (PRODUCCION ROBUSTA)")
+    print("  INICIANDO SERVIDOR CON WRAPPER")
     print("=========================================================")
 
     # Backup inicial (antes de arrancar el proceso de Bedrock)
@@ -578,7 +578,7 @@ if __name__ == "__main__":
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
     except Exception as e:
-        print(f"[Wrapper] Error fatal al iniciar BDS: {e}")
+        print(f"[Wrapper] Error al iniciar BDS: {e}")
         sys.exit(1)
 
     # Lanzar hilos de servicio
@@ -599,14 +599,14 @@ if __name__ == "__main__":
             if server_process:
                 server_process.wait(timeout=15)
         except subprocess.TimeoutExpired:
-            print("[Wrapper] [ALERTA] Servidor zombie. Forzando aniquilación...")
+            print("[Wrapper] [WARN] Servidor no respondio al cierre. Forzando terminacion...")
             try:
                 server_process.kill()
                 server_process.wait()
             except Exception:
                 pass
         except KeyboardInterrupt:
-            print("[Wrapper] Cierre forzado. Matando proceso del servidor...")
+            print("[Wrapper] Terminando proceso del servidor...")
             try:
                 if server_process:
                     server_process.kill()
@@ -615,7 +615,7 @@ if __name__ == "__main__":
                 pass
 
     finally:
-        # Bloque de apagado ultra-defensivo (inmune a agresiones por Ctrl+C repetidos)
+        # Limpieza final (intenta completar aunque haya Ctrl+C)
         try:
             with state_lock:
                 shutting_down = True
@@ -630,7 +630,7 @@ if __name__ == "__main__":
                     print("[Wrapper] Interrupción por teclado durante join del worker.")
 
                 if current_worker.is_alive():
-                    print("[Wrapper] Worker de compresión excedió el tiempo máximo de cierre. ANIQUILANDO PROCESO FANTASMA...")
+                    print("[Wrapper] Worker de compresion no termino a tiempo. forzando terminacion del proceso de compresion...")
                     
                     with state_lock:
                         proc_to_kill = active_compress_process
@@ -685,7 +685,7 @@ if __name__ == "__main__":
                 print("[Wrapper] Interrupción por teclado durante backup final.")
 
             if final_thread.is_alive():
-                print(f"[Wrapper] [ALERTA] Backup de cierre excedió los {FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.")
+                print(f"[Wrapper] [WARN] Backup de cierre excedio los {FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.")
 
             print("[Wrapper] Servidor finalizado limpiamente. Adiós.")
         except BaseException as e:
