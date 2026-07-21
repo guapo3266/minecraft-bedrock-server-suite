@@ -121,13 +121,13 @@ sequenceDiagram
     W->>BDS: send_command("save hold")
     loop Polling de Estado (cada ~3s)
         W->>BDS: send_command("save query")
-        BDS-->>W: Esperando / "Data saved..." (Lista de archivos + bytes)
+        BDS-->>W: "Data saved..." (Lista de archivos + bytes)
     end
-    W->>B: Dispara hilo de compresión con Snapshot de archivos
-    B->>B: Lee los truncados exactos de bytes y comprime a .zip
+    W->>B: Dispara hilo de compresión con Snapshot
+    Note over B: Lee truncados exactos de bytes<br/>y genera el archivo .zip
     B-->>W: Finaliza compresión
     W->>BDS: send_command("save resume")
-    Note over BDS: El servidor reanuda las escrituras en disco
+    Note over BDS: Servidor reanuda escrituras en disco
 ```
 
 ---
