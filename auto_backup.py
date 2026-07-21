@@ -4,17 +4,34 @@ import datetime
 import zipfile
 import glob
 import threading
+import multiprocessing
+
+# Lock por defecto (multiprocessing safe)
+_backup_lock = multiprocessing.Lock()
 
 # Configuración dinámicamente resuelta para máxima portabilidad
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORLD_DIR = os.path.join(BASE_DIR, "worlds", "Bedrock level")
+def get_world_name():
+    props_path = os.path.join(BASE_DIR, "server.properties")
+    if os.path.exists(props_path):
+        try:
+            with open(props_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("level-name="):
+                        return line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+    return "Bedrock level"
+
+WORLD_NAME = get_world_name()
+WORLD_DIR = os.path.join(BASE_DIR, "worlds", WORLD_NAME)
 WORLD_PARENT_DIR = os.path.join(BASE_DIR, "worlds")
 BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups"))
 
 # Retención de Doble Capa
 MAX_RECENT_BACKUPS = 15
 DAYS_TO_KEEP_DAILY = 7
-_backup_lock = threading.Lock()
 
 def _cancelled(cancel_event):
     return cancel_event is not None and cancel_event.is_set()
@@ -27,35 +44,59 @@ def _resolve_snapshot_path(rel_path):
 
     if first_part.lower() == "worlds":
         full_path = os.path.abspath(os.path.normpath(os.path.join(BASE_DIR, clean_rel_path)))
-    elif first_part == world_name:
+    elif first_part.lower() == world_name.lower():
         full_path = os.path.abspath(os.path.normpath(os.path.join(WORLD_PARENT_DIR, clean_rel_path)))
     else:
         full_path = os.path.abspath(os.path.normpath(os.path.join(WORLD_DIR, clean_rel_path)))
 
     world_root = os.path.abspath(WORLD_DIR)
 
-    if os.path.commonpath([world_root, full_path]) != world_root:
+    try:
+        common = os.path.commonpath([world_root, full_path])
+    except ValueError:
+        raise ValueError(f"Ruta invalida (unidades diferentes?): {rel_path}")
+    if common != world_root:
         raise ValueError(f"Ruta fuera del mundo rechazada: {rel_path}")
 
     return clean_rel_path, full_path
 
 
-def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None):
+def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wait_lock_timeout_sec=0, external_lock=None):
     """
     Crea una copia de seguridad comprimida del mundo.
     - file_snapshot: Lista de tuplas (rel_path, byte_count) devueltas por 'save query'.
       Si se provee, SOLO se leen y copian esos archivos hasta esa cantidad exacta de bytes (Protocolo Bedrock Nativo).
       Si es None, se realiza un backup tradicional escaneando WORLD_DIR.
+    - wait_lock_timeout_sec: Segundos a esperar si ya hay un backup en curso antes de abortar.
+    - external_lock: Instancia IPC de lock (multiprocessing.Lock) compartida con el proceso principal.
     """
-    if not _backup_lock.acquire(blocking=False):
-        print("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.")
-        return False
+    lock_to_use = external_lock if external_lock is not None else _backup_lock
+    acquired_lock = False
+
+    if wait_lock_timeout_sec > 0:
+        if not lock_to_use.acquire(timeout=wait_lock_timeout_sec):
+            print(f"[ERROR] Timeout esperando lock de backup ({wait_lock_timeout_sec}s); se cancela esta solicitud.")
+            return False
+        acquired_lock = True
+    else:
+        if not lock_to_use.acquire(False):
+            print("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.")
+            return False
+        acquired_lock = True
 
     success = False
     zip_filepath = None
     tmp_filepath = None
 
     try:
+        # Limpieza proactiva de .tmp huérfanos SOLO tras adquirir el lock de forma exclusiva
+        if os.path.exists(BACKUP_DIR):
+            for orphan_tmp in glob.glob(os.path.join(BACKUP_DIR, "*.tmp")):
+                try:
+                    os.remove(orphan_tmp)
+                    print(f"[*] Limpieza: Eliminado archivo huérfano {os.path.basename(orphan_tmp)}")
+                except Exception:
+                    pass
         if not os.path.exists(WORLD_DIR):
             print(f"[ERROR] No se encontro la carpeta del mundo: {WORLD_DIR}")
             return False
@@ -69,24 +110,31 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None):
 
         print(f"[*] Creando copia de seguridad comprimida ({trigger_name})...")
 
-        # Contar archivos físicos existentes en el mundo
-        physical_files_count = 0
-        for root, dirs, files in os.walk(WORLD_DIR):
-            if _cancelled(cancel_event):
-                raise RuntimeError("Backup cancelado antes de iniciar compresion.")
-            physical_files_count += len(files)
-
         use_snapshot = file_snapshot is not None
+        
+        # Modo tradicional: escanea WORLD_DIR directamente (abajo en el else)
         if use_snapshot:
             if not isinstance(file_snapshot, list) or len(file_snapshot) == 0:
                 raise RuntimeError("Snapshot Bedrock vacio o invalido; se aborta backup caliente.")
 
-            # Validación de cobertura: en backup caliente se falla cerrado.
-            min_expected = int(physical_files_count * 0.8)
-            if physical_files_count > 0 and len(file_snapshot) < min_expected:
+            # Validación de cobertura de snapshot (debe tener al menos los archivos base como level.dat y db/)
+            if len(file_snapshot) < 4:
                 raise RuntimeError(
-                    f"Snapshot incompleto o sospechoso ({len(file_snapshot)} de {physical_files_count} archivos)."
+                    f"Snapshot reportó muy pocos archivos ({len(file_snapshot)}). Snapshot incompleto o inválido."
                 )
+
+            # Validacion cruzada contra disco: si el snapshot tiene < 70% de los archivos
+            # reales en WORLD_DIR/db, esta probablemente incompleto
+            if os.path.exists(os.path.join(WORLD_DIR, "db")):
+                real_db_files = set()
+                for root, dirs, files in os.walk(os.path.join(WORLD_DIR, "db")):
+                    for fname in files:
+                        real_db_files.add(os.path.relpath(os.path.join(root, fname), WORLD_DIR).replace("\\", "/"))
+                snapshot_db_files = {p for p, _ in file_snapshot if p.startswith("db/") or p.startswith("db\\")}
+                if len(real_db_files) > 0 and len(snapshot_db_files) < len(real_db_files) * 0.70:
+                    raise RuntimeError(
+                        f"Snapshot incompleto: {len(snapshot_db_files)} archivos db/ en snapshot vs {len(real_db_files)} en disco."
+                    )
 
         with zipfile.ZipFile(tmp_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             if use_snapshot:
@@ -106,10 +154,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None):
 
                     with open(full_path, 'rb') as f:
                         data = f.read(byte_length)
+                        # Verificar que el archivo no sea mas grande que lo reportado
+                        # (si hay datos adicionales, el snapshot esta desincronizado)
+                        extra = f.read(1)
 
-                    if len(data) != byte_length:
+                    if len(data) != byte_length or extra:
+                        detail = f"truncado ({len(data)} < {byte_length})" if len(data) < byte_length else f"archivo mas grande que snapshot ({byte_length}+ bytes)"
                         raise RuntimeError(
-                            f"Lectura corta en '{clean_rel_path}': {len(data)} de {byte_length} bytes."
+                            f"Desincronizacion de snapshot en '{clean_rel_path}': {detail}."
                         )
 
                     zinfo = zipfile.ZipInfo(arcname, date_time=datetime.datetime.now().timetuple()[:6])
@@ -134,10 +186,11 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None):
         size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
         print(f"[OK] Backup creado exitosamente: {zip_filename} ({size_mb:.2f} MB)")
         success = True
-
-        # Limpieza automatica de rotación
-        rotate_backups()
-        return zip_filepath
+        # Rotacion ejecutada dentro del lock para evitar concurrencia
+        try:
+            rotate_backups()
+        except Exception as e:
+            print(f"[WARN] Fallo en rotacion de backups: {e}")
     except Exception as e:
         print(f"[ERROR] No se pudo crear el backup: {e}")
         return False
@@ -147,10 +200,19 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None):
             if cleanup_path and os.path.exists(cleanup_path):
                 try:
                     os.remove(cleanup_path)
-                    print(f"[*] Limpieza de emergencia: eliminado archivo incompleto {os.path.basename(cleanup_path)}")
-                except Exception as clean_err:
-                    print(f"[WARN] No se pudo eliminar archivo incompleto {cleanup_path}: {clean_err}")
-        _backup_lock.release()
+                    print(f"[*] Limpieza: archivo parcial '{os.path.basename(cleanup_path)}' eliminado.")
+                except Exception:
+                    pass
+        
+        if lock_to_use and acquired_lock:
+            try:
+                lock_to_use.release()
+            except Exception:
+                pass
+                
+    if success:
+        return zip_filepath
+    return False
 
 def rotate_backups():
     excluded_markers = ("_CORRUPTO", "_EXCEDIDO")
@@ -184,8 +246,9 @@ def rotate_backups():
     daily_keepers_found = set()
     
     for b in backup_data:
-        days_old = abs((now.date() - b['dt'].date()).days)
-        if days_old <= DAYS_TO_KEEP_DAILY:
+        date_diff = (now.date() - b['dt'].date()).days
+        # Solo retener backups del pasado (date_diff >= 0); ignorar fechas futuras
+        if 0 <= date_diff <= DAYS_TO_KEEP_DAILY:
             date_str = b['dt'].date().isoformat()
             if date_str not in daily_keepers_found:
                 daily_keepers_found.add(date_str)

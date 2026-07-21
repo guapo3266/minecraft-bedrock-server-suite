@@ -6,7 +6,22 @@ import shutil
 import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORLD_DIR = os.path.join(BASE_DIR, "worlds", "Bedrock level")
+
+def get_world_name():
+    props_path = os.path.join(BASE_DIR, "server.properties")
+    if os.path.exists(props_path):
+        try:
+            with open(props_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("level-name="):
+                        return line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+    return "Bedrock level"
+
+WORLD_NAME = get_world_name()
+WORLD_DIR = os.path.join(BASE_DIR, "worlds", WORLD_NAME)
 BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups"))
 
 def list_and_restore():

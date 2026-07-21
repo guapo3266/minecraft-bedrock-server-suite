@@ -57,4 +57,7 @@ def enable_experiments(file_path):
     print(f"Saved {file_path} successfully.")
 
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Uso: python enable_beta_apis_v2.py <ruta_a_level.dat>")
+        sys.exit(1)
     enable_experiments(sys.argv[1])

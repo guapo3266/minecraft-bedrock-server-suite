@@ -3,23 +3,52 @@ bedrock_server.exe
 bedrock_server.pdb
 *.dll
 
-# Datos de mundos y logs de juego
+# Datos de mundos y logs
 worlds/
 logs/
 *.log
 packet-statistics.txt
+release-notes.txt
 
-# Configuración local específica del servidor (usar server.properties.example como plantilla)
+# Configuración local (usar server.properties.example como plantilla)
 server.properties
 allowlist.json
 permissions.json
+packetlimitconfig.json
+profanity_filter.wlist
 
-# Archivos de respaldo y temporales
+# Backups y temporales
 *.zip
 *.tmp
 Backups_Minecraft/
 _POSIBLEMENTE_CORRUPTO*
+backups/
 
-# Python / Cache
+# Python
 __pycache__/
 *.pyc
+*.pyo
+
+# Archivos compilados sobrantes
+*.exe
+*.o
+*.obj
+
+# IDE y editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Scripts de test temporales (prefijo __audit_ / __test_ / __apply_ / __verify_ / __port_)
+__audit_*
+__test_*
+__apply_*
+__verify_*
+__port_*
