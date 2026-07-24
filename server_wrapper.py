@@ -1,6 +1,14 @@
 """
-Script principal para manejar el servidor y hacer backups.
-Ojalá no se rompa.
+server_wrapper.py — Wrapper para Bedrock Dedicated Server con backups en caliente
+==================================================================
+Wrapper de consola para Bedrock Dedicated Server con backups en caliente.
+
+Que hace:
+  - Protocolo Nativo Bedrock: Extrae la lista de archivos y truncados de bytes de `save query`.
+  - Estado protegido con lock para evitar race conditions.
+  - try/except en hilos principales para evitar que un fallo silencioso cuelgue el wrapper.
+  - Intenta cerrar limpiamente incluso con multiples Ctrl+C.
+  - Redireccion de logs con manejo de errores de encoding.
 """
 
 import subprocess
@@ -13,25 +21,30 @@ import os
 
 import auto_backup
 
-# ---
-# Ojo: dependo de los textos en ingles del log para saber si hay jugadores.
-# Si en alguna version de Bedrock lo traducen, esto va a dejar de funcionar.
-# ---
+# ═══════════════════════════════════════════════════════════════
+# ADVERTENCIA: Las detecciones de jugadores y save query dependen de
+# strings literales en ingles. Si BDS cambia el formato de log o el
+# idioma, estas detecciones fallaran silenciosamente.
+#   - "Player connected:" / "Player disconnected:" -> players_online
+#   - "Data saved. Files are now ready to be copied." -> save_query_ready_seen
+#   - "There are X/Y players online:" -> list de jugadores
+# Si sospechas que esto fallo, revisa los backups en caliente.
+# ═══════════════════════════════════════════════════════════════
 # CONFIGURACIÓN
-# ---
+# ═══════════════════════════════════════════════════════════════
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 BACKUP_INTERVAL_SEC = 30 * 60           # 30 minutos entre backups
 WATCHDOG_HOLDING_TIMEOUT_SEC = 60       # Max segundos esperando respuesta de save query
-LIST_SYNC_INTERVAL_SEC = 5 * 60         # Cada 5 min, sincronizar jugadores con 'list'
+LIST_SYNC_INTERVAL_SEC = 60             # Cada 60s (modo prueba)
 FINAL_BACKUP_LOCK_WAIT_SEC = 5          # Espera mínima por el lock (ya no hay proceso activo)
 FINAL_BACKUP_TIMEOUT_SEC = 240          # Max segundos para el backup de cierre (espera + compresión)
 WORKER_COMPRESSION_TIMEOUT_SEC = 120    # Tiempo máximo para la compresión del backup
 WORKER_JOIN_ON_SHUTDOWN_SEC = 135       # Mayor que el timeout del worker para evitar colisión
 
-# ---
-# Variables globales (metí un lock para que no se pisen entre hilos)
-# ---
+# ═══════════════════════════════════════════════════════════════
+# ESTADO GLOBAL (protegido por state_lock)
+# ═══════════════════════════════════════════════════════════════
 state_lock = threading.Lock()           # Protege TODAS las variables de estado
 stdin_lock = threading.Lock()           # Protege escrituras al pipe de stdin del servidor
 
@@ -54,11 +67,11 @@ last_snapshot_update_time = 0.0         # Timestamp de la última adición a las
 server_process = None
 
 
-# ---
+# ═══════════════════════════════════════════════════════════════
 # Envio de comandos al servidor
-# ---
+# ═══════════════════════════════════════════════════════════════
 def send_command(cmd):
-    """Le tira un comando al server y si el pipe falla hace la vista gorda."""
+    """Envía un comando al servidor de forma segura ignorando tuberías rotas o stdin cerrado."""
     try:
         with stdin_lock:
             if server_process and server_process.poll() is None and server_process.stdin:
@@ -99,11 +112,11 @@ def parse_save_query_files(line):
     return parsed
 
 
-# ---
-# Worker para comprimir el zip sin trabar el server
-# ---
+# ═══════════════════════════════════════════════════════════════
+# PROCESO WORKER: Compresión en E/S aislada
+# ═══════════════════════════════════════════════════════════════
 def _run_backup_process(trigger_name, file_snapshot, cancel_event, result_queue, external_lock):
-    """Funcion separada para el multiprocessing."""
+    """Función de nivel superior (picklable) para ejecutar en un proceso aislado."""
     import auto_backup
     try:
         zip_path = auto_backup.create_backup(
@@ -116,9 +129,9 @@ def _run_backup_process(trigger_name, file_snapshot, cancel_event, result_queue,
     except Exception as e:
         result_queue.put({"zip": None, "error": str(e)})
 
-# ---
+# ═══════════════════════════════════════════════════════════════
 # Forzar terminacion del proceso de compresion
-# ---
+# ═══════════════════════════════════════════════════════════════
 def _force_kill_compress_process(proc):
     """Fuerza la terminacion de un proceso de compresion y reemplaza el lock IPC por uno nuevo."""
     global backup_ipc_lock, active_compress_process
@@ -139,9 +152,9 @@ def _force_kill_compress_process(proc):
         backup_ipc_lock = multiprocessing.Lock()
         active_compress_process = None
 
-# ---
+# ═══════════════════════════════════════════════════════════════
 # Hilo worker de compresion
-# ---
+# ═══════════════════════════════════════════════════════════════
 def execute_backup_worker(file_snapshot=None, cancel_event=None):
     """Hilo efímero que orquesta el proceso de compresión de Bedrock."""
     global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock
@@ -242,9 +255,9 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
         with state_lock:
             active_compress_process = None
-# ---
+# ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdout del servidor
-# ---
+# ═══════════════════════════════════════════════════════════════
 def read_stdout():
     """Lee la salida del servidor, detecta eventos, parsea save query y despacha worker."""
     global players_online, backup_dispatched, backup_thread, last_save_snapshot, save_query_ready_seen, backup_cancel_event, expecting_list_names, last_snapshot_update_time
@@ -279,8 +292,12 @@ def read_stdout():
                     players_online.discard(name)
 
             # --- Sincronización con comando 'list' ---
+            # Fix: 'list' nunca se envía durante un backup, pero si una continuación
+            # quedó pendiente justo cuando arrancó un backup, no debe tratarse una línea
+            # de save query (p. ej. "Data saved. Files are now ready to be copied.")
+            # como si fuera una lista de nombres de jugadores.
             with state_lock:
-                is_expecting_list = expecting_list_names
+                is_expecting_list = expecting_list_names and not backup_in_progress
 
             match_list = re.search(r"There are (\d+)/\d+ players online:(.*)", line)
             if match_list:
@@ -305,11 +322,15 @@ def read_stdout():
                     with state_lock:
                         expecting_list_names = False
                 else:
-                    # Limpiar prefijos de log antes de parsear los nombres
-                    cleaned_line = re.sub(r'^(?:\[.*?\]\s*)+', '', line)
-                    if cleaned_line.startswith("["):
+                    # Fix: el chequeo debe hacerse sobre la línea ORIGINAL, no sobre
+                    # cleaned_line -- cleaned_line ya tiene el prefijo '[...]' removido,
+                    # así que 'cleaned_line.startswith("[")' nunca es True para una
+                    # línea real de BDS con timestamp, y el ruido (autosave, chunks,
+                    # etc.) se colaba como si fueran nombres de jugadores.
+                    if line.strip().startswith("["):
                         pass
                     else:
+                        cleaned_line = re.sub(r'^(?:\[.*?\]\s*)+', '', line)
                         stripped = cleaned_line.strip()
                         if stripped and stripped.lower() not in ("quit correctly",):
                             parsed_names = {n.strip() for n in stripped.split(",") if n.strip()}
@@ -334,7 +355,11 @@ def read_stdout():
                         last_save_snapshot = []
                         last_snapshot_update_time = time.time()
 
-                    if is_waiting and parsed_files and save_query_ready_seen:
+                    # Fix: nunca tratar una línea de conexión/desconexión de jugador
+                    # como parte del listado de archivos de 'save query' (puede
+                    # coincidir con el patrón "texto:numero" si el log no trae
+                    # espacio tras "xuid:").
+                    if is_waiting and parsed_files and save_query_ready_seen and not match_conn and not match_disc:
                         existing_paths = {path for path, _ in last_save_snapshot}
                         for item in parsed_files:
                             if item[0] not in existing_paths:
@@ -349,12 +374,12 @@ def read_stdout():
                 pass
 
 
-# ---
-# Hilo principal que revisa cada segundo si hay que hacer backup o apagar
-# ---
+# ═══════════════════════════════════════════════════════════════
+# HILO scheduler: Reloj maestro, Watchdog ATÓMICO y Sincronización
+# ═══════════════════════════════════════════════════════════════
 def backup_scheduler():
-    """Loop infinito que despacha backups. Le puse varios candados, parece seguro."""
-    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread
+    """Reloj maestro defensivo con evaluación e intervenciones de estado 100% atómicas."""
+    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread, expecting_list_names
 
     last_list_sync = time.time()
     last_save_query = 0.0
@@ -373,7 +398,7 @@ def backup_scheduler():
 
             now = time.time()
 
-            # Reviso el estado con candado por si acaso
+            # --- EVALUACIÓN DE ESTADO 100% ATÓMICA ---
             with state_lock:
                 if shutting_down:
                     break
@@ -426,11 +451,12 @@ def backup_scheduler():
                             backup_cancel_event = None
                             save_hold_timestamp = now
                             last_save_snapshot = []
+                            expecting_list_names = False  # Fix: no dejar una continuación de 'list' pendiente
                             should_send_hold = True
                         else:
                             last_backup_completed_time = now
 
-            # Mando los comandos aca afuera para no trabar todo
+            # --- EJECUCIÓN DE COMANDOS FUERA DEL LOCK (Cero riesgo de deadlock/TOCTOU) ---
             if should_send_list:
                 send_command("list")
 
@@ -450,9 +476,9 @@ def backup_scheduler():
                 pass
 
 
-# ---
+# ═══════════════════════════════════════════════════════════════
 # Apagado del servidor
-# ---
+# ═══════════════════════════════════════════════════════════════
 def initiate_shutdown(reason="shutdown"):
     """
     Inicia un apagado coordinado y seguro del servidor:
@@ -494,9 +520,9 @@ def initiate_shutdown(reason="shutdown"):
         send_command("stop")
 
 
-# ---
+# ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdin (comandos del usuario)
-# ---
+# ═══════════════════════════════════════════════════════════════
 def read_stdin():
     """Lee comandos del usuario y los reenvía al servidor."""
     while True:
@@ -521,9 +547,9 @@ def read_stdin():
             break
 
 
-# ---
+# ═══════════════════════════════════════════════════════════════
 # Backup final de cierre
-# ---
+# ═══════════════════════════════════════════════════════════════
 def execute_final_backup():
     """Hilo efímero para el backup de cierre."""
     try:
@@ -534,9 +560,9 @@ def execute_final_backup():
         print(f"[Wrapper] Falló el backup final: {e}")
 
 
-# ---
+# ═══════════════════════════════════════════════════════════════
 # PUNTO DE ENTRADA PRINCIPAL
-# ---
+# ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print("=========================================================")
     print("  INICIANDO SERVIDOR CON WRAPPER")

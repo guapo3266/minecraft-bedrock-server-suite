@@ -1,9 +1,7 @@
 import os
-import sys
 import datetime
 import zipfile
 import glob
-import threading
 import multiprocessing
 
 # Lock por defecto (multiprocessing safe)
@@ -130,7 +128,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 for root, dirs, files in os.walk(os.path.join(WORLD_DIR, "db")):
                     for fname in files:
                         real_db_files.add(os.path.relpath(os.path.join(root, fname), WORLD_DIR).replace("\\", "/"))
-                snapshot_db_files = {p for p, _ in file_snapshot if p.startswith("db/") or p.startswith("db\\")}
+                snapshot_db_files = {p for p, _ in file_snapshot if p.startswith("db/") or p.startswith("db\\") or "/db/" in p or "\\db\\" in p}
                 if len(real_db_files) > 0 and len(snapshot_db_files) < len(real_db_files) * 0.70:
                     raise RuntimeError(
                         f"Snapshot incompleto: {len(snapshot_db_files)} archivos db/ en snapshot vs {len(real_db_files)} en disco."
@@ -154,19 +152,40 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
 
                     with open(full_path, 'rb') as f:
                         data = f.read(byte_length)
-                        # Verificar que el archivo no sea mas grande que lo reportado
-                        # (si hay datos adicionales, el snapshot esta desincronizado)
                         extra = f.read(1)
 
-                    if len(data) != byte_length or extra:
-                        detail = f"truncado ({len(data)} < {byte_length})" if len(data) < byte_length else f"archivo mas grande que snapshot ({byte_length}+ bytes)"
+                    # Los .log de LevelDB pueden crecer durante save hold (WAL buffers del SO).
+                    # Solo rechazamos si el archivo es mas chico (truncado real).
+                    # Si es mas grande, leemos los bytes del snapshot y seguimos.
+                    is_wal = clean_rel_path.endswith('.log')
+                    if len(data) < byte_length:
                         raise RuntimeError(
-                            f"Desincronizacion de snapshot en '{clean_rel_path}': {detail}."
+                            f"Snapshot truncado en '{clean_rel_path}': {len(data)} < {byte_length} bytes."
+                        )
+                    if extra and not is_wal:
+                        raise RuntimeError(
+                            f"Desincronizacion de snapshot en '{clean_rel_path}': archivo mas grande que snapshot ({byte_length}+ bytes)."
                         )
 
                     zinfo = zipfile.ZipInfo(arcname, date_time=datetime.datetime.now().timetuple()[:6])
                     zinfo.compress_type = zipfile.ZIP_DEFLATED
                     zipf.writestr(zinfo, data)
+
+                # Bedrock 'save query' omite la configuracion de shaders/addons y el icono del mundo.
+                # Debemos empacarlos manualmente en el ZIP del backup en caliente.
+                static_includes = ["world_resource_packs.json", "world_behavior_packs.json", "world_icon.jpeg", "resource_packs", "behavior_packs"]
+                for static_name in static_includes:
+                    static_path = os.path.join(WORLD_DIR, static_name)
+                    if os.path.exists(static_path):
+                        if os.path.isdir(static_path):
+                            for root, dirs, files in os.walk(static_path):
+                                for static_file in files:
+                                    full_f = os.path.join(root, static_file)
+                                    arc = os.path.relpath(full_f, WORLD_DIR)
+                                    zipf.write(full_f, arc)
+                        else:
+                            arc = os.path.relpath(static_path, WORLD_DIR)
+                            zipf.write(static_path, arc)
             else:
                 # Backup completo tradicional (usado al inicio, apagar o caída por snapshot incompleto)
                 for root, dirs, files in os.walk(WORLD_DIR):
