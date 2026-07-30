@@ -456,7 +456,11 @@ def backup_scheduler():
                         else:
                             last_backup_completed_time = now
 
-            # --- EJECUCIÓN DE COMANDOS FUERA DEL LOCK (Cero riesgo de deadlock/TOCTOU) ---
+            # --- EJECUCIÓN DE COMANDOS FUERA DEL LOCK ---
+            # Sin deadlock: los comandos se ejecutan sin retener state_lock.
+            # TOCTOU existe: el estado puede cambiar entre la evaluación y la ejecución.
+            #   Esto es seguro porque los comandos aquí despachados son IDEMPOTENTES
+            #   (save hold/resume/query, list). No agregar comandos no idempotentes aquí.
             if should_send_list:
                 send_command("list")
 

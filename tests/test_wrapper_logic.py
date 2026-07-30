@@ -1,5 +1,5 @@
 import sys, os, time
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import server_wrapper as sw
 
 class FakeStdout:
