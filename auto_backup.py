@@ -31,6 +31,9 @@ BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecra
 MAX_RECENT_BACKUPS = 15
 DAYS_TO_KEEP_DAILY = 7
 
+# Limite de seguridad: tamaño maximo total del backup comprimido (10 GB default)
+MAX_BACKUP_BYTES = 10 * 1024**3  # 10,737,418,240 bytes
+
 def _cancelled(cancel_event):
     return cancel_event is not None and cancel_event.is_set()
 
@@ -47,14 +50,25 @@ def _resolve_snapshot_path(rel_path):
     else:
         full_path = os.path.abspath(os.path.normpath(os.path.join(WORLD_DIR, clean_rel_path)))
 
-    world_root = os.path.abspath(WORLD_DIR)
-
+    # Check 1: basic path traversal (.., rutas absolutas) — abspath basta
+    world_abs = os.path.abspath(WORLD_DIR)
     try:
-        common = os.path.commonpath([world_root, full_path])
+        common = os.path.commonpath([world_abs, full_path])
     except ValueError:
         raise ValueError(f"Ruta invalida (unidades diferentes?): {rel_path}")
-    if common != world_root:
+    if common != world_abs:
         raise ValueError(f"Ruta fuera del mundo rechazada: {rel_path}")
+
+    # Check 2: symlink traversal — realpath resuelve symlinks reales
+    if os.path.exists(full_path):
+        world_real = os.path.realpath(WORLD_DIR)
+        real_full = os.path.realpath(full_path)
+        try:
+            real_common = os.path.commonpath([world_real, real_full])
+        except ValueError:
+            raise ValueError(f"Symlink escapa del mundo (unidades diferentes): {rel_path}")
+        if real_common != world_real:
+            raise ValueError(f"Symlink fuera del mundo rechazado: {rel_path}")
 
     return clean_rel_path, full_path
 
@@ -135,6 +149,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     )
 
         with zipfile.ZipFile(tmp_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            total_bytes = 0
             if use_snapshot:
                 print(f"[*] Modo Snapshot Bedrock Nativo: guardando {len(file_snapshot)} archivo(s) congelados...")
                 for rel_path, byte_length in file_snapshot:
@@ -154,10 +169,10 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         data = f.read(byte_length)
                         extra = f.read(1)
 
-                    # Los .log de LevelDB pueden crecer durante save hold (WAL buffers del SO).
+                    # Los .log y MANIFEST de LevelDB pueden crecer durante save hold (flushes del SO).
                     # Solo rechazamos si el archivo es mas chico (truncado real).
                     # Si es mas grande, leemos los bytes del snapshot y seguimos.
-                    is_wal = clean_rel_path.endswith('.log')
+                    is_wal = clean_rel_path.endswith('.log') or 'MANIFEST-' in clean_rel_path
                     if len(data) < byte_length:
                         raise RuntimeError(
                             f"Snapshot truncado en '{clean_rel_path}': {len(data)} < {byte_length} bytes."
@@ -170,6 +185,12 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     zinfo = zipfile.ZipInfo(arcname, date_time=datetime.datetime.now().timetuple()[:6])
                     zinfo.compress_type = zipfile.ZIP_DEFLATED
                     zipf.writestr(zinfo, data)
+                    total_bytes += len(data)
+                    if total_bytes > MAX_BACKUP_BYTES:
+                        raise RuntimeError(
+                            f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
+                            f"(acumulado: {total_bytes / (1024**3):.2f} GB). Abortando."
+                        )
 
                 # Bedrock 'save query' omite la configuracion de shaders/addons y el icono del mundo.
                 # Debemos empacarlos manualmente en el ZIP del backup en caliente.
@@ -183,9 +204,19 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                     full_f = os.path.join(root, static_file)
                                     arc = os.path.relpath(full_f, WORLD_DIR)
                                     zipf.write(full_f, arc)
+                                    total_bytes += os.path.getsize(full_f)
+                                    if total_bytes > MAX_BACKUP_BYTES:
+                                        raise RuntimeError(
+                                            f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando."
+                                        )
                         else:
                             arc = os.path.relpath(static_path, WORLD_DIR)
                             zipf.write(static_path, arc)
+                            total_bytes += os.path.getsize(static_path)
+                            if total_bytes > MAX_BACKUP_BYTES:
+                                raise RuntimeError(
+                                    f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando."
+                                )
             else:
                 # Backup completo tradicional (usado al inicio, apagar o caída por snapshot incompleto)
                 for root, dirs, files in os.walk(WORLD_DIR):
@@ -197,6 +228,12 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         full_path = os.path.join(root, file)
                         arcname = os.path.relpath(full_path, WORLD_DIR)
                         zipf.write(full_path, arcname)
+                        total_bytes += os.path.getsize(full_path)
+                        if total_bytes > MAX_BACKUP_BYTES:
+                            raise RuntimeError(
+                                f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
+                                f"(acumulado: {total_bytes / (1024**3):.2f} GB). Abortando."
+                            )
 
         if _cancelled(cancel_event):
             raise RuntimeError("Backup cancelado antes de publicar ZIP.")
