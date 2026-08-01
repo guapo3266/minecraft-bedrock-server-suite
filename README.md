@@ -28,7 +28,6 @@ Lo estuve probando un buen rato en Windows 10/11 y parece que funciona bien, sie
 * `server_wrapper.py` - Es el script principal que lee la consola y maneja lo de los backups.
 * `auto_backup.py` - El que comprime la base de datos a ZIP.
 * `restore_backup.py` - Script para restaurar.
-* `enable_beta_apis.py` - Un script medio experimental que hice para toquetear el `level.dat`.
 
 ### Para usarlo:
 1. Necesitas tener Python instalado.
@@ -66,7 +65,6 @@ I tested it on Windows 10/11 for a bit and it seems to be working fine as long a
 * `server_wrapper.py` - The main script that reads the console and handles the backup logic.
 * `auto_backup.py` - Zips the files.
 * `restore_backup.py` - Restores the zip.
-* `enable_beta_apis.py` - An experimental script to mess with `level.dat`.
 
 ### How to use:
 1. You need Python installed.
