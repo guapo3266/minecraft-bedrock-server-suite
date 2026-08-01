@@ -24,7 +24,7 @@ Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola e
 
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
 - Requiere **Python 3.10+** y `pip install -r requirements.txt` (el `.bat` lo hace solo).
-- En Linux/macOS: `./iniciar_gui.sh`.
+- Solo Windows: el servidor BDS oficial de Mojang únicamente existe para Windows.
 - El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008).
 
 **2. Sin GUI (solo consola)** — el wrapper clásico:
@@ -50,7 +50,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 
 | Archivo | Qué hace |
 |---|---|
-| `iniciar_gui.bat` / `iniciar_gui.sh` | Arrancan la GUI (instalan dependencias de Python si faltan) |
+| `iniciar_gui.bat` | Arranca la GUI (instala dependencias de Python si faltan) |
 | `iniciar_servidor.bat` | Arranca el servidor con el wrapper clásico (sin GUI) |
 | `server_gui_server.py` | Backend de la GUI: FastAPI + WebSockets, sirve el frontend |
 | `server_wrapper.py` | Script principal: lee la consola, detecta jugadores, maneja los backups |
@@ -107,7 +107,7 @@ Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, s
 
 - **No Node.js needed**: the frontend ships prebuilt in `gui_frontend/dist/`.
 - Requires **Python 3.10+** and `pip install -r requirements.txt` (the `.bat` does it for you).
-- On Linux/macOS: `./iniciar_gui.sh`.
+- Windows only: Mojang's official BDS server exists for Windows only.
 - The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008).
 
 **2. Without GUI (console only)** — the classic wrapper:
@@ -133,7 +133,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 
 | File | What it does |
 |---|---|
-| `iniciar_gui.bat` / `iniciar_gui.sh` | Start the GUI (installs Python deps if missing) |
+| `iniciar_gui.bat` | Starts the GUI (installs Python deps if missing) |
 | `iniciar_servidor.bat` | Starts the server with the classic wrapper (no GUI) |
 | `server_gui_server.py` | GUI backend: FastAPI + WebSockets, serves the frontend |
 | `server_wrapper.py` | Main script: reads the console, detects players, handles backups |
