@@ -30,7 +30,7 @@ if errorlevel 1 (
 :: [2/3] Frontend compilado: NO requiere Node.js (el dist viaja en el repo).
 ::        Solo se compila si falta (para desarrolladores con Node instalado).
 if not exist "gui_frontend\dist\index.html" (
-    echo [2/3] dist no encontrado: compilando frontend (requiere Node.js)...
+    echo [2/3] dist no encontrado: compilando frontend - requiere Node.js...
     cd gui_frontend
     call npm run build
     cd ..
