@@ -2,8 +2,10 @@ import React from 'react';
 import ConfirmButton from './hover/ConfirmButton';
 import ShinyText from './reactbits/ShinyText';
 import { Play, Square, RotateCw, Save } from 'lucide-react';
+import { useI18n } from '../i18n.jsx';
 
 export default function ControlsBar({ status, onAction }) {
+  const { t } = useI18n();
   const isRunning = status.running;
 
   return (
@@ -17,7 +19,7 @@ export default function ControlsBar({ status, onAction }) {
           className="w-full py-4 text-base"
         >
           <Play className="h-5 w-5 text-emerald-400 fill-emerald-400" />
-          <ShinyText text="Iniciar Servidor" />
+          <ShinyText text={t('start')} />
         </ConfirmButton>
       </div>
 
@@ -30,7 +32,7 @@ export default function ControlsBar({ status, onAction }) {
           className="w-full py-4 text-base"
         >
           <Square className="h-5 w-5 text-rose-400 fill-rose-400" />
-          <ShinyText text="Detener" />
+          <ShinyText text={t('stop')} />
         </ConfirmButton>
       </div>
 
@@ -43,7 +45,7 @@ export default function ControlsBar({ status, onAction }) {
           className="w-full py-4 text-base"
         >
           <RotateCw className="h-5 w-5 text-purple-400" />
-          <ShinyText text="Reiniciar" />
+          <ShinyText text={t('restart')} />
         </ConfirmButton>
       </div>
 
@@ -55,7 +57,7 @@ export default function ControlsBar({ status, onAction }) {
           className="w-full py-4 text-base"
         >
           <Save className="h-5 w-5 text-amber-400" />
-          <ShinyText text="Forzar Backup" />
+          <ShinyText text={t('backup')} />
         </ConfirmButton>
       </div>
     </section>

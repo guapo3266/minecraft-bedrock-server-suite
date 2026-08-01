@@ -2,10 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Trash2 } from 'lucide-react';
 import { TerminalMotionIcon } from './hover/AnimatedIcons';
 import SpringChip from './hover/SpringChip';
+import { useI18n } from '../i18n.jsx';
 
 export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRunning }) {
   const [input, setInput] = useState('');
   const bodyRef = useRef(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (bodyRef.current) {
@@ -45,7 +47,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
           </div>
           <span className="ml-3 font-mono text-xs tracking-wider text-slate-400 flex items-center gap-2">
             <TerminalMotionIcon className="h-4 w-4 text-emerald-400" />
-            TERMINAL DE CONSOLA (LOGS EN VIVO)
+            {t('terminalTitle')}
           </span>
         </div>
 
@@ -54,14 +56,14 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
           className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-400 hover:border-emerald-500/50 hover:text-white transition-all"
         >
           <Trash2 className="h-3.5 w-3.5" />
-          Limpiar
+          {t('clear')}
         </button>
       </div>
 
       {/* Terminal Output */}
       <div ref={bodyRef} className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1.5 bg-slate-950/90">
         {logs.length === 0 ? (
-          <div className="text-slate-500 italic">[SISTEMA] Esperando logs del servidor...</div>
+          <div className="text-slate-500 italic">{t('waitingLogs')}</div>
         ) : (
           logs.map((log, index) => (
             <div key={index} className={`break-all ${getLogClass(log.type)}`}>
@@ -79,7 +81,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={isRunning ? "Escribe un comando (ej: op player, say Hola, list)..." : "Servidor APAGADO — Presiona Iniciar Servidor..."}
+          placeholder={isRunning ? t('placeholderRunning') : t('placeholderStopped')}
           className="flex-1 bg-transparent font-mono text-xs text-white outline-none placeholder:text-slate-500"
         />
         <button
@@ -87,7 +89,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
           className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition-colors"
         >
           <Send className="h-3.5 w-3.5" />
-          Enviar
+          {t('send')}
         </button>
       </form>
 

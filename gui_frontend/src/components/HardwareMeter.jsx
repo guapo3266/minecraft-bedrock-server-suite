@@ -3,11 +3,13 @@ import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import CountUp from './reactbits/CountUp';
 import { CpuMotionIcon, RamMotionIcon } from './hover/HardwareMotionIcons';
+import { useI18n } from '../i18n.jsx';
 
 export default function HardwareMeter({ hardware }) {
   const ramMb = hardware?.ram_mb || 0;
   const cpuPct = hardware?.cpu_pct || 0;
   const totalRamGb = hardware?.total_ram_gb || 23.6;
+  const { t } = useI18n();
 
   const isServerRunning = ramMb > 0;
 
@@ -19,10 +21,10 @@ export default function HardwareMeter({ hardware }) {
           <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
             <div className="flex items-center gap-2">
               <RamMotionIcon className="h-4 w-4 text-emerald-400" />
-              <span>Memoria RAM</span>
+              <span>{t('ram')}</span>
             </div>
             <span className="font-mono text-emerald-400 text-xs font-bold">
-              {isServerRunning ? `${ramMb} MB` : 'Apagado'}
+              {isServerRunning ? `${ramMb} MB` : t('off')}
             </span>
           </div>
 
@@ -30,7 +32,7 @@ export default function HardwareMeter({ hardware }) {
             <span className="text-2xl font-extrabold text-white">
               <CountUp to={isServerRunning ? ramMb : 0} decimals={isServerRunning ? 1 : 0} />
             </span>
-            <span className="text-xs font-medium text-slate-400">MB / {totalRamGb} GB</span>
+            <span className="text-xs font-medium text-slate-400">{t('mbOf', { total: totalRamGb })}</span>
           </div>
 
           {/* Barra de Nivel Minimalista */}
@@ -49,7 +51,7 @@ export default function HardwareMeter({ hardware }) {
           <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
             <div className="flex items-center gap-2">
               <CpuMotionIcon className="h-4 w-4 text-cyan-400" />
-              <span>Procesador CPU</span>
+              <span>{t('cpu')}</span>
             </div>
             <span className="font-mono text-cyan-400 text-xs font-bold">
               {isServerRunning ? `${cpuPct}%` : '0%'}
@@ -60,7 +62,7 @@ export default function HardwareMeter({ hardware }) {
             <span className="text-2xl font-extrabold text-white">
               <CountUp to={isServerRunning ? cpuPct : 0} decimals={1} />
             </span>
-            <span className="text-xs font-medium text-slate-400">% de uso BDS</span>
+            <span className="text-xs font-medium text-slate-400">{t('cpuUsage')}</span>
           </div>
 
           {/* Barra de Nivel Minimalista */}

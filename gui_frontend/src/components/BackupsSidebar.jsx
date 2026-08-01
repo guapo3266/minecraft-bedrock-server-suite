@@ -1,14 +1,16 @@
 import React from 'react';
 import SpotlightCard from './reactbits/SpotlightCard';
 import { FolderArchive, RefreshCw } from 'lucide-react';
+import { useI18n } from '../i18n.jsx';
 
 export default function BackupsSidebar({ backups = [], onRefresh }) {
+  const { t } = useI18n();
   return (
     <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.15)">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
           <FolderArchive className="h-4 w-4 text-amber-400" />
-          <h3>Historial de Backups</h3>
+          <h3>{t('backupsTitle')}</h3>
         </div>
         <button
           onClick={onRefresh}
@@ -20,7 +22,7 @@ export default function BackupsSidebar({ backups = [], onRefresh }) {
 
       <div className="mt-4 max-h-[220px] overflow-y-auto space-y-2">
         {backups.length === 0 ? (
-          <p className="text-xs italic text-slate-500 text-center py-4">No se encontraron respaldos ZIP</p>
+          <p className="text-xs italic text-slate-500 text-center py-4">{t('noBackups')}</p>
         ) : (
           backups.map((b) => (
             <div

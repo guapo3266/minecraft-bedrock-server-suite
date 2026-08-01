@@ -1,26 +1,28 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useI18n } from '../../i18n.jsx';
 
 /**
  * PingIndicator — ItsHover / Hover.dev Component (.jsx)
  * Indicador de latencia y estado en tiempo real con pulsaciones concéntricas.
  */
 export default function PingIndicator({ status, latency = null }) {
+  const { t } = useI18n();
   const isOnline = status.running;
   const isBackup = status.backup_in_progress;
 
   let color = "bg-rose-500";
   let ringColor = "border-rose-500/50";
-  let text = "DISCONNECTED";
+  let text = t('disconnected');
 
   if (isBackup) {
     color = "bg-amber-400";
     ringColor = "border-amber-400/50";
-    text = "HOT BACKUP";
+    text = t('hotBackup');
   } else if (isOnline) {
     color = "bg-emerald-400";
     ringColor = "border-emerald-400/50";
-    text = latency != null ? `${Math.max(latency, 0)}ms LATENCY` : "ONLINE";
+    text = latency != null ? t('latency', { ms: Math.max(latency, 0) }) : t('online');
   }
 
   return (
