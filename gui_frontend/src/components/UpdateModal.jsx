@@ -4,9 +4,11 @@ import DecryptedText from './reactbits/DecryptedText';
 import ShinyText from './reactbits/ShinyText';
 import Magnet from './reactbits/Magnet';
 import { DownloadMotionIcon, ShieldMotionIcon } from './hover/HardwareMotionIcons';
-import { X, CheckCircle, AlertTriangle } from 'lucide-react';
+import { X, CheckCircle } from 'lucide-react';
+import { useI18n } from '../i18n.jsx';
 
 export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpdate, isUpdating }) {
+  const { t } = useI18n();
   if (!isOpen) return null;
 
   return (
@@ -36,8 +38,8 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                 <DownloadMotionIcon className="h-5 w-5 text-emerald-400" />
               </div>
               <div>
-                <h2 className="text-lg font-bold text-white">Actualizador Oficial Mojang BDS</h2>
-                <p className="text-xs text-slate-400">Verificación de versión del ejecutable</p>
+                <h2 className="text-lg font-bold text-white">{t('updaterTitle')}</h2>
+                <p className="text-xs text-slate-400">{t('updaterSubtitle')}</p>
               </div>
             </div>
             <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white">
@@ -51,23 +53,23 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
                 <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
                   <CheckCircle className="h-4 w-4" />
-                  <span>¡NUEVA VERSIÓN DETECTADA DE MOJANG!</span>
+                  <span>{t('newVersion')}</span>
                 </div>
                 <div className="mt-2 text-2xl font-extrabold text-white tracking-wider">
                   <DecryptedText text={`v${updateInfo.latest_version}`} />
                 </div>
                 <p className="mt-1 text-xs text-slate-300">
-                  Versión actual en tu servidor: <span className="font-mono text-slate-400">{updateInfo.current_version}</span>
+                  {t('currentVersion')} <span className="font-mono text-slate-400">{updateInfo.current_version}</span>
                 </p>
               </div>
             ) : (
               <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4">
                 <div className="flex items-center gap-2 text-sm font-bold text-cyan-400">
                   <CheckCircle className="h-4 w-4" />
-                  <span>TU SERVIDOR ESTÁ EN LA ÚLTIMA VERSIÓN</span>
+                  <span>{t('upToDate')}</span>
                 </div>
                 <div className="mt-2 text-xl font-extrabold text-white">
-                  Versión Activa: v{updateInfo?.current_version || "1.21.XX"}
+                  {t('activeVersion')} v{updateInfo?.current_version || "1.21.XX"}
                 </div>
               </div>
             )}
@@ -75,11 +77,11 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2 text-xs text-slate-300">
               <div className="flex items-center gap-2 font-bold text-amber-400">
                 <ShieldMotionIcon className="h-4 w-4 text-amber-400" />
-                <span>Protocolo de Protección de Datos Activo:</span>
+                <span>{t('protectionTitle')}</span>
               </div>
               <ul className="list-disc list-inside space-y-1 text-slate-400">
-                <li>Se ejecutará un <strong className="text-white">Backup Preventivo Automático</strong> antes de actualizar.</li>
-                <li>Tus mundos (<code className="text-emerald-400">worlds/</code>) y configs (<code className="text-emerald-400">server.properties</code>) no se borrarán.</li>
+                <li>{t('protection1')}</li>
+                <li>{t('protection2')}</li>
               </ul>
             </div>
           </div>
@@ -90,7 +92,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
               onClick={onClose}
               className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 hover:bg-white/10"
             >
-              Cancelar
+              {t('cancel')}
             </button>
 
             {updateInfo?.has_update && (
@@ -101,7 +103,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                   className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-5 py-2 text-xs font-bold text-black shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:brightness-110 disabled:opacity-50"
                 >
                   <DownloadMotionIcon className="h-4 w-4 text-black" />
-                  <ShinyText text={isUpdating ? "Actualizando BDS..." : "Descargar & Actualizar Ahora"} />
+                  <ShinyText text={isUpdating ? t('updating') : t('updateNow')} />
                 </button>
               </Magnet>
             )}

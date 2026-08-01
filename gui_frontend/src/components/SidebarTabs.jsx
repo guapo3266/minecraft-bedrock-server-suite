@@ -3,20 +3,22 @@ import ChipTabs from './hover/ChipTabs';
 import PlayersSidebar from './PlayersSidebar';
 import BackupsSidebar from './BackupsSidebar';
 import { UsersMotionIcon, BackupMotionIcon } from './hover/AnimatedIcons';
+import { useI18n } from '../i18n.jsx';
 
 export default function SidebarTabs({ players, backups, onRefreshBackups }) {
   const [activeTab, setActiveTab] = useState('players');
+  const { t } = useI18n();
 
   const tabs = [
     {
       id: 'players',
-      label: 'Jugadores',
+      label: t('playersTab'),
       badge: players.length,
       icon: <UsersMotionIcon className="h-4 w-4 text-emerald-400" />
     },
     {
       id: 'backups',
-      label: 'Backups',
+      label: t('backupsTab'),
       badge: backups.length,
       icon: <BackupMotionIcon className="h-4 w-4 text-cyan-400" />
     }

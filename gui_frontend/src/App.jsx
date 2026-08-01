@@ -6,11 +6,16 @@ import ControlsBar from './components/ControlsBar';
 import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
 import UpdateModal from './components/UpdateModal';
+import { useI18n } from './i18n.jsx';
 
 // Paleta de colores del fondo fluido LiquidEther (alineada con el tema del dashboard)
 const LIQUID_COLORS = ['#10b981', '#06b6d4', '#8b5cf6'];
 
 export default function App() {
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
+
   const [status, setStatus] = useState({
     running: false,
     players: [],
@@ -50,7 +55,7 @@ export default function App() {
       };
 
       ws.onopen = () => {
-        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: '[WEBSOCKET] Conectado a React Backend.', type: 'system' }]);
+        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('wsConnected'), type: 'system' }]);
         fetchBackups();
         sendPing();
         pingTimer = setInterval(sendPing, 3000);
@@ -76,7 +81,7 @@ export default function App() {
 
       ws.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
-        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: '[WEBSOCKET] Desconectado. Reintentando...', type: 'error' }]);
+        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('wsDisconnected'), type: 'error' }]);
         setTimeout(connect, 3000);
       };
     };
@@ -138,10 +143,10 @@ export default function App() {
     try {
       const res = await fetch(`/api/action/${actionName}`, { method: 'POST' });
       const data = await res.json();
-      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: `[GUI] Acción '${actionName}' ejecutada (${data.status}).`, type: 'system' }]);
+      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('actionExecuted', { action: actionName, status: data.status }), type: 'system' }]);
       fetchBackups();
     } catch (e) {
-      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: `[GUI] Error al ejecutar acción '${actionName}': ${e}`, type: 'error' }]);
+      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('actionError', { action: actionName, err: e }), type: 'error' }]);
     }
   };
 
@@ -150,7 +155,7 @@ export default function App() {
       setLogs((prev) => [
         ...prev,
         { time: new Date().toLocaleTimeString(), text: `> ${command}`, type: 'command' },
-        { time: new Date().toLocaleTimeString(), text: '[SISTEMA] El servidor está APAGADO. Haz clic en "Iniciar Servidor" primero.', type: 'error' }
+        { time: new Date().toLocaleTimeString(), text: tRef.current('serverOff'), type: 'error' }
       ]);
       return;
     }
@@ -162,7 +167,7 @@ export default function App() {
         body: JSON.stringify({ command })
       });
     } catch (e) {
-      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: `[GUI] Error enviando comando: ${e}`, type: 'error' }]);
+      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('commandError', { err: e }), type: 'error' }]);
     }
   };
 
