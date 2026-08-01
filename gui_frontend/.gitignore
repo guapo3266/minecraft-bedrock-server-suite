@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+node_modules
+
+# El dist COMPILADO se sube a GitHub (así nadie necesita Node.js para ejecutar).
+# Si recompilas, se sobrescribe y git lo detecta como cambio.
+dist
+!dist/
+!dist/index.html
+!dist/assets/
+!dist/assets/*
+!dist/favicon.svg
+!dist/icons.svg
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

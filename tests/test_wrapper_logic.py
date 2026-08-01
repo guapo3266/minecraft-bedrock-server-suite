@@ -29,7 +29,7 @@ def run_lines(lines):
     sw.server_process = FakeProcess(lines)
     sw.read_stdout()
 
-def test(name, fn):
+def run_case(name, fn):
     reset_state()
     try:
         fn()
@@ -45,7 +45,7 @@ def t1():
         "Alice, Bob\n",
     ])
     assert sw.players_online == {"Alice", "Bob"}, sw.players_online
-test("list normal (header + nombres en linea siguiente)", t1)
+run_case("list normal (header + nombres en linea siguiente)", t1)
 
 # --- Test 2: list con ruido de logs entre encabezado y nombres ---
 def t2():
@@ -56,7 +56,7 @@ def t2():
         "Alice, Bob\n",
     ])
     assert sw.players_online == {"Alice", "Bob"}, sw.players_online
-test("list con ruido de logs entre medio", t2)
+run_case("list con ruido de logs entre medio", t2)
 
 # --- Test 3: EL BUG ORIGINAL - continuacion de list pendiente cuando arranca backup ---
 def t3():
@@ -78,7 +78,7 @@ def t3():
     assert sw.save_query_ready_seen is True
     assert ("level.dat", 6304) in sw.last_save_snapshot
     assert ("db/000030.ldb", 1917505) in sw.last_save_snapshot
-test("bug original: 'list' pendiente + arranque de backup (con fix)", t3)
+run_case("bug original: 'list' pendiente + arranque de backup (con fix)", t3)
 
 # --- Test 3b: MISMO escenario pero SIN aplicar el fix (para probar que de verdad hubiera fallado) ---
 def t3b():
@@ -94,7 +94,7 @@ def t3b():
     ])
     corrupted = "Data saved. Files are now ready to be copied." in sw.players_online
     print(f"    (sin fix) players_online = {sw.players_online} -> corrupto={corrupted}")
-test("reproduccion del bug SIN el fix (para confirmar que existia)", t3b)
+run_case("reproduccion del bug SIN el fix (para confirmar que existia)", t3b)
 
 # --- Test 4: connect/disconnect ---
 def t4():
@@ -104,7 +104,7 @@ def t4():
         "[INFO] Player disconnected: Steve, xuid: 123456789012345\n",
     ])
     assert sw.players_online == {"Alex"}, sw.players_online
-test("connect/disconnect normal (con espacio tras xuid:)", t4)
+run_case("connect/disconnect normal (con espacio tras xuid:)", t4)
 
 # --- Test 5: xuid SIN espacio durante ventana de snapshot (caso borde que marque como riesgo) ---
 def t5():
@@ -120,7 +120,7 @@ def t5():
     paths = [p for p, _ in sw.last_save_snapshot]
     print(f"    snapshot tras linea xuid sin espacio: {sw.last_save_snapshot}")
     assert len(sw.last_save_snapshot) == 1, f"Se agrego una entrada espuria al snapshot: {sw.last_save_snapshot}"
-test("xuid sin espacio durante ventana de snapshot activo", t5)
+run_case("xuid sin espacio durante ventana de snapshot activo", t5)
 
 # --- Test 6: multiples 'Data saved' (reintentos de save query) no dejan basura ---
 def t6():
@@ -133,7 +133,7 @@ def t6():
         "level.dat:100, level.dat_old:100\n",
     ])
     assert sw.last_save_snapshot == [("level.dat", 100), ("level.dat_old", 100)], sw.last_save_snapshot
-test("reintentos de 'save query' no acumulan snapshots viejos", t6)
+run_case("reintentos de 'save query' no acumulan snapshots viejos", t6)
 
 # --- Test 2 (regresion): ruido de logs entre header y nombres, CON el fix ---
 def t2_fix():
@@ -144,7 +144,7 @@ def t2_fix():
         "Alice, Bob\n",
     ])
     assert sw.players_online == {"Alice", "Bob"}, sw.players_online
-test("[REGRESION] ruido de logs entre header y nombres (con fix)", t2_fix)
+run_case("[REGRESION] ruido de logs entre header y nombres (con fix)", t2_fix)
 
 # --- Test 5 (regresion): xuid sin espacio durante ventana de snapshot, CON el fix ---
 def t5_fix():
@@ -159,7 +159,7 @@ def t5_fix():
     assert sw.last_save_snapshot == [("level.dat", 100)], \
         f"Se agrego una entrada espuria: {sw.last_save_snapshot}"
     assert sw.players_online == {"Bob"}, sw.players_online
-test("[REGRESION] xuid sin espacio durante ventana de snapshot (con fix)", t5_fix)
+run_case("[REGRESION] xuid sin espacio durante ventana de snapshot (con fix)", t5_fix)
 
 print("\n--- Pruebas de auto_backup.py (_resolve_snapshot_path) ---")
 import auto_backup as ab
