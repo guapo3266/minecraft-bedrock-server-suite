@@ -52,3 +52,10 @@ __test_*
 __apply_*
 __verify_*
 __port_*
+
+# GUI React (gui_frontend)
+gui_frontend/node_modules/
+.codewhale/
+archived/
+.pytest_cache/
+.hypothesis/

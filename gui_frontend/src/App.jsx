@@ -1,0 +1,233 @@
+import React, { useState, useEffect, useRef } from 'react';
+import LiquidEther from './components/reactbits/LiquidEther';
+import Navbar from './components/Navbar';
+import HardwareMeter from './components/HardwareMeter';
+import ControlsBar from './components/ControlsBar';
+import TerminalConsole from './components/TerminalConsole';
+import SidebarTabs from './components/SidebarTabs';
+import UpdateModal from './components/UpdateModal';
+
+// Paleta de colores del fondo fluido LiquidEther (alineada con el tema del dashboard)
+const LIQUID_COLORS = ['#10b981', '#06b6d4', '#8b5cf6'];
+
+export default function App() {
+  const [status, setStatus] = useState({
+    running: false,
+    players: [],
+    player_count: 0,
+    last_backup: "Ninguno",
+    backup_in_progress: false,
+    update_in_progress: false,
+    uptime: 0,
+    hardware: { ram_mb: 0, ram_pct: 0, cpu_pct: 0, total_ram_gb: 23.6 }
+  });
+
+  const [logs, setLogs] = useState([]);
+  const [backups, setBackups] = useState([]);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateStarted, setUpdateStarted] = useState(false);
+  const [latency, setLatency] = useState(null);
+  const wsRef = useRef(null);
+  const updateStartedRef = useRef(false);
+
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+    const connect = () => {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      let pingTimer = null;
+      const pingSentAt = { t: 0 };
+
+      const sendPing = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          pingSentAt.t = Date.now();
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      };
+
+      ws.onopen = () => {
+        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: '[WEBSOCKET] Conectado a React Backend.', type: 'system' }]);
+        fetchBackups();
+        sendPing();
+        pingTimer = setInterval(sendPing, 3000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'init') {
+            if (msg.logs) setLogs(msg.logs);
+            if (msg.status) setStatus(msg.status);
+          } else if (msg.type === 'log') {
+            setLogs((prev) => [...prev, msg.data]);
+          } else if (msg.type === 'status') {
+            setStatus(msg.data);
+          } else if (msg.type === 'pong') {
+            setLatency(Date.now() - pingSentAt.t);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      ws.onclose = () => {
+        if (pingTimer) clearInterval(pingTimer);
+        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: '[WEBSOCKET] Desconectado. Reintentando...', type: 'error' }]);
+        setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+    fetchBackups();
+
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, []);
+
+  // Cierra el modal de actualización cuando el backend termina el proceso (flag update_in_progress)
+  useEffect(() => {
+    if (status.update_in_progress) updateStartedRef.current = true;
+    if (updateStarted && isUpdating && updateStartedRef.current && status.update_in_progress === false) {
+      setIsUpdating(false);
+      setUpdateStarted(false);
+      setIsUpdateModalOpen(false);
+    }
+  }, [status.update_in_progress, updateStarted, isUpdating]);
+
+  const fetchBackups = async () => {
+    try {
+      const res = await fetch('/api/backups');
+      const data = await res.json();
+      if (data.backups) setBackups(data.backups);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleOpenUpdate = async () => {
+    setIsUpdateModalOpen(true);
+    updateStartedRef.current = false;
+    try {
+      const res = await fetch('/api/check_update');
+      const data = await res.json();
+      setUpdateInfo(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleConfirmUpdate = async () => {
+    setIsUpdating(true);
+    setUpdateStarted(true);
+    try {
+      await fetch('/api/action/update_bds', { method: 'POST' });
+    } catch (e) {
+      console.error(e);
+      setIsUpdating(false);
+      setUpdateStarted(false);
+      setIsUpdateModalOpen(false);
+    }
+  };
+
+  const handleAction = async (actionName) => {
+    try {
+      const res = await fetch(`/api/action/${actionName}`, { method: 'POST' });
+      const data = await res.json();
+      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: `[GUI] Acción '${actionName}' ejecutada (${data.status}).`, type: 'system' }]);
+      fetchBackups();
+    } catch (e) {
+      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: `[GUI] Error al ejecutar acción '${actionName}': ${e}`, type: 'error' }]);
+    }
+  };
+
+  const handleSendCommand = async (command) => {
+    if (!status.running) {
+      setLogs((prev) => [
+        ...prev,
+        { time: new Date().toLocaleTimeString(), text: `> ${command}`, type: 'command' },
+        { time: new Date().toLocaleTimeString(), text: '[SISTEMA] El servidor está APAGADO. Haz clic en "Iniciar Servidor" primero.', type: 'error' }
+      ]);
+      return;
+    }
+
+    try {
+      await fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command })
+      });
+    } catch (e) {
+      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: `[GUI] Error enviando comando: ${e}`, type: 'error' }]);
+    }
+  };
+
+  return (
+    <div className="relative min-h-screen text-slate-100 p-5 font-sans">
+      {/* Fondo Fluido WebGL LiquidEther (ReactBits) */}
+      <LiquidEther
+        className="fixed inset-0 pointer-events-none z-0"
+        colors={LIQUID_COLORS}
+        mouseForce={20}
+        cursorSize={100}
+        isViscous={false}
+        viscous={30}
+        iterationsViscous={32}
+        iterationsPoisson={32}
+        resolution={0.5}
+        isBounce={false}
+        autoDemo={true}
+        autoSpeed={0.5}
+        autoIntensity={2.2}
+        takeoverDuration={1.5}
+        autoResumeDelay={500}
+        autoRampDuration={1.5}
+      />
+
+      <div className="relative z-10 mx-auto max-w-7xl space-y-5">
+        {/* Cabecera Principal */}
+        <Navbar status={status} onOpenUpdate={handleOpenUpdate} latency={latency} />
+
+        {/* Botonera de Control con ClickSpark & ConfirmButton */}
+        <ControlsBar status={status} onAction={handleAction} />
+
+        {/* Medidor Compacto de Hardware (RAM & CPU) */}
+        <HardwareMeter hardware={status.hardware} />
+
+        {/* Área Principal Dividida: Consola Terminal y Panel Lateral por Pestañas (Hover.dev ChipTabs) */}
+        <main className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">
+          <TerminalConsole
+            logs={logs}
+            onSendCommand={handleSendCommand}
+            onClearLogs={() => setLogs([])}
+            isRunning={status.running}
+          />
+          <aside>
+            <SidebarTabs
+              players={status.players}
+              backups={backups}
+              onRefreshBackups={fetchBackups}
+            />
+          </aside>
+        </main>
+
+        <footer className="border-t border-white/10 pt-3 text-center text-xs text-slate-400">
+          Bedrock Dedicated Server &bull; ReactBits + ItsHover + Hover.dev &bull; Clean Dashboard
+        </footer>
+      </div>
+
+      {/* Modal de Actualización de BDS (Hover.dev SpringModal) */}
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        updateInfo={updateInfo}
+        onConfirmUpdate={handleConfirmUpdate}
+        isUpdating={isUpdating}
+      />
+    </div>
+  );
+}

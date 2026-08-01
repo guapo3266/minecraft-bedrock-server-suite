@@ -77,3 +77,39 @@ I tested it on Windows 10/11 for a bit and it seems to be working fine as long a
 
 ### Random technical notes:
 I had some serious headaches with the ZIP compression getting stuck on slow disks, so I ended up using `multiprocessing` and IPC locks to add a hard timeout. If it takes more than 2 minutes to compress, it just forcefully kills the worker so the server doesn't stay frozen forever. Hopefully I covered all the concurrency edge cases. Let me know if you find any bugs.
+
+---
+
+## GUI Web (React Dashboard) — 🇪🇸
+
+Dashboard web para controlar el servidor desde el navegador: consola en vivo, iniciar/detener/reiniciar, backups, jugadores, RAM/CPU y actualizador oficial de Mojang. Fondo fluido WebGL.
+
+**Ejecutar (sin Node.js — el frontend viaja compilado en gui_frontend/dist/):**
+
+`ash
+pip install -r requirements.txt
+python server_gui_server.py   # abre http://127.0.0.1:8000
+`
+
+En Windows: doble clic en iniciar_gui.bat (instala dependencias solo la primera vez). Linux/macOS: ./iniciar_gui.sh.
+
+- Requiere Python 3.10+. Node.js solo es necesario para *recompilar* el frontend (cd gui_frontend && npm run build).
+- El servidor escucha solo en 127.0.0.1 y rechaza conexiones no locales (403 / WS 1008).
+- Tests: python -m pytest tests/ -q (incluye property-based con Hypothesis).
+
+## GUI Web (React Dashboard) — 🇬🇧
+
+Browser dashboard to control the server: live console, start/stop/restart, backups, players, RAM/CPU metrics and official Mojang updater. WebGL fluid background.
+
+**Run (no Node.js needed — the frontend ships prebuilt in gui_frontend/dist/):**
+
+`ash
+pip install -r requirements.txt
+python server_gui_server.py   # opens http://127.0.0.1:8000
+`
+
+On Windows: double-click iniciar_gui.bat (installs deps once). Linux/macOS: ./iniciar_gui.sh.
+
+- Requires Python 3.10+. Node.js is only needed to *rebuild* the frontend (cd gui_frontend && npm run build).
+- The server listens on 127.0.0.1 only and rejects non-local connections (403 / WS 1008).
+- Tests: python -m pytest tests/ -q (includes property-based tests with Hypothesis).

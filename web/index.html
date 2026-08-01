@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minecraft Bedrock Wrapper — ReactBits Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Canvas de fondo para partículas interactivas estilo ReactBits -->
+  <canvas id="particles-canvas"></canvas>
+
+  <div class="app-container">
+    <!-- Encabezado con DecryptedText y Status Badge -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="cube-icon"></div>
+        <div>
+          <h1 id="brand-title" class="decrypted-text" data-text="BEDROCK WRAPPER">BEDROCK WRAPPER</h1>
+          <p class="subtitle">Minecraft Dedicated Server Control Center</p>
+        </div>
+      </div>
+
+      <div class="status-badge-container">
+        <div id="server-status-badge" class="status-badge offline glow-border">
+          <span class="status-dot"></span>
+          <span id="status-text" class="shiny-text">OFFLINE</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Grid de Métricas con Tarjetas Spotlight -->
+    <section class="metrics-grid">
+      <!-- Tarjeta 1: Estado del Servidor -->
+      <div class="spotlight-card glow-card">
+        <div class="card-header">
+          <span class="card-icon">⚡</span>
+          <h3>Estado del Servidor</h3>
+        </div>
+        <div class="card-value" id="metric-status">Inactivo</div>
+        <div class="card-footer" id="metric-uptime">Uptime: 00:00:00</div>
+      </div>
+
+      <!-- Tarjeta 2: Jugadores Online -->
+      <div class="spotlight-card glow-card">
+        <div class="card-header">
+          <span class="card-icon">👥</span>
+          <h3>Jugadores Online</h3>
+        </div>
+        <div class="card-value"><span id="metric-player-count">0</span> <span class="card-unit">conectados</span></div>
+        <div class="card-footer" id="metric-players-list-summary">Sin jugadores</div>
+      </div>
+
+      <!-- Tarjeta 3: Respaldos en Caliente -->
+      <div class="spotlight-card glow-card">
+        <div class="card-header">
+          <span class="card-icon">💾</span>
+          <h3>Último Backup</h3>
+        </div>
+        <div class="card-value" id="metric-last-backup">Ninguno</div>
+        <div class="card-footer" id="metric-backup-status">Listo</div>
+      </div>
+
+      <!-- Tarjeta 4: Motor de Juego -->
+      <div class="spotlight-card glow-card">
+        <div class="card-header">
+          <span class="card-icon">🧊</span>
+          <h3>Versión y Protocolo</h3>
+        </div>
+        <div class="card-value">Bedrock 1.21+</div>
+        <div class="card-footer">Hot Backup Active</div>
+      </div>
+    </section>
+
+    <!-- Barra de Controles con Botones Magnéticos -->
+    <section class="controls-bar">
+      <button id="btn-start" class="btn btn-start magnetic-btn">
+        <span class="btn-glow"></span>
+        <span class="btn-text shiny-text">▶ Iniciar Servidor</span>
+      </button>
+
+      <button id="btn-stop" class="btn btn-stop magnetic-btn" disabled>
+        <span class="btn-glow"></span>
+        <span class="btn-text shiny-text">⏹ Detener</span>
+      </button>
+
+      <button id="btn-restart" class="btn btn-restart magnetic-btn" disabled>
+        <span class="btn-glow"></span>
+        <span class="btn-text shiny-text">🔄 Reiniciar</span>
+      </button>
+
+      <button id="btn-backup" class="btn btn-backup magnetic-btn">
+        <span class="btn-glow"></span>
+        <span class="btn-text shiny-text">⚡ Forzar Backup</span>
+      </button>
+    </section>
+
+    <!-- Sección Principal: Terminal a la izquierda, Paneles laterales a la derecha -->
+    <main class="dashboard-main">
+      <!-- Consola Cyberpunk con streaming WebSocket -->
+      <section class="terminal-section spotlight-card">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+          <span class="terminal-title">TERMINAL DE CONSOLA (LOGS EN VIVO)</span>
+          <div class="terminal-actions">
+            <button id="btn-clear-logs" class="small-btn">Limpiar Consola</button>
+          </div>
+        </div>
+
+        <div id="terminal-body" class="terminal-body">
+          <div class="log-entry system">[SISTEMA] Conectando a WebSocket local...</div>
+        </div>
+
+        <form id="command-form" class="command-bar">
+          <span class="prompt-symbol">&gt;</span>
+          <input type="text" id="command-input" placeholder="Escribe un comando de Minecraft (ej: op player, say Hola, list)..." autocomplete="off" />
+          <button type="submit" class="btn-send">Enviar</button>
+        </form>
+
+        <div class="quick-commands">
+          <button class="chip-cmd" data-cmd="list">list</button>
+          <button class="chip-cmd" data-cmd="save query">save query</button>
+          <button class="chip-cmd" data-cmd="say Servidor en mantenimiento pronto.">say Notificar</button>
+          <button class="chip-cmd" data-cmd="time query day">time query</button>
+        </div>
+      </section>
+
+      <!-- Columna Derecha: Jugadores + Gestor de Backups -->
+      <aside class="sidebar-section">
+        <!-- Lista de Jugadores -->
+        <div class="spotlight-card sidebar-card">
+          <div class="card-header">
+            <span class="card-icon">🎮</span>
+            <h3>Jugadores en Línea</h3>
+          </div>
+          <ul id="players-list" class="players-list">
+            <li class="empty-msg">No hay jugadores conectados</li>
+          </ul>
+        </div>
+
+        <!-- Gestor de Backups -->
+        <div class="spotlight-card sidebar-card">
+          <div class="card-header">
+            <span class="card-icon">📂</span>
+            <h3>Historial de Backups</h3>
+            <button id="btn-refresh-backups" class="small-btn">Actualizar</button>
+          </div>
+          <div id="backups-list" class="backups-list">
+            <div class="empty-msg">Cargando lista de respaldos...</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Pie de página -->
+    <footer class="footer">
+      <p>Bedrock Dedicated Server GUI &bull; Impulsado por ReactBits Component Style &bull; Minecraft Hot Backup Active</p>
+    </footer>
+  </div>
+
+  <script src="/static/reactbits.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
