@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import LiquidEther from './components/reactbits/LiquidEther';
+import PixelSnow from './components/reactbits/PixelSnow';
 import Navbar from './components/Navbar';
 import HardwareMeter from './components/HardwareMeter';
 import ControlsBar from './components/ControlsBar';
@@ -191,6 +192,25 @@ export default function App() {
         takeoverDuration={1.5}
         autoResumeDelay={500}
         autoRampDuration={1.5}
+      />
+
+      {/* Capa de nieve sutil (ReactBits PixelSnow): entre el fondo y el contenido,
+          sin bloquear clics, con caída diagonal natural y baja densidad/brillo
+          para no competir con las tarjetas del dashboard. */}
+      <PixelSnow
+        className="fixed inset-0 pointer-events-none z-[1]"
+        color="#e2e8f0"
+        flakeSize={0.008}
+        minFlakeSize={1.1}
+        pixelResolution={220}
+        speed={0.85}
+        density={0.22}
+        depthFade={9}
+        farPlane={22}
+        brightness={0.55}
+        gamma={0.4545}
+        variant="round"
+        direction={125}
       />
 
       <div className="relative z-10 mx-auto max-w-7xl space-y-5">
