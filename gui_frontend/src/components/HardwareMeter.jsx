@@ -5,13 +5,18 @@ import CountUp from './reactbits/CountUp';
 import { CpuMotionIcon, RamMotionIcon } from './hover/HardwareMotionIcons';
 import { useI18n } from '../i18n.jsx';
 
-export default function HardwareMeter({ hardware }) {
+export default function HardwareMeter({ hardware, running }) {
   const ramMb = hardware?.ram_mb || 0;
   const cpuPct = hardware?.cpu_pct || 0;
   const totalRamGb = hardware?.total_ram_gb || 23.6;
+  const availGb = hardware?.system_available_gb || 0;
+  // RAM disponible de la maquina: en GB si >= 1, en MB si es menos
+  const availLabel = availGb >= 1 ? `${availGb} GB` : `${Math.round(availGb * 1024)} MB`;
   const { t } = useI18n();
 
-  const isServerRunning = ramMb > 0;
+  // El estado "encendido" viene del backend (status.running): la RAM medida
+  // ahora incluye siempre la propia GUI, asi que ramMb ya no puede ser 0.
+  const isServerRunning = Boolean(running);
 
   return (
     <section className="relative z-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -32,7 +37,7 @@ export default function HardwareMeter({ hardware }) {
             <span className="text-2xl font-extrabold text-white">
               <CountUp to={isServerRunning ? ramMb : 0} decimals={isServerRunning ? 1 : 0} />
             </span>
-            <span className="text-xs font-medium text-slate-400">{t('mbOf', { total: totalRamGb })}</span>
+            <span className="text-xs font-medium text-slate-400">{t('ramOf', { available: availLabel })}</span>
           </div>
 
           {/* Barra de Nivel Minimalista */}

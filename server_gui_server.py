@@ -93,8 +93,54 @@ def _is_safe_zip_entry(filename: str) -> bool:
         return False
     return True
 
+# Caché de objetos psutil.Process por PID. Necesaria para que cpu_percent(interval=None)
+# tenga baseline entre muestras (con objeto nuevo SIEMPRE devuelve 0.0). Se recrea el
+# objeto si el PID cambia (p. ej. al reiniciar BDS o el wrapper).
+_process_cache = {}
+
+
+def _measure_process_tree():
+    """Mide RAM y CPU acumuladas de todo lo relacionado al servidor:
+    la propia GUI (server_gui_server.py), el wrapper (server_wrapper.py) y
+    bedrock_server.exe (+ cualquier subproceso del wrapper, p. ej. compresión de backups).
+
+    Devuelve (ram_mb_total, raw_cpu_por_nucleo)."""
+    # PIDs del árbol: la GUI + todos sus descendientes recursivos (wrapper, BDS, compresión)
+    pids = {os.getpid()}
+    try:
+        for child in psutil.Process(os.getpid()).children(recursive=True):
+            try:
+                pids.add(child.pid)
+            except psutil.NoSuchProcess:
+                pass
+    except psutil.NoSuchProcess:
+        pass
+
+    # Limpiar de la caché los procesos que ya no existen
+    for pid in list(_process_cache):
+        if pid not in pids:
+            _process_cache.pop(pid, None)
+
+    ram_mb = 0.0
+    raw_cpu = 0.0
+    for pid in pids:
+        try:
+            proc = _process_cache.get(pid)
+            if proc is None:
+                proc = psutil.Process(pid)
+                _process_cache[pid] = proc
+            raw_cpu += proc.cpu_percent(interval=None)
+            ram_mb += proc.memory_info().rss / (1024 * 1024)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            _process_cache.pop(pid, None)
+
+    return ram_mb, raw_cpu
+
+
 def get_hardware_metrics():
-    """Mide RAM y CPU de bedrock_server.exe coincidiendo 1 a 1 con el Administrador de Tareas de Windows."""
+    """Mide RAM y CPU de todo lo relacionado al servidor (GUI + wrapper + BDS).
+    CPU normalizada como % de la capacidad total de la máquina (igual que el
+    Administrador de Tareas de Windows)."""
     sys_mem = psutil.virtual_memory()
     total_ram_gb = round(sys_mem.total / (1024**3), 1)
     system_used_gb = round(sys_mem.used / (1024**3), 1)
@@ -102,37 +148,13 @@ def get_hardware_metrics():
     system_used_pct = round(sys_mem.percent, 1)
     num_cores = psutil.cpu_count() or 1
 
-    bds_ram_mb = 0.0
-    bds_ram_pct = 0.0
-    bds_cpu_pct = 0.0
+    ram_mb, raw_cpu = _measure_process_tree()
 
-    if manager.is_running and manager.wrapper_process and manager.wrapper_process.poll() is None:
-        try:
-            parent = psutil.Process(manager.wrapper_process.pid)
-            children = parent.children(recursive=True)
-            
-            # Buscar específicamente la instancia ejecutable de bedrock_server.exe
-            target_proc = None
-            for child in children:
-                try:
-                    if "bedrock" in child.name().lower():
-                        target_proc = child
-                        break
-                except Exception:
-                    pass
-            
-            if not target_proc:
-                target_proc = children[0] if children else parent
-
-            mem = target_proc.memory_info()
-            bds_ram_mb = round(mem.rss / (1024 * 1024), 1)
-            bds_ram_pct = round((mem.rss / sys_mem.total) * 100, 2)
-
-            # Normalizar CPU dividiendo entre los núcleos de la PC (igual que el Administrador de Tareas de Windows)
-            raw_cpu = target_proc.cpu_percent(interval=None)
-            bds_cpu_pct = round(raw_cpu / num_cores, 1)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
+    bds_ram_mb = round(ram_mb, 1)
+    bds_ram_pct = round((ram_mb * 1024 * 1024 / sys_mem.total) * 100, 2)
+    # psutil devuelve % por núcleo (puede superar 100); dividir entre núcleos
+    # lo normaliza a % de la capacidad total de la máquina.
+    bds_cpu_pct = round(raw_cpu / num_cores, 1)
 
     return {
         "ram_mb": bds_ram_mb,
@@ -709,14 +731,50 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.active_websockets.discard(websocket)
 
 
+def _puerto_libre(puerto: int) -> bool:
+    """Comprueba si un puerto local está disponible para enlazar.
+
+    Sin SO_REUSEADDR a propósito: uvicorn no lo usa, y en Windows ese flag
+    permite a un socket "hijackear" un puerto ya ocupado (falso positivo).
+    """
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", puerto))
+            return True
+        except OSError:
+            return False
+
+
 if __name__ == "__main__":
+    import webbrowser
+
+    try:
+        puerto = int(os.environ.get("GUI_PORT", "8000"))
+        if not (1 <= puerto <= 65535):
+            raise ValueError
+    except ValueError:
+        print("[AVISO] GUI_PORT no es un puerto válido. Usando 8000.")
+        puerto = 8000
+
+    # Si el puerto pedido está ocupado (p. ej. SillyTavern en 8000),
+    # saltar al siguiente puerto libre para no chocar con la otra app.
+    while not _puerto_libre(puerto):
+        print(f"[AVISO] El puerto {puerto} ya está en uso. Probando el siguiente libre...")
+        puerto += 1
+
+    url = f"http://127.0.0.1:{puerto}"
     print("=================================================================")
     print("  MINECRAFT BEDROCK WRAPPER GUI - REACTBITS DASHBOARD")
-    print("  Abriendo en: http://127.0.0.1:8000")
+    print(f"  Abriendo en: {url}")
     print("=================================================================")
     try:
-        uvicorn.run("server_gui_server:app", host="127.0.0.1", port=8000, reload=False, log_level="info")
+        webbrowser.open(url)
+    except Exception:
+        pass  # sin navegador disponible no es crítico
+    try:
+        uvicorn.run("server_gui_server:app", host="127.0.0.1", port=puerto, reload=False, log_level="info")
     except OSError:
-        print("\n[AVISO] El puerto 8000 estaba en uso. Reintentando apertura...")
+        print(f"\n[AVISO] El puerto {puerto} se ocupó justo al abrir. Reintentando en el siguiente libre...")
         time.sleep(2)
-        uvicorn.run("server_gui_server:app", host="127.0.0.1", port=8000, reload=False, log_level="info")
+        uvicorn.run("server_gui_server:app", host="127.0.0.1", port=puerto + 1, reload=False, log_level="info")
