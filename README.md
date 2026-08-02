@@ -54,6 +54,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 | `iniciar_servidor.bat` | Arranca el servidor con el wrapper clásico (sin GUI) |
 | `server_gui_server.py` | Backend de la GUI: FastAPI + WebSockets, sirve el frontend |
 | `server_wrapper.py` | Script principal: lee la consola, detecta jugadores, maneja los backups |
+| `backup_worker.py` | Worker de compresión en proceso separado (subprocess, arranque rápido) |
 | `auto_backup.py` | Comprime la base de datos a ZIP |
 | `restore_backup.py` | Restaura un backup |
 | `gui_frontend/` | Frontend React (código fuente + `dist/` compilado, listo para usar) |
@@ -79,7 +80,7 @@ pip install hypothesis pytest
 python -m pytest tests/ -q
 ```
 
-Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local.
+Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local, más suites de inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback) y de la máquina de estados del disparo manual de backup en caliente.
 
 ### Detalles técnicos
 
@@ -137,6 +138,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 | `iniciar_servidor.bat` | Starts the server with the classic wrapper (no GUI) |
 | `server_gui_server.py` | GUI backend: FastAPI + WebSockets, serves the frontend |
 | `server_wrapper.py` | Main script: reads the console, detects players, handles backups |
+| `backup_worker.py` | Compression worker in a separate process (subprocess, fast startup) |
 | `auto_backup.py` | Zips the database |
 | `restore_backup.py` | Restores a backup |
 | `gui_frontend/` | React frontend (source + prebuilt `dist/`, ready to use) |
@@ -162,7 +164,7 @@ pip install hypothesis pytest
 python -m pytest tests/ -q
 ```
 
-Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control.
+Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control, plus backup fault-injection suites (cancellation, double backup, incomplete snapshot, corrupt ZIP, rollback) and the hot-backup manual trigger state machine.
 
 ### Random technical notes
 
