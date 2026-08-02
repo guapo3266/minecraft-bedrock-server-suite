@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import DecryptedText from './reactbits/DecryptedText';
 import ShinyText from './reactbits/ShinyText';
 import Magnet from './reactbits/Magnet';
+import SpotlightCard from './reactbits/SpotlightCard';
+import TiltCard from './hover/TiltCard';
 import { DownloadMotionIcon, ShieldMotionIcon } from './hover/HardwareMotionIcons';
 import { X, CheckCircle } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
@@ -50,47 +52,55 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
           {/* Body Content */}
           <div className="my-6 space-y-4">
             {updateInfo?.has_update ? (
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-                <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>{t('newVersion')}</span>
-                </div>
-                <div className="mt-2 text-2xl font-extrabold text-white tracking-wider">
-                  <DecryptedText text={`v${updateInfo.latest_version}`} />
-                </div>
-                <p className="mt-1 text-xs text-slate-300">
-                  {t('currentVersion')} <span className="font-mono text-slate-400">{updateInfo.current_version}</span>
-                </p>
-              </div>
+              <TiltCard>
+                <SpotlightCard spotlightColor="rgba(16, 185, 129, 0.2)">
+                  <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">
+                    <CheckCircle className="h-4 w-4" />
+                    <span>{t('newVersion')}</span>
+                  </div>
+                  <div className="mt-2 text-2xl font-extrabold text-white tracking-wider">
+                    <DecryptedText text={`v${updateInfo.latest_version}`} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-300">
+                    {t('currentVersion')} <span className="font-mono text-slate-400">{updateInfo.current_version}</span>
+                  </p>
+                </SpotlightCard>
+              </TiltCard>
             ) : (
-              <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4">
-                <div className="flex items-center gap-2 text-sm font-bold text-cyan-400">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>{t('upToDate')}</span>
-                </div>
-                <div className="mt-2 text-xl font-extrabold text-white">
-                  {t('activeVersion')} v{updateInfo?.current_version || "1.21.XX"}
-                </div>
-              </div>
+              <TiltCard>
+                <SpotlightCard spotlightColor="rgba(6, 182, 212, 0.2)">
+                  <div className="flex items-center gap-2 text-sm font-bold text-cyan-400">
+                    <CheckCircle className="h-4 w-4" />
+                    <span>{t('upToDate')}</span>
+                  </div>
+                  <div className="mt-2 text-xl font-extrabold text-white">
+                    {t('activeVersion')} v{updateInfo?.current_version || "1.21.XX"}
+                  </div>
+                </SpotlightCard>
+              </TiltCard>
             )}
 
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2 text-xs text-slate-300">
-              <div className="flex items-center gap-2 font-bold text-amber-400">
-                <ShieldMotionIcon className="h-4 w-4 text-amber-400" />
-                <span>{t('protectionTitle')}</span>
-              </div>
-              <ul className="list-disc list-inside space-y-1 text-slate-400">
-                <li>{t('protection1')}</li>
-                <li>{t('protection2')}</li>
-              </ul>
-            </div>
+            <TiltCard>
+              <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.18)">
+                <div className="space-y-2 text-xs text-slate-300">
+                  <div className="flex items-center gap-2 font-bold text-amber-400">
+                    <ShieldMotionIcon className="h-4 w-4 text-amber-400" />
+                    <span>{t('protectionTitle')}</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-slate-400">
+                    <li>{t('protection1')}</li>
+                    <li>{t('protection2')}</li>
+                  </ul>
+                </div>
+              </SpotlightCard>
+            </TiltCard>
           </div>
 
           {/* Footer Actions */}
           <div className="flex justify-end gap-3 border-t border-white/10 pt-4">
             <button
               onClick={onClose}
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 hover:bg-white/10"
+              className="flex min-h-[44px] items-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition-all duration-200 hover:border-white/25 hover:bg-white/15 hover:text-white active:scale-95 active:bg-white/25"
             >
               {t('cancel')}
             </button>
