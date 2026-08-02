@@ -533,6 +533,29 @@ def initiate_shutdown(reason="shutdown"):
 # ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdin (comandos del usuario)
 # ═══════════════════════════════════════════════════════════════
+def _begin_manual_hot_backup():
+    """Inicia un ciclo de backup en caliente manual (comando 'backup' por stdin).
+
+    Replica EXACTAMENTE el arranque del ciclo periodico de backup_scheduler():
+    misma maquina de estados y mismo lock, para que el scheduler tome el relevo
+    sin cambios. Devuelve True si el ciclo arranco, False si ya hay uno en curso.
+    """
+    global backup_in_progress, backup_dispatched, watchdog_fired, save_query_ready_seen
+    global backup_cancel_event, save_hold_timestamp, last_save_snapshot, expecting_list_names
+    with state_lock:
+        if backup_in_progress:
+            return False
+        backup_in_progress = True
+        backup_dispatched = False
+        watchdog_fired = False
+        save_query_ready_seen = False
+        backup_cancel_event = None
+        save_hold_timestamp = time.time()
+        last_save_snapshot = []
+        expecting_list_names = False
+    return True
+
+
 def read_stdin():
     """Lee comandos del usuario y los reenvía al servidor."""
     while True:
@@ -548,7 +571,14 @@ def read_stdin():
                 if shutting_down:
                     break
 
-            if cmd.lower() == "stop":
+            if cmd.lower() == "backup":
+                started = _begin_manual_hot_backup()
+                if started:
+                    send_command("save hold")
+                    print("[Wrapper] Backup manual solicitado; ciclo caliente iniciado.")
+                else:
+                    print("[Wrapper] Ya hay un backup en curso; solicitud manual ignorada.")
+            elif cmd.lower() == "stop":
                 initiate_shutdown("comando 'stop' en consola")
                 break
             else:
