@@ -473,9 +473,9 @@ async def handle_action(action_name: str, request: Request):
             return {"status": "backup_dispatched"}
         else:
             try:
-                manager.wrapper_process.stdin.write("save hold\n")
+                manager.wrapper_process.stdin.write("backup\n")
                 manager.wrapper_process.stdin.flush()
-                manager.add_log("[GUI Backend] Disparando backup en caliente (save hold)...", "backup")
+                manager.add_log("[GUI Backend] Disparando backup en caliente (comando backup)...", "backup")
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Error al iniciar backup: {e}")
             return {"status": "hot_backup_dispatched"}
