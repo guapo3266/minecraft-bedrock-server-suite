@@ -98,8 +98,14 @@ def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
 
 def parse_save_query_files(line):
     """Extrae pares (ruta_relativa, bytes) de una línea de save query."""
-    # Limpiar múltiples prefijos estándar de log de Bedrock si la consola los añade
-    line = re.sub(r'^(?:\[.*?\]\s*)+', '', line)
+    # Limpia prefijos de log de Bedrock ([YYYY-MM-DD HH:MM:SS:mmm LEVEL] o
+    # [LEVEL]) SOLO si van seguidos de espacio. Las rutas de archivo pueden
+    # empezar con '[' pero nunca contienen espacios (p.ej. '[/]:0'): el
+    # regex anterior comía cualquier '[...]' inicial y las perdía.
+    line = re.sub(
+        r'^(?:(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} (?:INFO|WARN|ERROR|DEBUG)\]|\[(?:INFO|WARN|ERROR|DEBUG)\]) +)+',
+        '', line,
+    )
 
     if ":" not in line:
         return []
