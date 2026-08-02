@@ -208,7 +208,7 @@ export default function App() {
         <ControlsBar status={status} onAction={handleAction} />
 
         {/* Medidor Compacto de Hardware (RAM & CPU) */}
-        <HardwareMeter hardware={status.hardware} />
+        <HardwareMeter hardware={status.hardware} running={status.running} />
 
         {/* Área Principal Dividida: Consola Terminal y Panel Lateral por Pestañas (Hover.dev ChipTabs) */}
         <main className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">
