@@ -196,9 +196,20 @@ export default function App() {
 
       {/* Capa de nieve sutil (ReactBits PixelSnow): entre el fondo y el contenido,
           sin bloquear clics, con caída diagonal natural y baja densidad/brillo
-          para no competir con las tarjetas del dashboard. */}
+          para no competir con las tarjetas del dashboard.
+          IMPORTANTE: el posicionamiento va por style inline (igual que LiquidEther)
+          porque .pixel-snow-container define position:relative sin @layer, y en la
+          cascada CSS eso pisa las utilities de Tailwind (fixed inset-0). */}
       <PixelSnow
-        className="fixed inset-0 pointer-events-none z-[1]"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          zIndex: 1,
+          pointerEvents: 'none'
+        }}
         color="#e2e8f0"
         flakeSize={0.008}
         minFlakeSize={1.1}
