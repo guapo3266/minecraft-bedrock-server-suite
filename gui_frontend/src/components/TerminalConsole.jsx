@@ -36,7 +36,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
   };
 
   return (
-    <section className="relative z-10 flex h-[540px] flex-col overflow-hidden rounded-2xl border border-white/10 backdrop-blur-xl shadow-2xl">
+    <section className="relative z-10 flex h-[420px] flex-col overflow-hidden rounded-2xl border border-white/10 backdrop-blur-xl shadow-2xl lg:h-[540px]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 bg-black/40 px-5 py-3">
         <div className="flex items-center gap-2">
@@ -53,7 +53,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
 
         <button
           onClick={onClearLogs}
-          className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-400 hover:border-emerald-500/50 hover:text-white transition-all"
+          className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-400 hover:border-emerald-500/50 hover:text-white transition-all"
         >
           <Trash2 className="h-3.5 w-3.5" />
           {t('clear')}
@@ -61,13 +61,13 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
       </div>
 
       {/* Terminal Output */}
-      <div ref={bodyRef} className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1.5 bg-slate-950/50">
+      <div ref={bodyRef} className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1.5 bg-slate-950/50" role="log" aria-live="polite">
         {logs.length === 0 ? (
-          <div className="text-slate-500 italic">{t('waitingLogs')}</div>
+          <div className="text-slate-400 italic">{t('waitingLogs')}</div>
         ) : (
           logs.map((log, index) => (
             <div key={index} className={`break-all ${getLogClass(log.type)}`}>
-              <span className="text-slate-600 mr-2">[{log.time}]</span>
+              <span className="text-slate-400 mr-2">[{log.time}]</span>
               {log.text}
             </div>
           ))
@@ -82,11 +82,11 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={isRunning ? t('placeholderRunning') : t('placeholderStopped')}
-          className="flex-1 bg-transparent font-mono text-xs text-white outline-none placeholder:text-slate-500"
+          className="flex-1 bg-transparent py-3 font-mono text-xs text-white outline-none placeholder:text-slate-400"
         />
         <button
           type="submit"
-          className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition-colors"
+          className="flex min-h-[44px] items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition-colors"
         >
           <Send className="h-3.5 w-3.5" />
           {t('send')}
