@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import LiquidEther from './components/reactbits/LiquidEther';
 import PixelSnow from './components/reactbits/PixelSnow';
 import Navbar from './components/Navbar';
 import HardwareMeter from './components/HardwareMeter';
@@ -8,9 +7,6 @@ import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
 import UpdateModal from './components/UpdateModal';
 import { useI18n } from './i18n.jsx';
-
-// Paleta de colores del fondo fluido LiquidEther (alineada con el tema del dashboard)
-const LIQUID_COLORS = ['#10b981', '#06b6d4', '#8b5cf6'];
 
 export default function App() {
   const { t } = useI18n();
@@ -174,31 +170,11 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen text-slate-100 p-5 font-sans">
-      {/* Fondo Fluido WebGL LiquidEther (ReactBits) */}
-      <LiquidEther
-        className="fixed inset-0 pointer-events-none z-0"
-        colors={LIQUID_COLORS}
-        mouseForce={20}
-        cursorSize={100}
-        isViscous={false}
-        viscous={30}
-        iterationsViscous={32}
-        iterationsPoisson={32}
-        resolution={0.5}
-        isBounce={false}
-        autoDemo={true}
-        autoSpeed={0.5}
-        autoIntensity={2.2}
-        takeoverDuration={1.5}
-        autoResumeDelay={500}
-        autoRampDuration={1.5}
-      />
-
       {/* Capa de nieve sutil (ReactBits PixelSnow): entre el fondo y el contenido,
           sin bloquear clics, con caída diagonal natural y baja densidad/brillo
           para no competir con las tarjetas del dashboard.
-          IMPORTANTE: el posicionamiento va por style inline (igual que LiquidEther)
-          porque .pixel-snow-container define position:relative sin @layer, y en la
+          IMPORTANTE: el posicionamiento va por style inline porque
+          .pixel-snow-container define position:relative sin @layer, y en la
           cascada CSS eso pisa las utilities de Tailwind (fixed inset-0). */}
       <PixelSnow
         style={{
