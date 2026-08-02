@@ -51,7 +51,16 @@ const STRINGS = {
     actionExecuted: "[GUI] Acción '{action}' ejecutada ({status}).",
     actionError: "[GUI] Error al ejecutar acción '{action}': {err}",
     commandError: '[GUI] Error enviando comando: {err}',
-    serverOff: '[SISTEMA] El servidor está APAGADO. Haz clic en "Iniciar Servidor" primero.'
+    serverOff: '[SISTEMA] El servidor está APAGADO. Haz clic en "Iniciar Servidor" primero.',
+    restore: 'Reestablecer',
+    restoreTitle: 'Reestablecer backup',
+    restoreConfirm: '¿Restaurar este backup?',
+    restoreWarning: 'El mundo actual será reemplazado por este punto de restauración. Esta acción no se puede deshacer.',
+    restoreServerOn: 'El servidor está encendido',
+    restoreServerOnMsg: 'Debes apagar el servidor antes de reestablecer un backup.',
+    restoreSuccess: 'Backup restaurado correctamente',
+    restoreFailed: 'No se pudo restaurar el backup',
+    restoring: 'Restaurando...'
   },
   en: {
     start: 'Start Server',
@@ -99,7 +108,16 @@ const STRINGS = {
     actionExecuted: "[GUI] Action '{action}' executed ({status}).",
     actionError: "[GUI] Error running action '{action}': {err}",
     commandError: '[GUI] Error sending command: {err}',
-    serverOff: '[SYSTEM] The server is OFF. Click "Start Server" first.'
+    serverOff: '[SYSTEM] The server is OFF. Click "Start Server" first.',
+    restore: 'Restore',
+    restoreTitle: 'Restore backup',
+    restoreConfirm: 'Restore this backup?',
+    restoreWarning: 'The current world will be replaced by this restore point. This action cannot be undone.',
+    restoreServerOn: 'The server is running',
+    restoreServerOnMsg: 'You must stop the server before restoring a backup.',
+    restoreSuccess: 'Backup restored successfully',
+    restoreFailed: 'Could not restore the backup',
+    restoring: 'Restoring...'
   }
 };
 

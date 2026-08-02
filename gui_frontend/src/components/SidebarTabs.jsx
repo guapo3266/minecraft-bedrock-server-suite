@@ -5,7 +5,7 @@ import BackupsSidebar from './BackupsSidebar';
 import { UsersMotionIcon, BackupMotionIcon } from './hover/AnimatedIcons';
 import { useI18n } from '../i18n.jsx';
 
-export default function SidebarTabs({ players, backups, onRefreshBackups }) {
+export default function SidebarTabs({ players, backups, onRefreshBackups, isRunning = false }) {
   const [activeTab, setActiveTab] = useState('players');
   const { t } = useI18n();
 
@@ -34,7 +34,7 @@ export default function SidebarTabs({ players, backups, onRefreshBackups }) {
         {activeTab === 'players' ? (
           <PlayersSidebar players={players} />
         ) : (
-          <BackupsSidebar backups={backups} onRefresh={onRefreshBackups} />
+          <BackupsSidebar backups={backups} onRefresh={onRefreshBackups} isRunning={isRunning} />
         )}
       </div>
     </div>
