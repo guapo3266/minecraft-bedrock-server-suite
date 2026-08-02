@@ -25,6 +25,7 @@ import psutil
 import requests
 import zipfile
 import re
+from urllib.parse import urlsplit
 
 # Importar lógica de auto_backup para consultar directorio de backups
 import auto_backup
@@ -49,6 +50,31 @@ def _ensure_local(client_host: str):
     """S1: Solo acepta peticiones desde la propia máquina (loopback)."""
     if client_host not in ("127.0.0.1", "::1"):
         raise HTTPException(status_code=403, detail="Acceso denegado: solo conexiones locales")
+
+_LOCAL_ORIGIN_HOSTS = ("127.0.0.1", "localhost")
+
+def _is_allowed_origin(origin: str | None) -> bool:
+    """S3: True si el header Origin viene de la propia máquina.
+
+    Los navegadores siempre envían Origin en POST y en el handshake de
+    WebSocket. Una página web maliciosa abierta en el navegador del usuario
+    genera conexiones desde 127.0.0.1 (superando _ensure_local), así que el
+    Origin es el único filtro que distingue "la GUI local" de "una web externa".
+    Clientes sin navegador (curl, scripts) no envían Origin: se permiten y
+    queda el filtro de IP como respaldo.
+    """
+    if not origin:
+        return True
+    try:
+        host = urlsplit(origin).hostname
+    except ValueError:
+        return False
+    return host in _LOCAL_ORIGIN_HOSTS
+
+def _check_origin(request: Request):
+    """Rechaza peticiones de navegador cuyo Origin no sea loopback (anti-CSRF)."""
+    if not _is_allowed_origin(request.headers.get("origin")):
+        raise HTTPException(status_code=403, detail="Acceso denegado: origen no permitido")
 
 def _is_safe_zip_entry(filename: str) -> bool:
     """S2: True si la entrada del zip es segura para extraer.
@@ -338,6 +364,7 @@ class CommandRequest(BaseModel):
 @app.post("/api/command")
 async def send_command(req: CommandRequest, request: Request):
     _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
     cmd = req.command.strip()
     if not cmd:
         return {"status": "ok"}
@@ -360,6 +387,7 @@ async def send_command(req: CommandRequest, request: Request):
 @app.post("/api/action/{action_name}")
 async def handle_action(action_name: str, request: Request):
     _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
     action = action_name.lower()
     if action == "start":
         if manager.is_running:
@@ -430,6 +458,9 @@ async def handle_action(action_name: str, request: Request):
             return {"status": "hot_backup_dispatched"}
 
     elif action == "update_bds":
+        # Guard anti doble actualización: dos threads pisándose bds_update.zip corromperían la instalación
+        if manager.update_in_progress:
+            return {"status": "already_updating"}
         # Flag sincrónico para que el frontend sepa que hay una actualización en curso
         manager.update_in_progress = True
         manager.update_status()
@@ -590,6 +621,10 @@ async def list_backups(request: Request):
 async def websocket_endpoint(websocket: WebSocket):
     # S1: solo conexiones desde la propia máquina
     if websocket.client is None or websocket.client.host not in ("127.0.0.1", "::1"):
+        await websocket.close(code=1008)
+        return
+    # S3: rechazar handshakes de navegador con Origin externo (anti-CSRF)
+    if not _is_allowed_origin(websocket.headers.get("origin")):
         await websocket.close(code=1008)
         return
     await websocket.accept()

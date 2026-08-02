@@ -182,3 +182,63 @@ def test_ensure_local_no_other_exceptions(host):
     with pytest.raises(HTTPException) as exc:
         sgs._ensure_local(host)
     assert exc.value.status_code == 403
+
+
+# ─────────────────────────────────────────────────────────────
+# 4) _is_allowed_origin — anti-CSRF: navegadores solo desde loopback
+# ─────────────────────────────────────────────────────────────
+
+# Origen hostil arbitrario: texto, URLs con host externo, malformadas
+origin_text = st.text(alphabet=st.characters(blacklist_categories=("Cc", "Cs")),
+                      min_size=0, max_size=80)
+
+@st.composite
+def local_origin(draw):
+    """Origen legitimo: http(s)://127.0.0.1:puerto o http(s)://localhost:puerto."""
+    scheme = draw(st.sampled_from(["http", "https"]))
+    host = draw(st.sampled_from(["127.0.0.1", "localhost"]))
+    port = draw(st.integers(min_value=1, max_value=65535))
+    return f"{scheme}://{host}:{port}"
+
+
+@given(local_origin())
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+def test_origin_accepts_local_browser(origin):
+    """El navegador de la propia maquina siempre pasa."""
+    assert sgs._is_allowed_origin(origin) is True, f"rechazado: {origin!r}"
+
+
+@given(st.one_of(st.none(), origin_text))
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+def test_origin_consistency(origin):
+    """Consistencia: se acepta sii el hostname parseado es loopback.
+
+    Ausencia de Origin (clientes no-navegador) se permite; el filtro de IP
+    queda como respaldo. Cualquier host que no sea 127.0.0.1/localhost se
+    rechaza; texto malformado sin hostname tambien.
+    """
+    if origin is None or origin == "":
+        assert sgs._is_allowed_origin(origin) is True
+        return
+    try:
+        host = sgs.urlsplit(origin).hostname
+    except ValueError:
+        host = None
+    expected = host in ("127.0.0.1", "localhost")
+    assert sgs._is_allowed_origin(origin) is expected, f"{origin!r} -> host={host!r}"
+
+
+@pytest.mark.parametrize("origin,expected", [
+    (None, True),                                    # curl / scripts locales
+    ("", True),
+    ("http://127.0.0.1:8000", True),                 # GUI React servida por uvicorn
+    ("http://localhost:8000", True),
+    ("http://127.0.0.1:9999", True),                 # puerto distinto, mismo host
+    ("http://evil.example.com", False),              # pagina maliciosa
+    ("https://evil.example.com/steal", False),
+    ("http://192.168.1.10:8000", False),             # otra maquina de la LAN
+    ("http://127.0.0.1.evil.com", False),            # dominio que termina en la IP
+    ("not a url", False),                            # malformado sin hostname
+])
+def test_origin_examples(origin, expected):
+    assert sgs._is_allowed_origin(origin) is expected
