@@ -1,16 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
-import { FolderArchive, RefreshCw, RotateCcw, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { FolderArchive, RefreshCw, XCircle } from 'lucide-react';
+import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon } from './hover/AnimatedStatusIcons';
 import { useI18n } from '../i18n.jsx';
 
 export default function BackupsSidebar({ backups = [], onRefresh, isRunning = false }) {
   const { t } = useI18n();
+  const successIconRef = useRef(null);
+  const alertIconRef = useRef(null);
   const [restoreTarget, setRestoreTarget] = useState(null); // backup a restaurar (confirm)
   const [alertOpen, setAlertOpen] = useState(false); // alerta "apaga el servidor"
   const [result, setResult] = useState(null); // { ok: bool, message: string } tras el intento
+
+  // Reproduce la animacion del check al confirmarse una restauracion exitosa
+  useEffect(() => {
+    if (result?.ok && successIconRef.current) {
+      successIconRef.current.startAnimation();
+    }
+  }, [result]);
+
+  // Pequena atencion al abrir la alerta de servidor encendido
+  useEffect(() => {
+    if (alertOpen && alertIconRef.current) {
+      alertIconRef.current.startAnimation();
+    }
+  }, [alertOpen]);
 
   const handleRestoreClick = (backup) => {
     if (isRunning) {
@@ -82,7 +99,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                     aria-label={t('restore')}
                     className="flex h-7 w-7 items-center justify-center rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/25 hover:border-amber-500/70"
                   >
-                    <RotateCcw className="h-3.5 w-3.5" />
+                    <HistoryCircleIcon size={15} className="text-amber-300" />
                   </motion.button>
                 </div>
               </div>
@@ -113,13 +130,9 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
               className="relative z-10 w-full max-w-sm rounded-2xl border border-rose-500/40 bg-slate-950 p-6 shadow-2xl"
             >
               <div className="flex items-center gap-3">
-                <motion.div
-                  animate={{ scale: [1, 1.12, 1] }}
-                  transition={{ repeat: Infinity, duration: 1.4 }}
-                  className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50"
-                >
-                  <AlertTriangle className="h-6 w-6 text-rose-400" />
-                </motion.div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
+                  <TriangleAlertIcon ref={alertIconRef} size={28} color="#fb7185" />
+                </div>
                 <div>
                   <h3 className="text-base font-bold text-white">{t('restoreServerOn')}</h3>
                   <p className="text-xs text-slate-400">{t('restoreServerOnMsg')}</p>
@@ -155,7 +168,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
             >
               <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/20 border border-amber-500/50">
-                  <RotateCcw className="h-6 w-6 text-amber-400" />
+                  <HistoryCircleIcon size={26} color="#fbbf24" />
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white">{t('restoreConfirm')}</h3>
@@ -177,7 +190,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                       : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
                   }`}
                 >
-                  {result.ok ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                  {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
                   <span className="break-all">{result.message}</span>
                 </div>
               )}
@@ -187,7 +200,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                   {t('cancel')}
                 </ConfirmButton>
                 <ConfirmButton variant="rose" onClick={handleConfirmRestore} className="px-4 py-2">
-                  <RotateCcw className="h-4 w-4" />
+                  <HistoryCircleIcon size={16} />
                   <span>{t('restore')}</span>
                 </ConfirmButton>
               </div>
