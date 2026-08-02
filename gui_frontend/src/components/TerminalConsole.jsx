@@ -61,7 +61,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
       </div>
 
       {/* Terminal Output */}
-      <div ref={bodyRef} className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1.5 bg-slate-950/90">
+      <div ref={bodyRef} className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1.5 bg-slate-950/55">
         {logs.length === 0 ? (
           <div className="text-slate-500 italic">{t('waitingLogs')}</div>
         ) : (
