@@ -1,5 +1,6 @@
 import React from 'react';
 import SpotlightCard from './reactbits/SpotlightCard';
+import AnimatedList from './reactbits/AnimatedList';
 import { FolderArchive, RefreshCw } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
@@ -20,24 +21,26 @@ export default function BackupsSidebar({ backups = [], onRefresh }) {
         </button>
       </div>
 
-      <div className="mt-4 max-h-[220px] overflow-y-auto space-y-2">
+      <div className="mt-4">
         {backups.length === 0 ? (
-          <p className="text-xs italic text-slate-500 text-center py-4">{t('noBackups')}</p>
+          <p className="text-xs italic text-slate-400 text-center py-4">{t('noBackups')}</p>
         ) : (
-          backups.map((b) => (
-            <div
-              key={b.filename}
-              className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 p-2.5 text-xs"
-            >
-              <div className="truncate mr-2">
-                <p className="font-bold text-white truncate">{b.filename}</p>
-                <p className="text-[11px] text-slate-400">{b.date}</p>
+          <AnimatedList
+            items={backups.map((b) => (
+              <div key={b.filename} className="flex items-center justify-between gap-2">
+                <div className="truncate mr-2">
+                  <p className="font-bold text-white truncate">{b.filename}</p>
+                  <p className="text-[11px] text-slate-400">{b.date}</p>
+                </div>
+                <span className="shrink-0 rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-300">
+                  {b.size_mb} MB
+                </span>
               </div>
-              <span className="shrink-0 rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-300">
-                {b.size_mb} MB
-              </span>
-            </div>
-          ))
+            ))}
+            showGradients
+            enableArrowNavigation={false}
+            displayScrollbar
+          />
         )}
       </div>
     </SpotlightCard>
