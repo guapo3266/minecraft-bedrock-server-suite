@@ -59,3 +59,6 @@ gui_frontend/node_modules/
 archived/
 .pytest_cache/
 .hypothesis/
+
+# Auditorias Semgrep (salidas locales, no versionar)
+static_analysis_semgrep_*/
