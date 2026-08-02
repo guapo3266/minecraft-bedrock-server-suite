@@ -36,7 +36,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
   };
 
   return (
-    <section className="relative z-10 flex h-[540px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/80 backdrop-blur-xl shadow-2xl">
+    <section className="relative z-10 flex h-[540px] flex-col overflow-hidden rounded-2xl border border-white/10 backdrop-blur-xl shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 bg-black/40 px-5 py-3">
         <div className="flex items-center gap-2">
@@ -61,7 +61,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
       </div>
 
       {/* Terminal Output */}
-      <div ref={bodyRef} className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1.5 bg-slate-950/55">
+      <div ref={bodyRef} className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1.5 bg-slate-950/50">
         {logs.length === 0 ? (
           <div className="text-slate-500 italic">{t('waitingLogs')}</div>
         ) : (
