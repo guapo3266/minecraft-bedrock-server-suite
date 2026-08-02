@@ -121,6 +121,40 @@ def parse_save_query_files(line):
 # ═══════════════════════════════════════════════════════════════
 # PROCESO WORKER: Compresión en E/S aislada
 # ═══════════════════════════════════════════════════════════════
+class _FileCancelEvent:
+    """Sustituto de multiprocessing.Event para la senal de cancelacion.
+
+    La senal via ARCHIVO (no via semaforo compartido): el worker de compresion
+    ahora se lanza con subprocess (el spawn de multiprocessing se colgaba
+    50-120s en el bootstrap con el wrapper + BDS), y un hijo subprocess no
+    puede compartir un Event de multiprocessing. La API es identica a
+    multiprocessing.Event (is_set/set/clear), asi que los puntos de
+    cancelacion existentes no cambian.
+    """
+    def __init__(self, path):
+        self.path = path
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+
+    def is_set(self):
+        return os.path.exists(self.path)
+
+    def set(self):
+        try:
+            open(self.path, "w").close()
+        except Exception:
+            pass
+
+    def clear(self):
+        try:
+            os.remove(self.path)
+        except Exception:
+            pass
+
+
 def _run_backup_process(trigger_name, file_snapshot, cancel_event, result_queue, external_lock):
     """Función de nivel superior (picklable) para ejecutar en un proceso aislado."""
     import auto_backup
@@ -166,21 +200,54 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
     global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock
     try:
 
-        print("[Worker] Iniciando compresión de archivos en proceso separado (multiprocessing)...")
+        print("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...")
 
-        ctx = multiprocessing.get_context("spawn")
-        queue = ctx.Queue()
-    
-        comp_proc = ctx.Process(
-            target=_run_backup_process, 
-            args=("periodico", file_snapshot, cancel_event, queue, backup_ipc_lock),
-            daemon=True
-        )
+        import pickle as _pickle
+        _base = os.path.dirname(os.path.abspath(__file__))
+        _stamp = int(time.time() * 1000)
+        _tmpdir = os.environ.get("TEMP", ".")
+        _snap_path = os.path.join(_tmpdir, "bw_snap_%d.pkl" % _stamp)
+        _marker = os.path.join(_tmpdir, "bw_cancel_%d.mark" % _stamp)
+        _result = os.path.join(_tmpdir, "bw_result_%d.pkl" % _stamp)
+        _worker = os.path.join(_base, "backup_worker.py")
+
+        try:
+            with open(_snap_path, "wb") as _f:
+                _pickle.dump(file_snapshot, _f)
+            # Si el evento de cancelacion es el nuevo _FileCancelEvent, usar SU
+            # archivo como marker (asi los puntos de cancelacion existentes,
+            # que llaman a .set(), cancelan de verdad al worker).
+            if cancel_event is not None and hasattr(cancel_event, "path"):
+                _marker = cancel_event.path
+            comp_proc = subprocess.Popen(
+                [sys.executable, "-u", _worker, _snap_path, _marker, _result],
+                cwd=_base,
+                stdin=subprocess.DEVNULL,
+            )
+            # Shims para compatibilidad con el codigo existente
+            # (_force_kill_compress_process usa is_alive/kill/join).
+            comp_proc.is_alive = lambda: comp_proc.poll() is None
+            comp_proc.join = lambda timeout=None: comp_proc.wait(timeout=timeout)
+        except Exception as e:
+            print(f"[Worker] [WARN] No se pudo lanzar el worker: {e}")
+            for _p in (_snap_path, _marker, _result):
+                try:
+                    os.remove(_p)
+                except Exception:
+                    pass
+            with state_lock:
+                backup_in_progress = False
+                backup_dispatched = False
+                save_query_ready_seen = False
+                backup_cancel_event = None
+                watchdog_fired = True
+                last_backup_completed_time = time.time()
+            send_command("save resume")
+            return
 
         with state_lock:
             active_compress_process = comp_proc
-        
-        comp_proc.start()
+
         comp_proc.join(timeout=WORKER_COMPRESSION_TIMEOUT_SEC)
 
         # --- CASO A: Compresión excedió el tiempo máximo (Timeout interno) ---
@@ -206,7 +273,12 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 save_query_ready_seen = False
                 backup_cancel_event = None
                 last_backup_completed_time = time.time()
-            
+
+            for _p in (_snap_path, _marker, _result):
+                try:
+                    os.remove(_p)
+                except Exception:
+                    pass
             return
 
         # --- CASO B: Compresión terminó a tiempo ---
@@ -214,10 +286,15 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             active_compress_process = None
 
         try:
-            result = queue.get(timeout=2)  # Fix: timeout evita race condition con feeder thread interno
+            with open(_result, "rb") as _f:
+                result = _pickle.load(_f)
         except Exception:
-            result = {"zip": None, "error": "El proceso terminó sin devolver un resultado"}
-
+            result = {"zip": None, "error": "El proceso termino sin devolver un resultado"}
+        for _p in (_snap_path, _marker, _result):
+            try:
+                os.remove(_p)
+            except Exception:
+                pass
         if result["error"]:
             print(f"[Worker] [ERROR] Falló la compresión: {result['error']}")
         elif not result["zip"]:
@@ -421,7 +498,7 @@ def backup_scheduler():
                             snapshot_copy = list(last_save_snapshot)
                             backup_dispatched = True
                             save_query_ready_seen = False
-                            backup_cancel_event = multiprocessing.Event()
+                            backup_cancel_event = _FileCancelEvent(os.path.join(os.environ.get("TEMP", "."), "bw_cancel_%d.mark" % int(time.time() * 1000)))
                             snapshot_len = len(snapshot_copy)
                             worker_to_start = threading.Thread(
                                 target=execute_backup_worker,
