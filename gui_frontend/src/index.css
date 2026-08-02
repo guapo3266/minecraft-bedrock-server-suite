@@ -19,6 +19,24 @@
     min-height: 100vh;
     overflow-x: hidden;
   }
+
+  /* Anillo de foco visible consistente (accesible por teclado) */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/* Reduce movimiento para usuarios que lo prefieran (WCAG 2.2.2) */
+@media (prefers-reduced-motion: reduce) {
+  .shiny-text,
+  .animate-pulse,
+  .animate-bounce,
+  .animate-spin,
+  .animate-ping {
+    animation: none !important;
+  }
 }
 
 /* ReactBits ShinyText Keyframe Animation */

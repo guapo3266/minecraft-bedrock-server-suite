@@ -26,7 +26,7 @@ export default function Navbar({ status, onOpenUpdate, latency = null }) {
   }
 
   return (
-    <header className="relative z-10 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/65 px-6 py-4 backdrop-blur-xl shadow-2xl">
+    <header className="relative z-10 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-900/65 px-4 py-4 backdrop-blur-xl shadow-2xl sm:px-6">
       <div className="flex items-center gap-4">
         <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
           <ServerMotionIcon className="h-6 w-6 text-emerald-400" />
@@ -39,7 +39,7 @@ export default function Navbar({ status, onOpenUpdate, latency = null }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
         <button
           onClick={onOpenUpdate}
           className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20 transition-all shadow-lg"
@@ -52,13 +52,13 @@ export default function Navbar({ status, onOpenUpdate, latency = null }) {
         <div className="flex items-center rounded-xl border border-white/10 bg-black/40 p-0.5 font-mono text-xs font-bold">
           <button
             onClick={() => setLang('es')}
-            className={`rounded-lg px-2.5 py-1.5 transition-all ${lang === 'es' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
+            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition-all ${lang === 'es' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
           >
             ES
           </button>
           <button
             onClick={() => setLang('en')}
-            className={`rounded-lg px-2.5 py-1.5 transition-all ${lang === 'en' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
+            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition-all ${lang === 'en' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
           >
             EN
           </button>
