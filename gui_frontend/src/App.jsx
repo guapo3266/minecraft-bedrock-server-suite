@@ -223,6 +223,7 @@ export default function App() {
               players={status.players}
               backups={backups}
               onRefreshBackups={fetchBackups}
+              isRunning={status.running}
             />
           </aside>
         </main>

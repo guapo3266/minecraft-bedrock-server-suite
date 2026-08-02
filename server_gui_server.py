@@ -18,6 +18,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Requ
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from contextlib import asynccontextmanager
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 import uvicorn
 
@@ -615,6 +616,46 @@ async def list_backups(request: Request):
             "date": mtime
         })
     return {"backups": backups_info}
+
+
+@app.post("/api/restore")
+async def restore_backup(request: Request):
+    """Restaura un backup al mundo. Rechaza si el servidor esta encendido.
+
+    La restauracion (I/O pesada) se ejecuta en un threadpool para no
+    bloquear el event loop de los WebSockets.
+    """
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cuerpo JSON invalido")
+    filename = (body or {}).get("filename", "")
+
+    if not filename or os.path.basename(filename) != filename:
+        raise HTTPException(status_code=400, detail="Nombre de backup invalido")
+
+    if manager.is_running:
+        raise HTTPException(
+            status_code=409,
+            detail="Debes apagar el servidor antes de reestablecer un backup",
+        )
+
+    manager.add_log(f"[GUI] Restaurando backup: {filename}", "backup")
+    try:
+        restored_path = await run_in_threadpool(auto_backup.restore_backup, filename)
+    except FileNotFoundError as e:
+        manager.add_log(f"[GUI] Error al restaurar {filename}: {e}", "error")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        manager.add_log(f"[GUI] Error al restaurar {filename}: {e}", "error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    manager.add_log(f"[GUI] Backup restaurado: {os.path.basename(restored_path)}", "backup")
+    manager.last_backup_time = time.strftime("%H:%M:%S")
+    return {"status": "ok", "backup": filename}
 
 
 @app.websocket("/ws")

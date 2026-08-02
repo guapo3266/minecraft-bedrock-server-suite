@@ -3,6 +3,7 @@ import datetime
 import zipfile
 import glob
 import multiprocessing
+import shutil
 
 # Lock por defecto (multiprocessing safe)
 _backup_lock = multiprocessing.Lock()
@@ -322,6 +323,75 @@ def rotate_backups():
                 
     if deleted_count > 0:
         print(f"[*] Limpieza completada. Backups retenidos: {len(keepers)}.")
+
+def _is_safe_zip_entry(filename: str) -> bool:
+    """True si la entrada del zip es segura para extraer (anti zip-slip).
+
+    Rechaza rutas absolutas, cualquier segmento '..' (traversal) y prefijos
+    de unidad/ADS tipo 'C:'.
+    """
+    norm = filename.replace("\\", "/")
+    if norm.startswith("/") or os.path.isabs(norm):
+        return False
+    segs = norm.split("/")
+    if any(s == ".." for s in segs):
+        return False
+    if ":" in segs[0]:
+        return False
+    return True
+
+
+def restore_backup(filename: str) -> str:
+    """Restaura un backup ZIP al mundo. Requiere servidor APAGADO.
+
+    - Valida el ZIP (zip-slip + CRC) ANTES de tocar el mundo.
+    - Resguarda el mundo actual en `WORLD_DIR.bak`.
+    - Si la extraccion falla, hace rollback automatico del resguardo.
+    Devuelve la ruta del backup restaurado.
+    """
+    if os.path.basename(filename) != filename:
+        raise ValueError("Nombre de backup invalido")
+    zip_path = os.path.join(BACKUP_DIR, filename)
+    if not os.path.isfile(zip_path):
+        raise FileNotFoundError("Backup no encontrado")
+
+    # 1. Validar el ZIP antes de tocar el mundo
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for entry in zf.infolist():
+            if not _is_safe_zip_entry(entry.filename):
+                raise ValueError(f"Entrada insegura en el backup: {entry.filename}")
+        bad = zf.testzip()
+        if bad is not None:
+            raise ValueError(f"Backup corrupto (CRC fallido): {bad}")
+
+    bak_dir = WORLD_DIR + ".bak"
+
+    # 2. Resguardar el mundo actual (si existe)
+    if os.path.exists(WORLD_DIR):
+        if os.path.exists(bak_dir):
+            shutil.rmtree(bak_dir, ignore_errors=True)
+        os.rename(WORLD_DIR, bak_dir)
+    os.makedirs(WORLD_DIR, exist_ok=True)
+
+    # 3. Extraer con doble chequeo de seguridad
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for entry in zf.infolist():
+                if not _is_safe_zip_entry(entry.filename):
+                    raise ValueError(f"Entrada insegura: {entry.filename}")
+                zf.extract(entry, WORLD_DIR)
+    except Exception as exc:
+        # Rollback: recuperar el mundo anterior
+        shutil.rmtree(WORLD_DIR, ignore_errors=True)
+        if os.path.exists(bak_dir):
+            os.rename(bak_dir, WORLD_DIR)
+        raise RuntimeError(f"Fallo la extraccion: {exc}") from exc
+
+    # 4. Limpieza del resguardo si todo salio bien
+    if os.path.exists(bak_dir):
+        shutil.rmtree(bak_dir, ignore_errors=True)
+    return zip_path
+
 
 if __name__ == "__main__":
     create_backup("inicio")
