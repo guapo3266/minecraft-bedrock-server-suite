@@ -4,8 +4,30 @@ import zipfile
 import shutil
 import datetime
 
-WORLD_DIR = r"C:\Users\guapo\Downloads\Servidores_Minecraft\Servidor de Guapo\worlds\Bedrock level"
-BACKUP_DIR = r"C:\Users\guapo\Downloads\Backups_Minecraft\auto_backups"
+# Rutas RESUELTAS desde la propia ubicacion del script: cada instalacion
+# restaura SU mundo. (Antes estaban hardcodeadas a "Servidor de Guapo", de
+# modo que ejecutar este script desde otra instalacion sobrescribia el mundo
+# de la vecina.)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _world_name():
+    """Nombre del nivel desde server.properties (misma regla que auto_backup)."""
+    props_path = os.path.join(BASE_DIR, "server.properties")
+    if os.path.exists(props_path):
+        try:
+            with open(props_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("level-name="):
+                        return line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+    return "Bedrock level"
+
+
+WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())
+BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups"))
 
 
 def _is_safe_zip_entry(filename: str) -> bool:

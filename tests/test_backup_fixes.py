@@ -357,6 +357,140 @@ def test_snapshot_retry_limite_abandona_hasta_intervalo_normal():
         )
 
 
+# ── 11) update con staging/rollback y locks de operacion ──────────────────────
+def test_apply_staged_update_exito_con_preservados():
+    """El staging reemplaza los binarios pero respeta los archivos/dirs
+    preservados (server.properties, worlds/)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = os.path.join(tmp, "base")
+        staging = os.path.join(tmp, "staging")
+        os.makedirs(os.path.join(base, "worlds"))
+        os.makedirs(os.path.join(staging, "behavior_packs"))
+        for p, content in [
+            (os.path.join(base, "a.dll"), "old-a"),
+            (os.path.join(base, "server.properties"), "keep-me"),
+            (os.path.join(base, "worlds", "level.dat"), "world"),
+        ]:
+            with open(p, "w") as f:
+                f.write(content)
+        for p, content in [
+            (os.path.join(staging, "a.dll"), "new-a"),
+            (os.path.join(staging, "behavior_packs", "pack.json"), "new-pack"),
+        ]:
+            with open(p, "w") as f:
+                f.write(content)
+
+        sgs._apply_staged_update(
+            staging, base,
+            {"server.properties"}, {"worlds"},
+        )
+
+        assert open(os.path.join(base, "a.dll")).read() == "new-a"
+        assert open(os.path.join(base, "behavior_packs", "pack.json")).read() == "new-pack"
+        assert open(os.path.join(base, "server.properties")).read() == "keep-me"
+        assert open(os.path.join(base, "worlds", "level.dat")).read() == "world"
+        assert not os.path.exists(staging)
+        assert not [d for d in os.listdir(base) if d.startswith("bds_update_prev_")]
+
+
+def test_apply_staged_update_rollback_restaura_instalacion(monkeypatch):
+    """Un fallo a mitad de la aplicacion restaura los binarios anteriores:
+    la instalacion nunca queda con versiones mezcladas."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = os.path.join(tmp, "base")
+        staging = os.path.join(tmp, "staging")
+        os.makedirs(base)
+        os.makedirs(staging)
+        for p, content in [
+            (os.path.join(base, "a.dll"), "old-a"),
+            (os.path.join(base, "b.dll"), "old-b"),
+        ]:
+            with open(p, "w") as f:
+                f.write(content)
+        for p, content in [
+            (os.path.join(staging, "a.dll"), "new-a"),
+            (os.path.join(staging, "b.dll"), "new-b"),
+        ]:
+            with open(p, "w") as f:
+                f.write(content)
+
+        real_replace = os.replace
+
+        def flaky(src, dst):
+            if "b.dll" in str(dst):
+                raise OSError("fallo simulado a mitad de la aplicacion")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", flaky)
+
+        with pytest.raises(OSError):
+            sgs._apply_staged_update(staging, base, set(), set())
+
+        # Rollback: TODO vuelve al estado anterior, sin mezcla de versiones
+        assert open(os.path.join(base, "a.dll")).read() == "old-a"
+        assert open(os.path.join(base, "b.dll")).read() == "old-b"
+        assert not [d for d in os.listdir(base) if d.startswith("bds_update_prev_")]
+
+
+def test_start_rechaza_busy_con_operacion_en_curso():
+    """Si una restauracion/actualizacion tiene op_lock, el start se rechaza
+    con 'busy' (no espera ni lanza un segundo wrapper)."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    sgs.manager.is_running = False
+    try:
+        sgs.manager.op_lock.acquire()  # simula restore/update en curso
+        try:
+            with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+                resp = client.post("/api/action/start")
+                assert resp.status_code == 200
+                assert resp.json()["status"] == "busy"
+        finally:
+            sgs.manager.op_lock.release()
+    finally:
+        sgs.manager.is_running = False
+
+
+def test_doble_start_solo_lanza_un_wrapper(monkeypatch):
+    """Dos solicitudes de start seguidas no lanzan dos wrappers: la segunda
+    ve el estado marcado atomicamente y responde already_running."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    calls = {"n": 0}
+
+    def fake_run_wrapper():
+        calls["n"] += 1
+
+    monkeypatch.setattr(sgs, "run_wrapper_thread", fake_run_wrapper)
+    sgs.manager.is_running = False
+    try:
+        with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+            r1 = client.post("/api/action/start")
+            r2 = client.post("/api/action/start")
+        assert r1.json()["status"] == "starting", r1.text
+        assert r2.json()["status"] == "already_running", r2.text
+        assert calls["n"] == 1, f"se lanzo el wrapper {calls['n']} veces"
+    finally:
+        sgs.manager.is_running = False
+
+
+# ── 12) restore_backup.py: rutas relativas a la propia instalacion ────────────
+def test_restore_backup_rutas_relativas():
+    """restore_backup.py resuelve el mundo desde su propia ubicacion: no puede
+    sobrescribir la instalacion vecina (bug de las rutas hardcodeadas)."""
+    import restore_backup as rb
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    expected_world = os.path.join(project_root, "worlds", rb._world_name())
+    assert rb.WORLD_DIR == expected_world, (
+        f"WORLD_DIR={rb.WORLD_DIR} no apunta a esta instalacion"
+    )
+    assert os.path.isabs(rb.WORLD_DIR)
+    assert "Servidor de Guapo" not in rb.WORLD_DIR
+    assert rb.BACKUP_DIR.endswith(os.path.join("Backups_Minecraft", "auto_backups"))
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v", "--tb=short"])

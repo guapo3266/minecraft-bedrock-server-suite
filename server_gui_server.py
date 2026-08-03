@@ -13,6 +13,8 @@ import asyncio
 import threading
 import subprocess
 import glob
+import shutil
+import tempfile
 from typing import Set
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -185,6 +187,12 @@ class ServerManager:
         self.wrapper_exit_event.set()  # Sin wrapper en ejecución al inicio
         self.active_websockets: Set[WebSocket] = set()
         self.loop = None
+        # Exclusion mutua de operaciones que tocan servidor/mundo/instalacion:
+        # start, restore y update no pueden solaparse (evita lanzar BDS mientras
+        # se reemplaza el mundo o los binarios). El start lo toma sin bloqueo
+        # (rechaza con 'busy' si hay contención); restore/update lo toman
+        # bloqueante dentro de sus hilos.
+        self.op_lock = threading.Lock()
 
     def add_log(self, text: str, log_type: str = "info"):
         timestamp = time.strftime("%H:%M:%S")
@@ -413,8 +421,18 @@ async def handle_action(action_name: str, request: Request):
     _check_origin(request)
     action = action_name.lower()
     if action == "start":
-        if manager.is_running:
-            return {"status": "already_running"}
+        # Chequeo + marcado de estado ATOMICOS bajo op_lock (sin bloqueo: si
+        # hay una restauracion o actualizacion en curso, se rechaza con 'busy'
+        # en vez de esperar). Dos requests simultaneos ya no pueden ver ambos
+        # is_running == False y lanzar dos wrappers.
+        if not manager.op_lock.acquire(blocking=False):
+            return {"status": "busy", "message": "Operación en curso (restauración/actualización)"}
+        try:
+            if manager.is_running:
+                return {"status": "already_running"}
+            manager.is_running = True  # el hilo lo reafirma al arrancar
+        finally:
+            manager.op_lock.release()
         threading.Thread(target=run_wrapper_thread, daemon=True).start()
         return {"status": "starting"}
 
@@ -553,16 +571,30 @@ async def handle_action(action_name: str, request: Request):
                 preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
                 preserve_dirs = {"worlds", "backups", "web", "gui_frontend"}
 
-                with zipfile.ZipFile(temp_zip, "r") as z:
-                    for item in z.infolist():
-                        name = item.filename
-                        if any(name.startswith(d + "/") for d in preserve_dirs) or name in preserve_files:
-                            continue
-                        # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
-                        if not _is_safe_zip_entry(name):
-                            manager.add_log(f"[Actualizador BDS] Entrada insegura en el zip ignorada: {name}", "error")
-                            continue
-                        z.extract(item, BASE_DIR)
+                # Staging + aplicacion bajo op_lock: nunca se toca la
+                # instalacion con un zip a medias, y un 'start' simultaneo no
+                # puede lanzar BDS mientras se reemplazan los binarios.
+                with manager.op_lock:
+                    staging_dir = os.path.join(BASE_DIR, "bds_update_staging")
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+                    os.makedirs(staging_dir, exist_ok=True)
+                    with zipfile.ZipFile(temp_zip, "r") as z:
+                        for item in z.infolist():
+                            name = item.filename
+                            # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
+                            if not _is_safe_zip_entry(name):
+                                manager.add_log(f"[Actualizador BDS] Entrada insegura en el zip ignorada: {name}", "error")
+                                continue
+                            z.extract(item, staging_dir)
+
+                    if not os.path.exists(os.path.join(staging_dir, "bedrock_server.exe")):
+                        raise RuntimeError(
+                            "El zip descargado no contiene bedrock_server.exe; se aborta sin tocar la instalacion."
+                        )
+
+                    # Aplica con rollback: si algo falla a mitad, la instalacion
+                    # vuelve a los binarios anteriores (sin versiones mezcladas).
+                    _apply_staged_update(staging_dir, BASE_DIR, preserve_files, preserve_dirs)
 
                 manager.add_log("[Actualizador BDS] ¡Servidor actualizado exitosamente a la versión oficial de Mojang!", "system")
             except Exception as e:
@@ -626,6 +658,67 @@ async def check_update(request: Request):
 _CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
 
 
+def _is_preserved_update_path(rel, preserve_files, preserve_dirs):
+    """True si una ruta relativa del zip de actualizacion no debe reemplazarse."""
+    rel_norm = rel.replace("\\", "/")
+    return rel_norm in preserve_files or any(
+        rel_norm.startswith(d + "/") for d in preserve_dirs
+    )
+
+
+def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
+    """Aplica un staging extraido a base_dir con rollback ante fallo.
+
+    Fase 1: mueve los archivos actuales que seran reemplazados a un dir
+    temporal (mismo volumen). Fase 2: mueve los nuevos desde el staging
+    (os.replace, atomico por archivo). Si algo falla en la fase 2, se restauran
+    los archivos resguardados y se eliminan los parcialmente aplicados: la
+    instalacion nunca queda con binarios de versiones mezcladas.
+    """
+    prev_dir = tempfile.mkdtemp(prefix="bds_update_prev_", dir=base_dir)
+    applied = []  # rutas relativas ya movidas del staging al destino
+    try:
+        # Fase 1: resguardar los actuales que seran reemplazados
+        for root, _dirs, names in os.walk(staging_dir):
+            for n in names:
+                rel = os.path.relpath(os.path.join(root, n), staging_dir)
+                if _is_preserved_update_path(rel, preserve_files, preserve_dirs):
+                    continue
+                target = os.path.join(base_dir, rel)
+                if os.path.isfile(target):
+                    prev_target = os.path.join(prev_dir, rel)
+                    os.makedirs(os.path.dirname(prev_target), exist_ok=True)
+                    os.replace(target, prev_target)
+
+        # Fase 2: aplicar los nuevos
+        for root, _dirs, names in os.walk(staging_dir):
+            for n in names:
+                rel = os.path.relpath(os.path.join(root, n), staging_dir)
+                if _is_preserved_update_path(rel, preserve_files, preserve_dirs):
+                    continue
+                target = os.path.join(base_dir, rel)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                os.replace(os.path.join(root, n), target)
+                applied.append(rel)
+    except Exception:
+        # Rollback: quitar lo parcialmente aplicado y restaurar lo resguardado
+        for rel in applied:
+            try:
+                os.remove(os.path.join(base_dir, rel))
+            except OSError:
+                pass
+        for root, _dirs, names in os.walk(prev_dir):
+            for n in names:
+                rel = os.path.relpath(os.path.join(root, n), prev_dir)
+                target = os.path.join(base_dir, rel)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                os.replace(os.path.join(root, n), target)
+        raise
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        shutil.rmtree(prev_dir, ignore_errors=True)
+
+
 def _list_backup_files(backup_dir):
     """Zips de backup visibles para restauracion.
 
@@ -686,15 +779,16 @@ async def restore_backup(request: Request):
     manager.add_log(f"[GUI] Restaurando backup: {filename}", "backup")
 
     def _restore_with_running_guard():
-        # Re-chequeo dentro del threadpool: el servidor pudo encenderse entre
-        # el chequeo del endpoint y la ejecucion real de la restauracion
-        # (TOCTOU). Restaurar sobre un mundo vivo corromperia ambos.
-        if manager.is_running:
-            raise HTTPException(
-                status_code=409,
-                detail="El servidor se encendió durante la restauración; operación cancelada",
-            )
-        return auto_backup.restore_backup(filename)
+        # Re-chequeo ATOMICO dentro del threadpool: op_lock excluye a start y
+        # update, y bajo el lock se verifica is_running. Sin esto, un inicio
+        # simultaneo podria lanzar BDS mientras se reemplaza el mundo.
+        with manager.op_lock:
+            if manager.is_running:
+                raise HTTPException(
+                    status_code=409,
+                    detail="El servidor se encendió durante la restauración; operación cancelada",
+                )
+            return auto_backup.restore_backup(filename)
 
     try:
         restored_path = await run_in_threadpool(_restore_with_running_guard)
