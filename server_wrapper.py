@@ -57,7 +57,8 @@ last_backup_completed_time = 0          # Cuándo terminó el último ciclo de b
 save_hold_timestamp = 0                 # Cuándo se envió save hold (para el watchdog)
 backup_thread = None                    # Referencia al hilo worker actual
 active_compress_process = None          # Referencia al proceso de compresión para aniquilación
-backup_ipc_lock = multiprocessing.Lock() # Lock IPC compartido entre proceso maestro e hijo
+backup_ipc_lock = multiprocessing.Lock() # Lock IPC para backups frios del propio wrapper (inicio/cierre);
+# el worker subprocess NO lo comparte (usa el lock interno de auto_backup)
 last_save_snapshot = []                 # Lista de tuplas (rel_path, byte_length) parseadas de save query
 save_query_ready_seen = False           # True si llegó "Data saved" y falta capturar la lista de archivos
 backup_cancel_event = None              # Señal cooperativa para cancelar la compresión actual
