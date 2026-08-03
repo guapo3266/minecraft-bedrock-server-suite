@@ -50,7 +50,11 @@ def _main():
         )
         result = {"zip": zip_path, "error": None}
     except Exception as e:
-        result = {"zip": None, "error": str(e)}
+        # create_backup en modo snapshot SIEMPRE lanza en un fallo (nunca
+        # devuelve False); el prefijo "Snapshot:" anota el contexto para que
+        # el wrapper distinga (reintento inmediato) de los fallos operativos
+        # (cancelacion, limite de tamano) que no merecen reintento.
+        result = {"zip": None, "error": "Snapshot: %s" % e}
 
     try:
         with open(result_path, "wb") as f:

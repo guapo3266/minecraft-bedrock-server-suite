@@ -126,13 +126,22 @@ def parse_save_query_files(line):
 
 
 def _is_snapshot_failure(error_msg):
-    """True si el error del worker indica un snapshot incompleto o invalido.
+    """True si el error del worker merece reintento inmediato del ciclo caliente.
 
-    Estos fallos merecen reintento inmediato del ciclo caliente (el siguiente
-    `save query` puede llegar completo); el resto de errores (E/S, lock, disco)
-    esperan el intervalo normal de backup.
+    El worker anota los fallos del modo snapshot con el prefijo "Snapshot:"
+    (create_backup en modo snapshot siempre lanza). Se excluyen los fallos
+    operativos que un reintento no va a resolver: cancelacion (shutdown en
+    curso) y exceso del limite de tamano. El resto de errores (E/S, lock,
+    disco) esperan el intervalo normal de backup.
     """
-    return bool(error_msg) and "snapshot" in error_msg.lower()
+    msg = (error_msg or "").lower()
+    if "snapshot" not in msg:
+        return False
+    if "cancelado" in msg:
+        return False
+    if "excede el limite" in msg:
+        return False
+    return True
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -253,12 +253,15 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             print(f"[WARN] Fallo en rotacion de backups: {e}")
     except Exception as e:
         print(f"[ERROR] No se pudo crear el backup: {e}")
-        if isinstance(e, RuntimeError) and "Snapshot" in str(e):
-            # Fallo de VALIDACION de snapshot (vacio, sin level.dat, incompleto,
-            # truncado, desincronizado): es un error del caller, no un fallo
-            # operativo. Se propaga para que el wrapper pueda reintentar el ciclo
-            # caliente en vez de esperar el intervalo completo. El finally
-            # (limpieza de parciales + release del lock) corre igualmente.
+        if file_snapshot is not None:
+            # Modo snapshot: CUALQUIER fallo se propaga (no solo los RuntimeError
+            # de validacion). Un FileNotFoundError/OSError durante la lectura
+            # (archivo borrado por BDS entre save query y copia) tambien es un
+            # snapshot desincronizado y merece reintento. Devolver False aqui
+            # perderia el motivo: backup_worker lo convierte en
+            # {"zip": False, "error": None} y el wrapper no reintenta. El
+            # finally (limpieza + release del lock) corre igualmente; el modo
+            # tradicional (file_snapshot=None) conserva su contrato (False).
             raise
         return False
     finally:
