@@ -41,6 +41,9 @@ FINAL_BACKUP_LOCK_WAIT_SEC = 5          # Espera mínima por el lock (ya no hay 
 FINAL_BACKUP_TIMEOUT_SEC = 240          # Max segundos para el backup de cierre (espera + compresión)
 WORKER_COMPRESSION_TIMEOUT_SEC = 120    # Tiempo máximo para la compresión del backup
 WORKER_JOIN_ON_SHUTDOWN_SEC = 135       # Mayor que el timeout del worker para evitar colisión
+RETRY_BACKOFF_BASE_SEC = 5              # Backoff inicial entre reintentos de snapshot
+RETRY_BACKOFF_MAX_SEC = 60              # Tope del backoff exponencial
+MAX_CONSECUTIVE_SNAPSHOT_RETRIES = 10   # Abandono del reintento hasta el proximo intervalo normal
 
 # ═══════════════════════════════════════════════════════════════
 # ESTADO GLOBAL (protegido por state_lock)
@@ -64,6 +67,8 @@ save_query_ready_seen = False           # True si llegó "Data saved" y falta ca
 backup_cancel_event = None              # Señal cooperativa para cancelar la compresión actual
 expecting_list_names = False            # True si se recibió encabezado 'There are X players' y falta leer nombres
 last_snapshot_update_time = 0.0         # Timestamp de la última adición a last_save_snapshot
+snapshot_retry_count = 0                # Reintentos consecutivos por snapshot incompleto
+snapshot_retry_at = 0.0                 # Timestamp del proximo reintento permitido (0 = no programado)
 
 server_process = None
 
@@ -142,6 +147,16 @@ def _is_snapshot_failure(error_msg):
     if "excede el limite" in msg:
         return False
     return True
+
+
+def _snapshot_retry_delay(attempt):
+    """Backoff exponencial entre reintentos de snapshot: 5, 10, 20, ... 60 s tope.
+
+    `attempt` es el numero de reintentos consecutivos ya fallidos (1-based).
+    Acota el ciclo cuando BDS responde con snapshots incompletos de forma
+    sostenida (el watchdog solo limita cuando BDS NO responde).
+    """
+    return min(RETRY_BACKOFF_MAX_SEC, RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1)))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -223,7 +238,7 @@ def _force_kill_compress_process(proc):
 # ═══════════════════════════════════════════════════════════════
 def execute_backup_worker(file_snapshot=None, cancel_event=None):
     """Hilo efímero que orquesta el proceso de compresión de Bedrock."""
-    global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock
+    global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock, snapshot_retry_count, snapshot_retry_at
     try:
 
         print("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...")
@@ -269,6 +284,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 backup_cancel_event = None
                 watchdog_fired = True
                 last_backup_completed_time = time.time()
+                snapshot_retry_count = 0
+                snapshot_retry_at = 0.0
             send_command("save resume")
             return
 
@@ -300,6 +317,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 save_query_ready_seen = False
                 backup_cancel_event = None
                 last_backup_completed_time = time.time()
+                snapshot_retry_count = 0
+                snapshot_retry_at = 0.0
 
             for _p in (_snap_path, _marker, _result):
                 try:
@@ -349,11 +368,27 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             save_query_ready_seen = False
             backup_cancel_event = None
             if retry_soon:
-                # Snapshot incompleto: reintentar el ciclo caliente en el proximo
-                # tick (1s) en vez de esperar los 30 min del intervalo normal.
-                print("[Worker] Snapshot incompleto: se reintentara el ciclo caliente de inmediato.")
-                last_backup_completed_time = 0
+                # Snapshot incompleto: reintentar con backoff exponencial
+                # (5, 10, 20, ... 60 s). Sin backoff, un BDS que responde
+                # continuamente con snapshots incompletos repetiria el ciclo
+                # cada ~10 s indefinidamente; el watchdog solo limita cuando
+                # BDS NO responde. Tras MAX intentos consecutivos se abandona
+                # hasta el proximo intervalo normal de 30 min.
+                snapshot_retry_count += 1
+                if snapshot_retry_count >= MAX_CONSECUTIVE_SNAPSHOT_RETRIES:
+                    print(f"[Worker] {snapshot_retry_count} reintentos consecutivos de snapshot fallidos; "
+                          "se espera el proximo intervalo normal de backup.")
+                    snapshot_retry_count = 0
+                    snapshot_retry_at = 0.0
+                else:
+                    delay = _snapshot_retry_delay(snapshot_retry_count)
+                    snapshot_retry_at = time.time() + delay
+                    print(f"[Worker] Snapshot incompleto: reintento en {delay}s (intento {snapshot_retry_count}).")
+                last_backup_completed_time = time.time()
             else:
+                # Exito o fallo operativo: el patron de snapshot termina.
+                snapshot_retry_count = 0
+                snapshot_retry_at = 0.0
                 last_backup_completed_time = time.time()
 
 
@@ -368,6 +403,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             backup_cancel_event = None
             watchdog_fired = True
             last_backup_completed_time = time.time()
+            snapshot_retry_count = 0
+            snapshot_retry_at = 0.0
         send_command("save resume")
 
         with state_lock:
@@ -496,7 +533,7 @@ def read_stdout():
 # ═══════════════════════════════════════════════════════════════
 def backup_scheduler():
     """Reloj maestro defensivo con evaluación e intervenciones de estado 100% atómicas."""
-    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread, expecting_list_names
+    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread, expecting_list_names, snapshot_retry_count, snapshot_retry_at
 
     last_list_sync = time.time()
     last_save_query = 0.0
@@ -557,8 +594,11 @@ def backup_scheduler():
                                 should_send_query = True
                                 last_save_query = now
                 else:
-                    # Estado IDLE: evaluar si corresponde iniciar ciclo de backup
-                    if (now - last_backup_completed_time) > BACKUP_INTERVAL_SEC:
+                    # Estado IDLE: evaluar si corresponde iniciar ciclo de backup.
+                    # El ciclo normal (30 min) o el reintento programado por
+                    # snapshot incompleto (backoff: snapshot_retry_at).
+                    retry_due = snapshot_retry_at > 0 and now >= snapshot_retry_at
+                    if (now - last_backup_completed_time) > BACKUP_INTERVAL_SEC or retry_due:
                         if len(players_online) > 0:
                             print(f"[Wrapper] Hay {len(players_online)} jugador(es) online. Iniciando backup en caliente...")
                             backup_in_progress = True
@@ -569,6 +609,7 @@ def backup_scheduler():
                             save_hold_timestamp = now
                             last_save_snapshot = []
                             expecting_list_names = False  # Fix: no dejar una continuación de 'list' pendiente
+                            snapshot_retry_at = 0.0  # consumir el disparador del reintento
                             should_send_hold = True
                         else:
                             last_backup_completed_time = now
@@ -653,6 +694,7 @@ def _begin_manual_hot_backup():
     """
     global backup_in_progress, backup_dispatched, watchdog_fired, save_query_ready_seen
     global backup_cancel_event, save_hold_timestamp, last_save_snapshot, expecting_list_names
+    global snapshot_retry_at
     with state_lock:
         if backup_in_progress:
             return False
@@ -664,6 +706,7 @@ def _begin_manual_hot_backup():
         save_hold_timestamp = time.time()
         last_save_snapshot = []
         expecting_list_names = False
+        snapshot_retry_at = 0.0  # el ciclo manual consume cualquier reintento pendiente
     return True
 
 
