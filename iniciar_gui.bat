@@ -2,6 +2,8 @@
 chcp 65001 >nul
 title Minecraft Bedrock Wrapper - ReactBits Dashboard
 color 0A
+:: Trabajar SIEMPRE sobre la carpeta de este .bat (rutas relativas a el)
+cd /d "%~dp0"
 cls
 echo ================================================================
 echo   MINECRAFT BEDROCK WRAPPER - REACTBITS REACT DASHBOARD
