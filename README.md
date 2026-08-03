@@ -84,7 +84,7 @@ Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la c
 
 ### Detalles técnicos
 
-Me dio bastantes dolores de cabeza la parte donde la compresión del ZIP se quedaba colgada cuando el disco estaba lento, así que usé `multiprocessing` con locks para ponerle un timeout de seguridad: si tarda más de 2 minutos comprimiendo, mata el proceso para que el servidor no quede congelado. Espero haber tapado todos los huecos de concurrencia. Si ven algún bug me avisan.
+Me dio bastantes dolores de cabeza la parte donde la compresión del ZIP se quedaba colgada, así que el worker corre en un proceso separado vía `subprocess` (arranque rápido, sin el pipe de bootstrap de `multiprocessing.spawn`, que se colgaba 50-120 s con el servidor en marcha) con un timeout de seguridad: si tarda más de 2 minutos comprimiendo, el wrapper mata el proceso para que el servidor no quede congelado. La cancelación cooperativa usa un archivo marcador (un hijo subprocess no comparte eventos de memoria). Espero haber tapado todos los huecos de concurrencia. Si ven algún bug me avisan.
 
 ---
 
@@ -168,4 +168,4 @@ Includes property-based tests (Hypothesis) for `save query` parsing, version com
 
 ### Random technical notes
 
-I had some serious headaches with the ZIP compression getting stuck on slow disks, so I ended up using `multiprocessing` and IPC locks to add a hard timeout. If it takes more than 2 minutes to compress, it just forcefully kills the worker so the server doesn't stay frozen forever. Hopefully I covered all the concurrency edge cases. Let me know if you find any bugs.
+I had some serious headaches with the ZIP compression getting stuck, so the worker now runs in a separate process via `subprocess` (fast startup, no `multiprocessing.spawn` bootstrap pipe, which hung for 50-120 s while the server was running) with a safety timeout: if compression takes more than 2 minutes, the wrapper kills the process so the server doesn't stay frozen. Cooperative cancellation uses a marker file (a subprocess child can't share in-memory events). Hopefully I covered all the concurrency edge cases. Let me know if you find any bugs.

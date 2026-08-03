@@ -28,6 +28,21 @@ Además, si el wrapper aplicaba un `kill()` al proceso mientras éste tenía el 
 
 ---
 
+## 2.5 Actualización 2026-08-02: del `multiprocessing.spawn` al `subprocess` + cancelación por archivo
+
+### El Problema
+El arranque de los procesos hijos vía `multiprocessing.spawn` (el único método disponible en Windows) se colgaba de forma intermitente 50-120 s+ cuando el padre era el wrapper con BDS en marcha: el hijo quedaba bloqueado en la lectura del pipe de arranque de spawn y nunca llegaba a ejecutar la compresión. El timeout de 120 s abortaba el backup caliente sistematicamente (investigación completa en `INFORME_COLGADO_SPAWN_WORKER.md`).
+
+### La Solución
+- **Worker por `subprocess.Popen`:** `execute_backup_worker` lanza `backup_worker.py` como subproceso con `subprocess.Popen` (arranque inmediato, sin pipe de bootstrap). El snapshot viaja en un pickle temporal y el resultado vuelve en otro.
+- **Cancelación por archivo marcador:** la señal ya no es un `multiprocessing.Event` compartido (imposible entre procesos subprocess): `_FileCancelEvent` escribe/lee un archivo con la misma API (`is_set`/`set`/`clear`), de modo que los puntos de cancelacion existentes no cambiaron.
+- **El `backup_ipc_lock` se mantiene** pero solo para los backups fríos del propio wrapper (inicio/cierre, mismo proceso). El worker usa el lock interno de `auto_backup`; la exclusion entre ambos la garantizan `backup_in_progress` + el join antes del backup de cierre.
+- El timeout de 120 s y `_force_kill_compress_process` siguen funcionando sin cambios (con shims `is_alive`/`join` sobre el `Popen`).
+
+> Las secciones 1 y 2 de este documento describen el diseño original (V5) con `multiprocessing`; su lógica de timeout y des-envenenamiento del lock sigue vigente para los backups en proceso del wrapper.
+
+---
+
 ## 3. Desincronización de Carreras Críticas de Apagado (DRY y Timeouts)
 
 ### El Problema
