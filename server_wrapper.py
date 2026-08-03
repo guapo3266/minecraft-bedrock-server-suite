@@ -85,10 +85,16 @@ def send_command(cmd):
 
 
 def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
-    """Renombra un archivo .zip a _POSIBLEMENTE_CORRUPTO si ocurrió una anomalia."""
+    """Renombra un archivo .zip a _POSIBLEMENTE_CORRUPTO si ocurrió una anomalia.
+
+    Idempotente: si el archivo ya lleva el marcador `reason`, no se renombra de
+    nuevo (evita nombres _CORRUPTO_CORRUPTO.zip en dobles marcados).
+    """
     if zip_filepath and isinstance(zip_filepath, str) and os.path.exists(zip_filepath):
         # Usar rsplit para reemplazar solo la extension final, no .zip intermedios
         base = zip_filepath.rsplit(".zip", 1)[0]
+        if base.endswith("_" + reason):
+            return
         corrupt_name = f"{base}_{reason}.zip"
         try:
             os.rename(zip_filepath, corrupt_name)
@@ -104,7 +110,7 @@ def parse_save_query_files(line):
     # empezar con '[' pero nunca contienen espacios (p.ej. '[/]:0'): el
     # regex anterior comía cualquier '[...]' inicial y las perdía.
     line = re.sub(
-        r'^(?:(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} (?:INFO|WARN|ERROR|DEBUG)\]|\[(?:INFO|WARN|ERROR|DEBUG)\]) +)+',
+        r'^(?:(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} (?:INFO|WARN|ERROR|DEBUG|LOG)\]|\[(?:INFO|WARN|ERROR|DEBUG|LOG)\]) +)+',
         '', line,
     )
 
@@ -117,6 +123,16 @@ def parse_save_query_files(line):
         if clean_rel:
             parsed.append((clean_rel, int(size_str)))
     return parsed
+
+
+def _is_snapshot_failure(error_msg):
+    """True si el error del worker indica un snapshot incompleto o invalido.
+
+    Estos fallos merecen reintento inmediato del ciclo caliente (el siguiente
+    `save query` puede llegar completo); el resto de errores (E/S, lock, disco)
+    esperan el intervalo normal de backup.
+    """
+    return bool(error_msg) and "snapshot" in error_msg.lower()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -206,10 +222,11 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
         import pickle as _pickle
         _base = os.path.dirname(os.path.abspath(__file__))
         _stamp = int(time.time() * 1000)
+        _nonce = os.urandom(4).hex()  # nombre no predecible: el .pkl se deserializa con pickle
         _tmpdir = os.environ.get("TEMP", ".")
-        _snap_path = os.path.join(_tmpdir, "bw_snap_%d.pkl" % _stamp)
-        _marker = os.path.join(_tmpdir, "bw_cancel_%d.mark" % _stamp)
-        _result = os.path.join(_tmpdir, "bw_result_%d.pkl" % _stamp)
+        _snap_path = os.path.join(_tmpdir, "bw_snap_%d_%s.pkl" % (_stamp, _nonce))
+        _marker = os.path.join(_tmpdir, "bw_cancel_%d_%s.mark" % (_stamp, _nonce))
+        _result = os.path.join(_tmpdir, "bw_result_%d_%s.pkl" % (_stamp, _nonce))
         _worker = os.path.join(_base, "backup_worker.py")
 
         try:
@@ -296,6 +313,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 os.remove(_p)
             except Exception:
                 pass
+        retry_soon = _is_snapshot_failure(result.get("error"))
         if result["error"]:
             print(f"[Worker] [ERROR] Falló la compresión: {result['error']}")
         elif not result["zip"]:
@@ -321,7 +339,13 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             watchdog_fired = False
             save_query_ready_seen = False
             backup_cancel_event = None
-            last_backup_completed_time = time.time()
+            if retry_soon:
+                # Snapshot incompleto: reintentar el ciclo caliente en el proximo
+                # tick (1s) en vez de esperar los 30 min del intervalo normal.
+                print("[Worker] Snapshot incompleto: se reintentara el ciclo caliente de inmediato.")
+                last_backup_completed_time = 0
+            else:
+                last_backup_completed_time = time.time()
 
 
 
@@ -499,7 +523,7 @@ def backup_scheduler():
                             snapshot_copy = list(last_save_snapshot)
                             backup_dispatched = True
                             save_query_ready_seen = False
-                            backup_cancel_event = _FileCancelEvent(os.path.join(os.environ.get("TEMP", "."), "bw_cancel_%d.mark" % int(time.time() * 1000)))
+                            backup_cancel_event = _FileCancelEvent(os.path.join(os.environ.get("TEMP", "."), "bw_cancel_%d_%s.mark" % (int(time.time() * 1000), os.urandom(4).hex())))
                             snapshot_len = len(snapshot_copy)
                             worker_to_start = threading.Thread(
                                 target=execute_backup_worker,

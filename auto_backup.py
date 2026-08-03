@@ -130,10 +130,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             if not isinstance(file_snapshot, list) or len(file_snapshot) == 0:
                 raise RuntimeError("Snapshot Bedrock vacio o invalido; se aborta backup caliente.")
 
-            # Validación de cobertura de snapshot (debe tener al menos los archivos base como level.dat y db/)
-            if len(file_snapshot) < 4:
+            # Validación de cobertura de snapshot: exige el archivo esencial del nivel.
+            # (El conteo magico "<4" rechazaba mundos pequeños pero válidos; lo que
+            # define un snapshot util es que incluya level.dat, y luego se verifica
+            # la cobertura real de db/ contra disco.)
+            if not any(os.path.basename(p.replace("\\", "/")) == "level.dat" for p, _ in file_snapshot):
                 raise RuntimeError(
-                    f"Snapshot reportó muy pocos archivos ({len(file_snapshot)}). Snapshot incompleto o inválido."
+                    "Snapshot sin level.dat; snapshot incompleto o inválido."
                 )
 
             # Validacion cruzada contra disco: si el snapshot tiene < 70% de los archivos
@@ -250,6 +253,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             print(f"[WARN] Fallo en rotacion de backups: {e}")
     except Exception as e:
         print(f"[ERROR] No se pudo crear el backup: {e}")
+        if isinstance(e, RuntimeError) and "Snapshot" in str(e):
+            # Fallo de VALIDACION de snapshot (vacio, sin level.dat, incompleto,
+            # truncado, desincronizado): es un error del caller, no un fallo
+            # operativo. Se propaga para que el wrapper pueda reintentar el ciclo
+            # caliente en vez de esperar el intervalo completo. El finally
+            # (limpieza de parciales + release del lock) corre igualmente.
+            raise
         return False
     finally:
         # Limpiar archivos parciales o corruptos
@@ -271,7 +281,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         return zip_filepath
     return False
 
-def rotate_backups():
+def rotate_backups(now=None):
+    """Politica de retencion: 15 recientes + 1 por dia (ultimos 7 dias).
+
+    `now` es inyectable para tests deterministas; por defecto usa la hora real.
+    """
+    if now is None:
+        now = datetime.datetime.now()
     excluded_markers = ("_CORRUPTO", "_EXCEDIDO")
     backups = [
         b for b in glob.glob(os.path.join(BACKUP_DIR, "auto_backup_*.zip"))
@@ -299,7 +315,6 @@ def rotate_backups():
         keepers.add(b['path'])
         
     # Capa 2: Retener 1 por día para los últimos M días
-    now = datetime.datetime.now()
     daily_keepers_found = set()
     
     for b in backup_data:

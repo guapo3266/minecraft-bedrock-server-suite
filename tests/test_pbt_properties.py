@@ -342,6 +342,206 @@ def test_rotate_stable_ordering():
             ab.BACKUP_DIR = restore_backup_dir
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4) parse_save_query_files  —  prefijos de log apilados
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_LOG_PREFIXES = (
+    "[2026-07-30 12:00:00:001 INFO] ",
+    "[INFO] ",
+    "[WARN] ",
+)
+
+
+@st.composite
+def prefixed_save_query_line(draw):
+    """Línea de save query válida con 0..3 prefijos de log apilados."""
+    line, pairs = draw(valid_save_query_line())
+    prefixes = draw(st.lists(st.sampled_from(_LOG_PREFIXES), min_size=0, max_size=3))
+    return "".join(prefixes) + line, pairs
+
+
+@given(prefixed_save_query_line())
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+@example(("[INFO] [WARN] a:0", [("a", 0)]))
+def test_parse_stacked_prefixes(data):
+    """Todos los prefijos apilados se eliminan; el roundtrip se conserva."""
+    raw, expected = data
+    result = sw.parse_save_query_files(raw)
+    assert result == expected, (
+        f"\n  input:    {raw!r}"
+        f"\n  got:      {result}"
+        f"\n  expected: {expected}"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5) _resolve_snapshot_path  —  idempotencia y equivalencia de separadores
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.composite
+def safe_world_relpath(draw):
+    """Ruta relativa segura y sin ambiguedad para _resolve_snapshot_path:
+    primer segmento distinto de 'worlds' y del nombre del mundo; sin '..'
+    ni nombres reservados de Windows (NUL, CON, ...) que abspath convierte
+    en dispositivos (\\\\.\\NUL) y hacen fallar commonpath por diseno."""
+    world_name = os.path.basename(os.path.abspath(ab.WORLD_DIR)).lower()
+    segs = draw(st.lists(
+        st.text(alphabet=_safe_chars, min_size=1, max_size=12).filter(
+            lambda s: s != ".." and s.split(".")[0].lower() not in _WIN_RESERVED
+        ),
+        min_size=1, max_size=3,
+    ))
+    if segs[0].lower() in ("worlds", world_name):
+        segs[0] = "data"  # primer segmento neutral: evita rama contra BASE_DIR real
+    return "/".join(segs)
+
+
+@given(safe_world_relpath())
+@settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
+def test_resolve_idempotent(rel_path):
+    """resolve(resolve(p)) == resolve(p): la ruta 'limpia' devuelta es una
+    normalizacion estable (mismo full_path y mismo clean_rel_path)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        world = _make_fake_world_dir(tmp)
+        restore_world = ab.WORLD_DIR
+        ab.WORLD_DIR = world
+        ab.WORLD_PARENT_DIR = os.path.join(tmp, "worlds")
+        try:
+            clean1, full1 = ab._resolve_snapshot_path(rel_path)
+            clean2, full2 = ab._resolve_snapshot_path(clean1)
+            assert full2 == full1, f"{rel_path!r}: full {full1!r} -> {full2!r}"
+            assert clean2 == clean1, f"{rel_path!r}: clean {clean1!r} -> {clean2!r}"
+        finally:
+            ab.WORLD_DIR = restore_world
+
+
+@given(safe_world_relpath())
+@settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
+def test_resolve_separator_and_dot_equivalence(rel_path):
+    """'\\' vs '/' y prefijo './' resuelven al mismo full_path (normalizacion)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        world = _make_fake_world_dir(tmp)
+        restore_world = ab.WORLD_DIR
+        ab.WORLD_DIR = world
+        ab.WORLD_PARENT_DIR = os.path.join(tmp, "worlds")
+        try:
+            _, full_a = ab._resolve_snapshot_path(rel_path)
+            _, full_b = ab._resolve_snapshot_path(rel_path.replace("/", os.sep))
+            assert full_b == full_a, f"separadores: {rel_path!r}"
+            _, full_c = ab._resolve_snapshot_path("./" + rel_path)
+            assert full_c == full_a, f"prefijo ./: {rel_path!r}"
+        finally:
+            ab.WORLD_DIR = restore_world
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6) rotate_backups  —  invariantes de retención robustos al "now" real
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@given(st.lists(st.integers(min_value=0, max_value=60), min_size=1, max_size=60))
+@settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
+def test_rotate_newest_always_survives(days_ago_list):
+    """El backup mas reciente jamas se elimina, sin importar la politica."""
+    with tempfile.TemporaryDirectory() as tmp:
+        backup_dir = os.path.join(tmp, "auto_backups")
+        restore_backup_dir = ab.BACKUP_DIR
+        ab.BACKUP_DIR = backup_dir
+
+        try:
+            now = datetime.datetime.now()
+            dates = [
+                now - datetime.timedelta(days=d, minutes=i)
+                for i, d in enumerate(days_ago_list)
+            ]
+            created = _make_backup_files(backup_dir, [
+                (f"t_{i:04d}", dt) for i, dt in enumerate(dates)
+            ])
+            newest_name = os.path.basename(max(created, key=os.path.getmtime))
+
+            ab.rotate_backups()
+
+            assert newest_name in os.listdir(backup_dir), (
+                f"Rotacion elimino el backup mas reciente: {newest_name}"
+            )
+        finally:
+            ab.BACKUP_DIR = restore_backup_dir
+
+
+@given(st.lists(st.integers(min_value=0, max_value=60), min_size=16, max_size=80))
+@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+def test_rotate_old_survivors_bounded_by_recent_layer(days_ago_list):
+    """Solo la capa 'recientes' puede conservar backups fuera de la ventana
+    diaria: supervivientes con mas de DAYS_TO_KEEP_DAILY dias <= MAX_RECENT."""
+    with tempfile.TemporaryDirectory() as tmp:
+        backup_dir = os.path.join(tmp, "auto_backups")
+        restore_backup_dir = ab.BACKUP_DIR
+        ab.BACKUP_DIR = backup_dir
+
+        try:
+            now = datetime.datetime.now()
+            dates = [
+                now - datetime.timedelta(days=d, minutes=i)
+                for i, d in enumerate(days_ago_list)
+            ]
+            _make_backup_files(backup_dir, [
+                (f"t_{i:04d}", dt) for i, dt in enumerate(dates)
+            ])
+
+            ab.rotate_backups()
+
+            old_survivors = 0
+            for name in os.listdir(backup_dir):
+                mtime = os.path.getmtime(os.path.join(backup_dir, name))
+                dt = datetime.datetime.fromtimestamp(mtime)
+                age_days = (now.date() - dt.date()).days
+                if age_days > ab.DAYS_TO_KEEP_DAILY:
+                    old_survivors += 1
+
+            assert old_survivors <= ab.MAX_RECENT_BACKUPS, (
+                f"{old_survivors} supervivientes fuera de la ventana diaria "
+                f"(max {ab.MAX_RECENT_BACKUPS} por la capa de recientes)"
+            )
+        finally:
+            ab.BACKUP_DIR = restore_backup_dir
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7) _is_safe_zip_entry  —  consenso entre las 3 copias (anti-drift)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import restore_backup as rb
+import server_gui_server as sgs
+
+_zip_segment = st.text(
+    alphabet=st.characters(blacklist_categories=("Cc", "Cs"), blacklist_characters="\x00"),
+    min_size=0, max_size=20,
+)
+
+_hostile_zip_name = st.lists(
+    st.one_of(_zip_segment, st.just(".."), st.just("."), st.just(""), st.just("C:")),
+    min_size=1, max_size=6,
+).map(lambda segs: "/".join(segs))
+
+
+@given(_hostile_zip_name)
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+@example("../../etc/passwd")
+@example("C:/Windows/System32")
+@example("a\\..\\b")
+def test_zip_entry_consensus(name):
+    """auto_backup, restore_backup y server_gui_server aplican el mismo guard
+    anti zip-slip: si alguno diverge, hay drift entre las copias."""
+    verdicts = {
+        "auto_backup": ab._is_safe_zip_entry(name),
+        "restore_backup": rb._is_safe_zip_entry(name),
+        "server_gui_server": sgs._is_safe_zip_entry(name),
+    }
+    assert len(set(verdicts.values())) == 1, (
+        f"Consenso roto para {name!r}: {verdicts}"
+    )
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v", "--tb=short"])

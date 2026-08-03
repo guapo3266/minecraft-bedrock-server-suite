@@ -168,24 +168,31 @@ def test_snapshot_vacio_rechazado(capsys):
     lock = multiprocessing.Lock()
     try:
         _valid_world(fake_world)
-        result = auto_backup.create_backup("test", file_snapshot=[], external_lock=lock)
+        import pytest
+        with pytest.raises(RuntimeError):
+            auto_backup.create_backup("test", file_snapshot=[], external_lock=lock)
         out = capsys.readouterr().out
-        assert result is False
         assert "Snapshot Bedrock vacio o invalido" in out
     finally:
         _teardown(tmp, old)
 
 
 def test_snapshot_con_pocos_archivos_rechazado(capsys):
+    """Snapshot con solo level.dat se rechaza por cobertura db/ insuficiente.
+
+    (El conteo magico '<4' se reemplazo por 'exige level.dat'; este caso cae
+    por la validacion cruzada contra disco, no por el numero de entradas.)
+    """
     tmp, fake_bkp, fake_world, old = _setup_env()
     lock = multiprocessing.Lock()
     try:
         _valid_world(fake_world)
-        result = auto_backup.create_backup("test", file_snapshot=[("level.dat", 100)],
-                                           external_lock=lock)
+        import pytest
+        with pytest.raises(RuntimeError):
+            auto_backup.create_backup("test", file_snapshot=[("level.dat", 100)],
+                                      external_lock=lock)
         out = capsys.readouterr().out
-        assert result is False
-        assert "muy pocos archivos" in out  # sin acentos: el stdout de Windows los manglea
+        assert "Snapshot incompleto" in out
     finally:
         _teardown(tmp, old)
 
@@ -198,9 +205,10 @@ def test_snapshot_cobertura_db_insuficiente_rechazado(capsys):
         _valid_world(fake_world, n_db_files=10)
         snap = [("level.dat", 100), ("db/CURRENT", 15),
                 ("db/file_00.log", 64), ("db/file_01.log", 64)]
-        result = auto_backup.create_backup("test", file_snapshot=snap, external_lock=lock)
+        import pytest
+        with pytest.raises(RuntimeError):
+            auto_backup.create_backup("test", file_snapshot=snap, external_lock=lock)
         out = capsys.readouterr().out
-        assert result is False
         assert "Snapshot incompleto" in out
     finally:
         _teardown(tmp, old)
