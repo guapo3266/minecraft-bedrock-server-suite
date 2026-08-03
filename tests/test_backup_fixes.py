@@ -12,6 +12,7 @@ Cubre:
 """
 import os
 import sys
+import time
 import shutil
 import tempfile
 import datetime
@@ -264,8 +265,8 @@ def _real_world_snapshot_with_missing_file():
 )
 def test_worker_lectura_snapshot_fallida_programa_reintento():
     """Regresion del caso reportado: un fallo de lectura NO RuntimeError en el
-    snapshot (archivo desaparecido) debe programar el reintento inmediato
-    (last_backup_completed_time == 0), no esperar los 30 minutos."""
+    snapshot (archivo desaparecido) debe programar el reintento con backoff
+    (snapshot_retry_at en el futuro), no esperar los 30 minutos."""
     ev = sw._FileCancelEvent(os.path.join(
         tempfile.gettempdir(), "e2e_%s.mark" % os.urandom(4).hex()))
     try:
@@ -280,12 +281,52 @@ def test_worker_lectura_snapshot_fallida_programa_reintento():
             pass
 
     with sw.state_lock:
-        assert sw.last_backup_completed_time == 0, (
-            "el fallo de lectura del snapshot no programo el reintento; "
-            "el backup caliente esperara 30 min"
+        assert sw.snapshot_retry_count == 1, (
+            "el fallo de lectura del snapshot no incremento el contador de reintentos"
+        )
+        assert sw.snapshot_retry_at > time.time(), (
+            "el fallo de lectura del snapshot no programo un reintento con backoff"
+        )
+        assert sw.last_backup_completed_time != 0, (
+            "el ultimo ciclo no quedo registrado"
         )
         assert not sw.backup_in_progress and not sw.backup_dispatched, (
             "estado colgado tras el ciclo del worker"
+        )
+
+
+# ── 10) backoff exponencial y limite de reintentos ─────────────────────────────
+def test_snapshot_retry_delay_backoff():
+    """El backoff es exponencial con tope: 5, 10, 20, 40, 60, 60, ..."""
+    expected = [5, 10, 20, 40, 60, 60, 60, 60]
+    for attempt, want in enumerate(expected, start=1):
+        got = sw._snapshot_retry_delay(attempt)
+        assert got == want, f"intento {attempt}: esperado {want}s, got {got}s"
+        assert got <= sw.RETRY_BACKOFF_MAX_SEC
+
+
+def test_snapshot_retry_limite_abandona_hasta_intervalo_normal():
+    """Tras MAX reintentos consecutivos el patron se reinicia y no se programa
+    mas reintento: se espera el proximo intervalo normal de 30 min."""
+    ev = sw._FileCancelEvent(os.path.join(
+        tempfile.gettempdir(), "e2e_%s.mark" % os.urandom(4).hex()))
+    with sw.state_lock:
+        sw.snapshot_retry_count = sw.MAX_CONSECUTIVE_SNAPSHOT_RETRIES - 1
+        sw.snapshot_retry_at = 0.0
+    try:
+        sw.execute_backup_worker(file_snapshot=[], cancel_event=ev)
+    finally:
+        try:
+            os.remove(ev.path)
+        except OSError:
+            pass
+
+    with sw.state_lock:
+        assert sw.snapshot_retry_count == 0, (
+            "el contador no se reinicio al abandonar el reintento"
+        )
+        assert sw.snapshot_retry_at == 0.0, (
+            "se programo un reintento tras el limite; debe esperar 30 min"
         )
 
 
