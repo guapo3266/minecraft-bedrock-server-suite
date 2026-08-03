@@ -462,11 +462,21 @@ async def handle_action(action_name: str, request: Request):
                 if not exit_event.wait(timeout=30):
                     manager.add_log("[GUI Backend] El servidor no se detuvo en 30s. Reinicio cancelado.", "error")
                     return
+            # Chequeo + lanzamiento atomicos bajo op_lock: si hay una
+            # actualizacion/restauracion/backup en curso, no se re-lanza BDS
+            # (arrancar mientras se reemplazan binarios o se copia el mundo
+            # corromperia ambos).
+            if not manager.op_lock.acquire(blocking=False):
+                manager.add_log("[GUI Backend] Operación en curso (actualización/restauración/backup); reinicio abortado.", "error")
+                return
+            try:
                 # Alguien más pudo arrancar el servidor mientras esperábamos; no duplicar
                 if manager.is_running:
                     manager.add_log("[GUI Backend] Otro inicio detectado durante el reinicio. Abortando.", "error")
                     return
-            threading.Thread(target=run_wrapper_thread, daemon=True).start()
+                threading.Thread(target=run_wrapper_thread, daemon=True).start()
+            finally:
+                manager.op_lock.release()
 
         threading.Thread(target=do_restart, daemon=True).start()
         return {"status": "restarting"}
@@ -474,21 +484,24 @@ async def handle_action(action_name: str, request: Request):
     elif action == "backup":
         if not manager.is_running or not manager.wrapper_process:
             def manual_off_backup():
-                manager.backup_in_progress = True
-                manager.update_status()
-                manager.add_log("[GUI Backend] Ejecutando backup en frío...", "backup")
-                try:
-                    zip_path = auto_backup.create_backup("gui_manual")
-                    if zip_path:
-                        manager.last_backup_time = time.strftime("%H:%M:%S")
-                        manager.add_log(f"[GUI Backend] Backup exitoso: {os.path.basename(zip_path)}", "backup")
-                    else:
-                        manager.add_log("[GUI Backend] Error en backup: no se produjo un ZIP (revisa la consola del servidor).", "error")
-                except Exception as e:
-                    manager.add_log(f"[GUI Backend] Error en backup: {e}", "error")
-                finally:
-                    manager.backup_in_progress = False
+                # op_lock durante TODA la copia: un start inmediato modificaria
+                # el mundo mientras se comprime, dando un backup inconsistente.
+                with manager.op_lock:
+                    manager.backup_in_progress = True
                     manager.update_status()
+                    manager.add_log("[GUI Backend] Ejecutando backup en frío...", "backup")
+                    try:
+                        zip_path = auto_backup.create_backup("gui_manual")
+                        if zip_path:
+                            manager.last_backup_time = time.strftime("%H:%M:%S")
+                            manager.add_log(f"[GUI Backend] Backup exitoso: {os.path.basename(zip_path)}", "backup")
+                        else:
+                            manager.add_log("[GUI Backend] Error en backup: no se produjo un ZIP (revisa la consola del servidor).", "error")
+                    except Exception as e:
+                        manager.add_log(f"[GUI Backend] Error en backup: {e}", "error")
+                    finally:
+                        manager.backup_in_progress = False
+                        manager.update_status()
 
             threading.Thread(target=manual_off_backup, daemon=True).start()
             return {"status": "backup_dispatched"}
@@ -511,6 +524,11 @@ async def handle_action(action_name: str, request: Request):
 
         def do_update():
             temp_zip = os.path.join(BASE_DIR, "bds_update.zip")
+            # op_lock durante TODO el ciclo de actualizacion (detener el
+            # servidor, backup preventivo, descarga, extraccion): un start o
+            # restart durante cualquiera de esas fases arrancaria BDS mientras
+            # se reemplazan los binarios. El finally libera en todos los caminos.
+            manager.op_lock.acquire()
             try:
                 manager.add_log("[Actualizador BDS] Iniciando proceso de actualización de Mojang...", "system")
                 if manager.is_running and manager.wrapper_process:
@@ -571,35 +589,34 @@ async def handle_action(action_name: str, request: Request):
                 preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
                 preserve_dirs = {"worlds", "backups", "web", "gui_frontend"}
 
-                # Staging + aplicacion bajo op_lock: nunca se toca la
-                # instalacion con un zip a medias, y un 'start' simultaneo no
-                # puede lanzar BDS mientras se reemplazan los binarios.
-                with manager.op_lock:
-                    staging_dir = os.path.join(BASE_DIR, "bds_update_staging")
-                    shutil.rmtree(staging_dir, ignore_errors=True)
-                    os.makedirs(staging_dir, exist_ok=True)
-                    with zipfile.ZipFile(temp_zip, "r") as z:
-                        for item in z.infolist():
-                            name = item.filename
-                            # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
-                            if not _is_safe_zip_entry(name):
-                                manager.add_log(f"[Actualizador BDS] Entrada insegura en el zip ignorada: {name}", "error")
-                                continue
-                            z.extract(item, staging_dir)
+                # Staging: nunca se toca la instalacion con un zip a medias.
+                # (op_lock ya cubre todo el ciclo desde el inicio de do_update.)
+                staging_dir = os.path.join(BASE_DIR, "bds_update_staging")
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                os.makedirs(staging_dir, exist_ok=True)
+                with zipfile.ZipFile(temp_zip, "r") as z:
+                    for item in z.infolist():
+                        name = item.filename
+                        # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
+                        if not _is_safe_zip_entry(name):
+                            manager.add_log(f"[Actualizador BDS] Entrada insegura en el zip ignorada: {name}", "error")
+                            continue
+                        z.extract(item, staging_dir)
 
-                    if not os.path.exists(os.path.join(staging_dir, "bedrock_server.exe")):
-                        raise RuntimeError(
-                            "El zip descargado no contiene bedrock_server.exe; se aborta sin tocar la instalacion."
-                        )
+                if not os.path.exists(os.path.join(staging_dir, "bedrock_server.exe")):
+                    raise RuntimeError(
+                        "El zip descargado no contiene bedrock_server.exe; se aborta sin tocar la instalacion."
+                    )
 
-                    # Aplica con rollback: si algo falla a mitad, la instalacion
-                    # vuelve a los binarios anteriores (sin versiones mezcladas).
-                    _apply_staged_update(staging_dir, BASE_DIR, preserve_files, preserve_dirs)
+                # Aplica con rollback: si algo falla a mitad, la instalacion
+                # vuelve a los binarios anteriores (sin versiones mezcladas).
+                _apply_staged_update(staging_dir, BASE_DIR, preserve_files, preserve_dirs)
 
                 manager.add_log("[Actualizador BDS] ¡Servidor actualizado exitosamente a la versión oficial de Mojang!", "system")
             except Exception as e:
                 manager.add_log(f"[Actualizador BDS] Error al actualizar: {e}", "error")
             finally:
+                manager.op_lock.release()
                 if os.path.exists(temp_zip):
                     try: os.remove(temp_zip)
                     except Exception: pass

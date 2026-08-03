@@ -491,6 +491,106 @@ def test_restore_backup_rutas_relativas():
     assert rb.BACKUP_DIR.endswith(os.path.join("Backups_Minecraft", "auto_backups"))
 
 
+# ── 13) op_lock cubre TODO el ciclo de operaciones que tocan el servidor ─────
+def test_update_toma_op_lock_durante_todo_el_ciclo(monkeypatch):
+    """El backup preventivo y la descarga corren CON op_lock adquirido: un
+    start/restart durante cualquier fase de la actualizacion recibe busy."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    lock_state = {}
+
+    def fake_create_backup(*args, **kwargs):
+        lock_state["locked"] = sgs.manager.op_lock.locked()
+        return os.path.join(tempfile.gettempdir(), "fake_pre_update.zip")
+
+    class FakeResp:
+        status_code = 200
+        text = "<html>sin zip de bedrock aqui</html>"
+
+    monkeypatch.setattr(sgs.auto_backup, "create_backup", fake_create_backup)
+    monkeypatch.setattr(sgs.requests, "get", lambda *a, **k: FakeResp())
+
+    sgs.manager.is_running = False
+    sgs.manager.update_in_progress = False
+    try:
+        with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+            resp = client.post("/api/action/update_bds")
+            assert resp.json()["status"] == "update_dispatched", resp.text
+            deadline = time.time() + 10
+            while sgs.manager.update_in_progress and time.time() < deadline:
+                time.sleep(0.05)
+        assert not sgs.manager.update_in_progress, "el hilo de update no termino"
+        assert lock_state.get("locked") is True, (
+            "el backup preventivo corrio sin op_lock: un start podria arrancar "
+            "BDS durante la actualizacion"
+        )
+    finally:
+        sgs.manager.is_running = False
+        sgs.manager.update_in_progress = False
+
+
+def test_restart_respeta_op_lock(monkeypatch):
+    """Con una operacion en curso (op_lock retenido), el restart no lanza un
+    nuevo wrapper."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    calls = {"n": 0}
+
+    def fake_run_wrapper():
+        calls["n"] += 1
+
+    monkeypatch.setattr(sgs, "run_wrapper_thread", fake_run_wrapper)
+    sgs.manager.is_running = False
+    try:
+        sgs.manager.op_lock.acquire()  # actualizacion/restauracion en curso
+        try:
+            with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+                resp = client.post("/api/action/restart")
+                assert resp.json()["status"] == "restarting", resp.text
+                time.sleep(0.5)  # deja terminar al hilo do_restart
+            assert calls["n"] == 0, (
+                "el restart lanzo un wrapper con una operacion en curso"
+            )
+        finally:
+            sgs.manager.op_lock.release()
+    finally:
+        sgs.manager.is_running = False
+
+
+def test_backup_frio_toma_op_lock(monkeypatch):
+    """El backup en frio corre CON op_lock: un start inmediato no puede
+    modificar el mundo mientras se comprime (backup inconsistente)."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    lock_state = {}
+
+    def fake_create_backup(*args, **kwargs):
+        lock_state["locked"] = sgs.manager.op_lock.locked()
+        return os.path.join(tempfile.gettempdir(), "fake_gui_manual.zip")
+
+    monkeypatch.setattr(sgs.auto_backup, "create_backup", fake_create_backup)
+    sgs.manager.is_running = False
+    sgs.manager.backup_in_progress = False
+    try:
+        with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+            resp = client.post("/api/action/backup")
+            assert resp.json()["status"] == "backup_dispatched", resp.text
+            deadline = time.time() + 10
+            while sgs.manager.backup_in_progress and time.time() < deadline:
+                time.sleep(0.05)
+        assert not sgs.manager.backup_in_progress, "el hilo de backup no termino"
+        assert lock_state.get("locked") is True, (
+            "el backup en frio corrio sin op_lock: un start podria modificar "
+            "el mundo durante la copia"
+        )
+    finally:
+        sgs.manager.is_running = False
+        sgs.manager.backup_in_progress = False
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v", "--tb=short"])
