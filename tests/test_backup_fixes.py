@@ -591,6 +591,47 @@ def test_backup_frio_toma_op_lock(monkeypatch):
         sgs.manager.backup_in_progress = False
 
 
+# ── 14) carrera: start gana al backup en frio -> se cancela bajo el lock ─────
+def test_backup_frio_cancela_si_servidor_inicio(monkeypatch):
+    """Si `start` gana la carrera entre el chequeo del handler y la
+    adquisicion del lock, el backup en frio se cancela dentro del lock: nunca
+    copia el mundo con BDS activo."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    calls = {"n": 0}
+
+    def fake_create_backup(*args, **kwargs):
+        calls["n"] += 1
+        return os.path.join(tempfile.gettempdir(), "fake_gui_manual.zip")
+
+    monkeypatch.setattr(sgs.auto_backup, "create_backup", fake_create_backup)
+    sgs.manager.is_running = False
+    sgs.manager.backup_in_progress = False
+    try:
+        # El handler decide la rama 'off' (is_running=False). Antes de que el
+        # hilo del backup adquiera el lock, el start gana la carrera y marca
+        # is_running=True (bajo op_lock). Al soltar, el hilo debe cancelar.
+        sgs.manager.op_lock.acquire()
+        try:
+            with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+                resp = client.post("/api/action/backup")
+                assert resp.json()["status"] == "backup_dispatched", resp.text
+                # mientras el hilo espera el lock, el start marca el estado
+                sgs.manager.is_running = True
+        finally:
+            sgs.manager.op_lock.release()  # el hilo del backup entra ahora
+
+        time.sleep(0.5)  # deja terminar al hilo
+        assert calls["n"] == 0, (
+            "el backup en frio copio el mundo con el servidor iniciado"
+        )
+        assert not sgs.manager.backup_in_progress
+    finally:
+        sgs.manager.is_running = False
+        sgs.manager.backup_in_progress = False
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v", "--tb=short"])
