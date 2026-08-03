@@ -17,6 +17,7 @@ import tempfile
 import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import pytest
 import auto_backup
 import server_wrapper as sw
 import server_gui_server as sgs
@@ -169,21 +170,34 @@ def test_list_backup_files_excluye_corruptos():
 
 # ── 6) clasificacion de fallos de snapshot ────────────────────────────────────
 def test_is_snapshot_failure():
-    real_errors = [
-        "Snapshot Bedrock vacio o invalido; se aborta backup caliente.",
-        "Snapshot sin level.dat; snapshot incompleto o invalido.",
-        "Snapshot incompleto: 1 < 4 archivos reales en db/.",
-        "Snapshot truncado en 'db/000030.ldb': 5 < 1917505 bytes.",
-        "Desincronizacion de snapshot en 'x': archivo mas grande que snapshot.",
+    """El wrapper reintenta los fallos anotados como snapshot, pero no los
+    operativos (cancelacion, exceso de tamano) ni los ajenos al backup."""
+    retry = [
+        # Mensajes del worker con prefijo "Snapshot:" (create_backup en modo
+        # snapshot siempre lanza; el worker anota el contexto)
+        "Snapshot: Snapshot Bedrock vacio o invalido; se aborta backup caliente.",
+        "Snapshot: Snapshot sin level.dat; snapshot incompleto o invalido.",
+        "Snapshot: Snapshot incompleto: 1 < 4 archivos reales en db/.",
+        "Snapshot: Snapshot truncado en 'db/000030.ldb': 5 < 1917505 bytes.",
+        "Snapshot: Desincronizacion de snapshot en 'x': archivo mas grande que snapshot.",
+        # Fallos de lectura con excepcion NO RuntimeError (archivo borrado por
+        # BDS entre save query y copia): tambien son snapshot desincronizado
+        "Snapshot: [Errno 2] No such file or directory: 'db/000030.ldb'",
+        "Snapshot: [Errno 13] Permission denied: 'db/MANIFEST-000001'",
     ]
-    for err in real_errors:
+    for err in retry:
         assert sw._is_snapshot_failure(err) is True, err
 
     no_retry = [
         None,
         "",
-        "Backup excede el limite de 10 GB (acumulado: 12.00 GB). Abortando.",
+        # Operativos: un reintento no los resuelve
+        "Snapshot: Backup cancelado antes de publicar ZIP.",
+        "Snapshot: Backup cancelado durante compresion tradicional.",
+        "Snapshot: Backup excede el limite de 10 GB (acumulado: 12.00 GB). Abortando.",
+        # Ajenos al modo snapshot (fallo fuera del worker o resultado perdido)
         "[Errno 28] No space left on device",
+        "El proceso termino sin devolver un resultado",
         "No se pudo escribir el resultado: boom",
     ]
     for err in no_retry:
@@ -223,6 +237,56 @@ def test_restore_guard_dentro_threadpool_devuelve_409(monkeypatch):
             assert "encendió" in resp.json()["detail"]
     finally:
         sgs.manager.is_running = False
+
+
+# ── 9) E2E worker real: fallo de lectura de snapshot -> reintento ─────────────
+def _real_world_snapshot_with_missing_file():
+    """Snapshot del mundo real (80% de db/) + un archivo inexistente:
+    pasa las validaciones de cobertura pero falla al leer (FileNotFoundError),
+    exactamente el caso reportado: BDS borra un archivo entre save query y copia."""
+    world = auto_backup.WORLD_DIR
+    files = []
+    for root, _dirs, names in os.walk(os.path.join(world, "db")):
+        for n in names:
+            full = os.path.join(root, n)
+            files.append((os.path.relpath(full, world).replace("\\", "/"),
+                          os.path.getsize(full)))
+    take = max(1, int(len(files) * 0.8))
+    snapshot = [("db/zz_missing_%s.ldb" % os.urandom(4).hex(), 1)]
+    snapshot += files[:take]
+    snapshot.append(("level.dat", os.path.getsize(os.path.join(world, "level.dat"))))
+    return snapshot
+
+
+@pytest.mark.skipif(
+    not os.path.exists(os.path.join(auto_backup.WORLD_DIR, "db")),
+    reason="requiere mundo real con db/ (solo la instalacion TESTTEST)",
+)
+def test_worker_lectura_snapshot_fallida_programa_reintento():
+    """Regresion del caso reportado: un fallo de lectura NO RuntimeError en el
+    snapshot (archivo desaparecido) debe programar el reintento inmediato
+    (last_backup_completed_time == 0), no esperar los 30 minutos."""
+    ev = sw._FileCancelEvent(os.path.join(
+        tempfile.gettempdir(), "e2e_%s.mark" % os.urandom(4).hex()))
+    try:
+        sw.execute_backup_worker(
+            file_snapshot=_real_world_snapshot_with_missing_file(),
+            cancel_event=ev,
+        )
+    finally:
+        try:
+            os.remove(ev.path)
+        except OSError:
+            pass
+
+    with sw.state_lock:
+        assert sw.last_backup_completed_time == 0, (
+            "el fallo de lectura del snapshot no programo el reintento; "
+            "el backup caliente esperara 30 min"
+        )
+        assert not sw.backup_in_progress and not sw.backup_dispatched, (
+            "estado colgado tras el ciclo del worker"
+        )
 
 
 if __name__ == "__main__":
