@@ -487,6 +487,16 @@ async def handle_action(action_name: str, request: Request):
                 # op_lock durante TODA la copia: un start inmediato modificaria
                 # el mundo mientras se comprime, dando un backup inconsistente.
                 with manager.op_lock:
+                    # Re-chequeo atomico bajo el lock: `start` pudo ganar la
+                    # carrera entre la decision del handler (servidor apagado)
+                    # y la adquisicion del lock. Un backup en frio sobre un
+                    # mundo vivo seria inconsistente.
+                    if manager.is_running:
+                        manager.add_log(
+                            "[GUI Backend] El servidor se encendió; backup en frío cancelado (usa el backup en caliente).",
+                            "error",
+                        )
+                        return
                     manager.backup_in_progress = True
                     manager.update_status()
                     manager.add_log("[GUI Backend] Ejecutando backup en frío...", "backup")
