@@ -80,11 +80,11 @@ pip install hypothesis pytest
 python -m pytest tests/ -q
 ```
 
-Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local, más suites de inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback) y de la máquina de estados del disparo manual de backup en caliente.
+Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local, más suites de inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback) y de la máquina de estados del disparo manual de backup en caliente. Desde la revisión de 2026-08-02 incluyen además regresiones de los fixes (reintento inmediato tras snapshot incompleto, validación de snapshot por `level.dat`, retención con reloj inyectable, filtro de backups corruptos en la GUI, guard TOCTOU del restore) y propiedades adicionales: prefijos de log apilados, idempotencia/normalización de rutas y consenso anti-drift del guard zip-slip entre sus copias.
 
 ### Detalles técnicos
 
-Me dio bastantes dolores de cabeza la parte donde la compresión del ZIP se quedaba colgada, así que el worker corre en un proceso separado vía `subprocess` (arranque rápido, sin el pipe de bootstrap de `multiprocessing.spawn`, que se colgaba 50-120 s con el servidor en marcha) con un timeout de seguridad: si tarda más de 2 minutos comprimiendo, el wrapper mata el proceso para que el servidor no quede congelado. La cancelación cooperativa usa un archivo marcador (un hijo subprocess no comparte eventos de memoria). Espero haber tapado todos los huecos de concurrencia. Si ven algún bug me avisan.
+Me dio bastantes dolores de cabeza la parte donde la compresión del ZIP se quedaba colgada, así que el worker corre en un proceso separado vía `subprocess` (arranque rápido, sin el pipe de bootstrap de `multiprocessing.spawn`, que se colgaba 50-120 s con el servidor en marcha) con un timeout de seguridad: si tarda más de 2 minutos comprimiendo, el wrapper mata el proceso para que el servidor no quede congelado. La cancelación cooperativa usa un archivo marcador (un hijo subprocess no comparte eventos de memoria). Si el `save query` llega incompleto, el wrapper reintenta el ciclo caliente de inmediato en vez de esperar los 30 minutos; el watchdog de 60 s acota el reintento si el servidor no responde. Espero haber tapado todos los huecos de concurrencia. Si ven algún bug me avisan.
 
 ---
 
@@ -164,8 +164,8 @@ pip install hypothesis pytest
 python -m pytest tests/ -q
 ```
 
-Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control, plus backup fault-injection suites (cancellation, double backup, incomplete snapshot, corrupt ZIP, rollback) and the hot-backup manual trigger state machine.
+Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control, plus backup fault-injection suites (cancellation, double backup, incomplete snapshot, corrupt ZIP, rollback) and the hot-backup manual trigger state machine. Since the 2026-08-02 review it also includes fix regressions (immediate retry after an incomplete snapshot, snapshot validation by `level.dat`, clock-injectable retention, corrupt-backup filtering in the GUI, restore TOCTOU guard) and extra properties: stacked log prefixes, path idempotence/normalization and anti-drift consensus of the zip-slip guard across its copies.
 
 ### Random technical notes
 
-I had some serious headaches with the ZIP compression getting stuck, so the worker now runs in a separate process via `subprocess` (fast startup, no `multiprocessing.spawn` bootstrap pipe, which hung for 50-120 s while the server was running) with a safety timeout: if compression takes more than 2 minutes, the wrapper kills the process so the server doesn't stay frozen. Cooperative cancellation uses a marker file (a subprocess child can't share in-memory events). Hopefully I covered all the concurrency edge cases. Let me know if you find any bugs.
+I had some serious headaches with the ZIP compression getting stuck, so the worker now runs in a separate process via `subprocess` (fast startup, no `multiprocessing.spawn` bootstrap pipe, which hung for 50-120 s while the server was running) with a safety timeout: if compression takes more than 2 minutes, the wrapper kills the process so the server doesn't stay frozen. Cooperative cancellation uses a marker file (a subprocess child can't share in-memory events). If the `save query` arrives incomplete, the wrapper retries the hot cycle immediately instead of waiting the full 30 minutes; the 60 s watchdog bounds the retry if the server stops responding. Hopefully I covered all the concurrency edge cases. Let me know if you find any bugs.
