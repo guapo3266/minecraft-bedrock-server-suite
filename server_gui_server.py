@@ -461,8 +461,11 @@ async def handle_action(action_name: str, request: Request):
                 manager.add_log("[GUI Backend] Ejecutando backup en frío...", "backup")
                 try:
                     zip_path = auto_backup.create_backup("gui_manual")
-                    manager.last_backup_time = time.strftime("%H:%M:%S")
-                    manager.add_log(f"[GUI Backend] Backup exitoso: {os.path.basename(zip_path)}", "backup")
+                    if zip_path:
+                        manager.last_backup_time = time.strftime("%H:%M:%S")
+                        manager.add_log(f"[GUI Backend] Backup exitoso: {os.path.basename(zip_path)}", "backup")
+                    else:
+                        manager.add_log("[GUI Backend] Error en backup: no se produjo un ZIP (revisa la consola del servidor).", "error")
                 except Exception as e:
                     manager.add_log(f"[GUI Backend] Error en backup: {e}", "error")
                 finally:
@@ -620,6 +623,21 @@ async def check_update(request: Request):
     }
 
 
+_CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
+
+
+def _list_backup_files(backup_dir):
+    """Zips de backup visibles para restauracion.
+
+    Excluye los marcados como corruptos/excedidos (mismos criterios que
+    auto_backup.rotate_backups): restaurar un backup corrupto siempre falla.
+    """
+    return [
+        z for z in glob.glob(os.path.join(backup_dir, "*.zip"))
+        if not any(marker in os.path.basename(z) for marker in _CORRUPT_MARKERS)
+    ]
+
+
 @app.get("/api/backups")
 async def list_backups(request: Request):
     _ensure_local(request.client.host if request.client else "")
@@ -627,7 +645,7 @@ async def list_backups(request: Request):
     if not os.path.exists(backup_dir):
         return {"backups": []}
 
-    zips = glob.glob(os.path.join(backup_dir, "*.zip"))
+    zips = _list_backup_files(backup_dir)
     backups_info = []
     for z in sorted(zips, key=os.path.getmtime, reverse=True):
         size_mb = round(os.path.getsize(z) / (1024 * 1024), 2)
@@ -666,8 +684,24 @@ async def restore_backup(request: Request):
         )
 
     manager.add_log(f"[GUI] Restaurando backup: {filename}", "backup")
+
+    def _restore_with_running_guard():
+        # Re-chequeo dentro del threadpool: el servidor pudo encenderse entre
+        # el chequeo del endpoint y la ejecucion real de la restauracion
+        # (TOCTOU). Restaurar sobre un mundo vivo corromperia ambos.
+        if manager.is_running:
+            raise HTTPException(
+                status_code=409,
+                detail="El servidor se encendió durante la restauración; operación cancelada",
+            )
+        return auto_backup.restore_backup(filename)
+
     try:
-        restored_path = await run_in_threadpool(auto_backup.restore_backup, filename)
+        restored_path = await run_in_threadpool(_restore_with_running_guard)
+    except HTTPException:
+        # El guard interno (409 si el servidor se encendio) debe propagarse
+        # tal cual; no dejarlo caer en el except Exception -> 500.
+        raise
     except FileNotFoundError as e:
         manager.add_log(f"[GUI] Error al restaurar {filename}: {e}", "error")
         raise HTTPException(status_code=404, detail=str(e))
