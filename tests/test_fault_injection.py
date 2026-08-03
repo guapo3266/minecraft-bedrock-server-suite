@@ -77,11 +77,13 @@ def test_backup_cancelado_libera_lock_y_limpia_tmp(capsys):
         cancel = threading.Event()
         cancel.set()  # cancelado de antemano -> aborta en la primera comprobacion
         snap = [("level.dat", 100), ("db/CURRENT", 15), ("db/file_00.log", 64), ("db/file_01.log", 64)]
-        import pytest
-        with pytest.raises(RuntimeError):
-            auto_backup.create_backup("test", file_snapshot=snap,
-                                      cancel_event=cancel, external_lock=lock)
+        # La cancelacion NO es desincronizacion del snapshot: create_backup
+        # devuelve False (no propaga SnapshotDesyncError) y el wrapper no
+        # reintenta una cancelacion.
+        result = auto_backup.create_backup("test", file_snapshot=snap,
+                                           cancel_event=cancel, external_lock=lock)
         out = capsys.readouterr().out
+        assert result is False
         assert "Backup cancelado" in out
         # Sin .tmp huerfanos ni zip publicado
         assert not glob_tmp(fake_bkp), "quedaron .tmp huerfanos"

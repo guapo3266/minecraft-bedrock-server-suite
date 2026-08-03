@@ -49,12 +49,16 @@ def _main():
             cancel_event=_FileCancel(marker),
         )
         result = {"zip": zip_path, "error": None}
-    except Exception as e:
-        # create_backup en modo snapshot SIEMPRE lanza en un fallo (nunca
-        # devuelve False); el prefijo "Snapshot:" anota el contexto para que
-        # el wrapper distinga (reintento inmediato) de los fallos operativos
-        # (cancelacion, limite de tamano) que no merecen reintento.
+    except auto_backup.SnapshotDesyncError as e:
+        # Snapshot desincronizado/incompleto: un nuevo save query puede dar un
+        # snapshot consistente. El prefijo "Snapshot:" lo marca para que el
+        # wrapper lo reintente con backoff.
         result = {"zip": None, "error": "Snapshot: %s" % e}
+    except Exception as e:
+        # Errores de almacenamiento/operativos (disco lleno, permisos, creacion
+        # del ZIP, cancelacion): un reintento no los resuelve; viajan sin el
+        # prefijo y el wrapper espera el intervalo normal de backup.
+        result = {"zip": None, "error": str(e)}
 
     try:
         with open(result_path, "wb") as f:
