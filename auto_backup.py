@@ -35,6 +35,16 @@ DAYS_TO_KEEP_DAILY = 7
 # Limite de seguridad: tamaño maximo total del backup comprimido (10 GB default)
 MAX_BACKUP_BYTES = 10 * 1024**3  # 10,737,418,240 bytes
 
+
+class SnapshotDesyncError(RuntimeError):
+    """Snapshot desincronizado o incompleto.
+
+    Es la UNICA categoria de fallo del modo snapshot que merece reintento:
+    un nuevo `save query` puede producir un snapshot consistente. Los errores
+    de almacenamiento (disco lleno, permisos, creacion del ZIP) NO se resuelven
+    reintentando y quedan fuera de esta clase.
+    """
+
 def _cancelled(cancel_event):
     return cancel_event is not None and cancel_event.is_set()
 
@@ -128,14 +138,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         # Modo tradicional: escanea WORLD_DIR directamente (abajo en el else)
         if use_snapshot:
             if not isinstance(file_snapshot, list) or len(file_snapshot) == 0:
-                raise RuntimeError("Snapshot Bedrock vacio o invalido; se aborta backup caliente.")
+                raise SnapshotDesyncError("Snapshot Bedrock vacio o invalido; se aborta backup caliente.")
 
             # Validación de cobertura de snapshot: exige el archivo esencial del nivel.
             # (El conteo magico "<4" rechazaba mundos pequeños pero válidos; lo que
             # define un snapshot util es que incluya level.dat, y luego se verifica
             # la cobertura real de db/ contra disco.)
             if not any(os.path.basename(p.replace("\\", "/")) == "level.dat" for p, _ in file_snapshot):
-                raise RuntimeError(
+                raise SnapshotDesyncError(
                     "Snapshot sin level.dat; snapshot incompleto o inválido."
                 )
 
@@ -148,7 +158,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         real_db_files.add(os.path.relpath(os.path.join(root, fname), WORLD_DIR).replace("\\", "/"))
                 snapshot_db_files = {p for p, _ in file_snapshot if p.startswith("db/") or p.startswith("db\\") or "/db/" in p or "\\db\\" in p}
                 if len(real_db_files) > 0 and len(snapshot_db_files) < len(real_db_files) * 0.70:
-                    raise RuntimeError(
+                    raise SnapshotDesyncError(
                         f"Snapshot incompleto: {len(snapshot_db_files)} archivos db/ en snapshot vs {len(real_db_files)} en disco."
                     )
 
@@ -167,22 +177,30 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     arcname = os.path.relpath(full_path, WORLD_DIR)
 
                     if not os.path.exists(full_path):
-                        raise RuntimeError(f"Archivo de snapshot no encontrado en disco: {clean_rel_path}")
+                        raise SnapshotDesyncError(f"Archivo de snapshot no encontrado en disco: {clean_rel_path}")
 
-                    with open(full_path, 'rb') as f:
-                        data = f.read(byte_length)
-                        extra = f.read(1)
+                    try:
+                        with open(full_path, 'rb') as f:
+                            data = f.read(byte_length)
+                            extra = f.read(1)
+                    except FileNotFoundError as fnf:
+                        # TOCTOU entre el exists() y el open(): BDS pudo borrar
+                        # el archivo en ese intervalo. Es desincronizacion del
+                        # snapshot (reintentable), no un error de almacenamiento.
+                        raise SnapshotDesyncError(
+                            f"Archivo de snapshot desaparecido durante la copia: {clean_rel_path}"
+                        ) from fnf
 
                     # Los .log y MANIFEST de LevelDB pueden crecer durante save hold (flushes del SO).
                     # Solo rechazamos si el archivo es mas chico (truncado real).
                     # Si es mas grande, leemos los bytes del snapshot y seguimos.
                     is_wal = clean_rel_path.endswith('.log') or 'MANIFEST-' in clean_rel_path
                     if len(data) < byte_length:
-                        raise RuntimeError(
+                        raise SnapshotDesyncError(
                             f"Snapshot truncado en '{clean_rel_path}': {len(data)} < {byte_length} bytes."
                         )
                     if extra and not is_wal:
-                        raise RuntimeError(
+                        raise SnapshotDesyncError(
                             f"Desincronizacion de snapshot en '{clean_rel_path}': archivo mas grande que snapshot ({byte_length}+ bytes)."
                         )
 
@@ -253,15 +271,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             print(f"[WARN] Fallo en rotacion de backups: {e}")
     except Exception as e:
         print(f"[ERROR] No se pudo crear el backup: {e}")
-        if file_snapshot is not None:
-            # Modo snapshot: CUALQUIER fallo se propaga (no solo los RuntimeError
-            # de validacion). Un FileNotFoundError/OSError durante la lectura
-            # (archivo borrado por BDS entre save query y copia) tambien es un
-            # snapshot desincronizado y merece reintento. Devolver False aqui
-            # perderia el motivo: backup_worker lo convierte en
-            # {"zip": False, "error": None} y el wrapper no reintenta. El
-            # finally (limpieza + release del lock) corre igualmente; el modo
-            # tradicional (file_snapshot=None) conserva su contrato (False).
+        if isinstance(e, SnapshotDesyncError):
+            # Snapshot desincronizado/incompleto: merece reintento (un nuevo
+            # save query puede dar un snapshot consistente). Se propaga para
+            # que el worker lo anote y el wrapper lo reintente con backoff.
+            # Cualquier otro error en modo snapshot (disco lleno, permisos,
+            # creacion del ZIP, cancelacion, limite de tamano) NO se resuelve
+            # reintentando: devuelve False y el wrapper espera el intervalo
+            # normal. El finally (limpieza + release del lock) corre igual.
             raise
         return False
     finally:
