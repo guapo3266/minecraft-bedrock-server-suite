@@ -33,7 +33,7 @@ Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola e
 iniciar_servidor.bat     ← doble clic y el servidor arranca con la consola
 ```
 
-Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, hace backups automáticos cada 30 minutos (más uno al arrancar y otro al apagar) y mantiene los últimos 15 backups.
+Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, hace backups automáticos cada 30 minutos (más uno al arrancar y otro al apagar) y mantiene los últimos 15 backups. Para forzar un backup caliente al instante, escribí `backup` en la consola del wrapper.
 
 Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI y seguir usando los scripts de respaldo de siempre.
 
@@ -117,7 +117,7 @@ Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, s
 iniciar_servidor.bat     ← double-click and the server starts with the console
 ```
 
-The original mode: the wrapper reads the server console, detects players, runs automatic backups every 30 minutes (plus one on start and one on stop) and keeps the last 15 backups.
+The original mode: the wrapper reads the server console, detects players, runs automatic backups every 30 minutes (plus one on start and one on stop) and keeps the last 15 backups. To force a hot backup on the spot, type `backup` in the wrapper console.
 
 Both modes share the same wrapper and folder — you can start with the GUI and keep using the same backup scripts as always.
 
