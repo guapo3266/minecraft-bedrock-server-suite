@@ -28,6 +28,7 @@ def _world_name():
 
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())
 BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups"))
+_CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
 
 
 def _is_safe_zip_entry(filename: str) -> bool:
@@ -58,6 +59,14 @@ def _validate_backup(zip_path: str):
             raise ValueError(f"Backup corrupto (CRC fallido): {bad}")
 
 
+def _list_backup_files(backup_dir):
+    """Devuelve solo backups aptos para ofrecerlos en la CLI."""
+    return [
+        path for path in glob.glob(os.path.join(backup_dir, "auto_backup_*.zip"))
+        if not any(marker in os.path.basename(path) for marker in _CORRUPT_MARKERS)
+    ]
+
+
 def list_and_restore():
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 60)
@@ -70,7 +79,7 @@ def list_and_restore():
         input("\nPresiona Enter para salir...")
         return
 
-    backups = glob.glob(os.path.join(BACKUP_DIR, "auto_backup_*.zip"))
+    backups = _list_backup_files(BACKUP_DIR)
     backups.sort(key=os.path.getmtime, reverse=True)  # Mas reciente primero
 
     if not backups:

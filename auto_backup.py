@@ -4,6 +4,7 @@ import zipfile
 import glob
 import multiprocessing
 import shutil
+import re
 
 # Lock por defecto (multiprocessing safe)
 _backup_lock = multiprocessing.Lock()
@@ -34,6 +35,10 @@ DAYS_TO_KEEP_DAILY = 7
 
 # Limite de seguridad: tamaño maximo total del backup comprimido (10 GB default)
 MAX_BACKUP_BYTES = 10 * 1024**3  # 10,737,418,240 bytes
+
+# Tamano de chunk para la copia en streaming de archivos de snapshot:
+# el pico de RAM es constante (~2x chunk), no proporcional al archivo.
+_CHUNK = 8 * 1024 * 1024
 
 
 class SnapshotDesyncError(RuntimeError):
@@ -127,8 +132,19 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         os.makedirs(BACKUP_DIR, exist_ok=True)
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        zip_filename = f"auto_backup_{trigger_name}_{timestamp}.zip"
+        # FIX F4: trigger_name puede venir de cualquier origen; se sanea para
+        # que el ZIP nunca escape de BACKUP_DIR (separadores, '..', etc.)
+        safe_trigger = re.sub(r"[^A-Za-z0-9_-]", "_", str(trigger_name))
+        # FIX G5: nonce aleatorio en el nombre: dos backups lanzados en el
+        # mismo segundo ya no comparten nombre (antes el segundo os.replace
+        # pisaba silenciosamente al primero).
+        nonce = os.urandom(3).hex()
+        zip_filename = f"auto_backup_{safe_trigger}_{timestamp}_{nonce}.zip"
         zip_filepath = os.path.join(BACKUP_DIR, zip_filename)
+        if os.path.abspath(zip_filepath) != os.path.join(
+            os.path.abspath(BACKUP_DIR), os.path.basename(zip_filepath)
+        ):
+            raise RuntimeError(f"Nombre de backup invalido tras saneo: {trigger_name!r}")
         tmp_filepath = zip_filepath + ".tmp"
 
         print(f"[*] Creando copia de seguridad comprimida ({trigger_name})...")
@@ -150,14 +166,19 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 )
 
             # Validacion cruzada contra disco: si el snapshot tiene < 70% de los archivos
-            # reales en WORLD_DIR/db, esta probablemente incompleto
+            # reales en WORLD_DIR/db, esta probablemente incompleto.
+            # FIX D8: el umbral se redondea a entero (int) para que mundos
+            # pequenos no den falso positivo (p.ej. 2 de 3 archivos db: antes
+            # 2 < 2.1 lanzaba desync aunque el snapshot era valido; reproducido
+            # en vivo con BDS real).
             if os.path.exists(os.path.join(WORLD_DIR, "db")):
                 real_db_files = set()
                 for root, dirs, files in os.walk(os.path.join(WORLD_DIR, "db")):
                     for fname in files:
                         real_db_files.add(os.path.relpath(os.path.join(root, fname), WORLD_DIR).replace("\\", "/"))
                 snapshot_db_files = {p for p, _ in file_snapshot if p.startswith("db/") or p.startswith("db\\") or "/db/" in p or "\\db\\" in p}
-                if len(real_db_files) > 0 and len(snapshot_db_files) < len(real_db_files) * 0.70:
+                min_expected = max(1, int(len(real_db_files) * 0.70))
+                if len(real_db_files) > 0 and len(snapshot_db_files) < min_expected:
                     raise SnapshotDesyncError(
                         f"Snapshot incompleto: {len(snapshot_db_files)} archivos db/ en snapshot vs {len(real_db_files)} en disco."
                     )
@@ -179,10 +200,37 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     if not os.path.exists(full_path):
                         raise SnapshotDesyncError(f"Archivo de snapshot no encontrado en disco: {clean_rel_path}")
 
+                    # FIX F3: copia en streaming por chunks (pico de RAM
+                    # constante ~2x chunk); antes se leia el archivo entero en
+                    # memoria. Misma semantica que el codigo anterior:
+                    #  - archivo mas corto que el snapshot -> truncado (desync)
+                    #  - archivo mas largo (no-WAL) -> desync
+                    #  - .log/MANIFEST (WAL) pueden crecer: se cortan en
+                    #    byte_length, como hacia f.read(byte_length).
+                    is_wal = clean_rel_path.endswith('.log') or 'MANIFEST-' in clean_rel_path
+                    zinfo = zipfile.ZipInfo(arcname, date_time=datetime.datetime.now().timetuple()[:6])
+                    zinfo.compress_type = zipfile.ZIP_DEFLATED
                     try:
-                        with open(full_path, 'rb') as f:
-                            data = f.read(byte_length)
-                            extra = f.read(1)
+                        with open(full_path, 'rb') as f, zipf.open(zinfo, 'w') as zout:
+                            remaining = byte_length
+                            copied = 0
+                            while remaining > 0:
+                                if _cancelled(cancel_event):
+                                    raise RuntimeError("Backup cancelado durante compresion snapshot.")
+                                chunk = f.read(min(_CHUNK, remaining))
+                                if not chunk:
+                                    break
+                                zout.write(chunk)
+                                copied += len(chunk)
+                                remaining -= len(chunk)
+                            if copied < byte_length:
+                                raise SnapshotDesyncError(
+                                    f"Snapshot truncado en '{clean_rel_path}': {copied} < {byte_length} bytes."
+                                )
+                            if not is_wal and f.read(1):
+                                raise SnapshotDesyncError(
+                                    f"Desincronizacion de snapshot en '{clean_rel_path}': archivo mas grande que snapshot ({byte_length}+ bytes)."
+                                )
                     except FileNotFoundError as fnf:
                         # TOCTOU entre el exists() y el open(): BDS pudo borrar
                         # el archivo en ese intervalo. Es desincronizacion del
@@ -191,23 +239,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                             f"Archivo de snapshot desaparecido durante la copia: {clean_rel_path}"
                         ) from fnf
 
-                    # Los .log y MANIFEST de LevelDB pueden crecer durante save hold (flushes del SO).
-                    # Solo rechazamos si el archivo es mas chico (truncado real).
-                    # Si es mas grande, leemos los bytes del snapshot y seguimos.
-                    is_wal = clean_rel_path.endswith('.log') or 'MANIFEST-' in clean_rel_path
-                    if len(data) < byte_length:
-                        raise SnapshotDesyncError(
-                            f"Snapshot truncado en '{clean_rel_path}': {len(data)} < {byte_length} bytes."
-                        )
-                    if extra and not is_wal:
-                        raise SnapshotDesyncError(
-                            f"Desincronizacion de snapshot en '{clean_rel_path}': archivo mas grande que snapshot ({byte_length}+ bytes)."
-                        )
-
-                    zinfo = zipfile.ZipInfo(arcname, date_time=datetime.datetime.now().timetuple()[:6])
-                    zinfo.compress_type = zipfile.ZIP_DEFLATED
-                    zipf.writestr(zinfo, data)
-                    total_bytes += len(data)
+                    total_bytes += copied
                     if total_bytes > MAX_BACKUP_BYTES:
                         raise RuntimeError(
                             f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
@@ -406,10 +438,12 @@ def restore_backup(filename: str) -> str:
         if os.path.exists(bak_dir):
             shutil.rmtree(bak_dir, ignore_errors=True)
         os.rename(WORLD_DIR, bak_dir)
-    os.makedirs(WORLD_DIR, exist_ok=True)
 
-    # 3. Extraer con doble chequeo de seguridad
+    # 3. Extraer con doble chequeo de seguridad.
+    # FIX G3: os.makedirs(WORLD_DIR) va DENTRO del try para que el rollback
+    # recupere el mundo si la creacion del directorio falla (permisos/espacio).
     try:
+        os.makedirs(WORLD_DIR, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
             for entry in zf.infolist():
                 if not _is_safe_zip_entry(entry.filename):

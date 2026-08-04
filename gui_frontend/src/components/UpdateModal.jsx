@@ -12,6 +12,7 @@ import { useI18n } from '../i18n.jsx';
 export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpdate, isUpdating }) {
   const { t } = useI18n();
   if (!isOpen) return null;
+  const versionUnavailable = !updateInfo || updateInfo.has_update == null || updateInfo.unavailable;
 
   return (
     <AnimatePresence>
@@ -51,7 +52,17 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
 
           {/* Body Content */}
           <div className="my-6 space-y-4">
-            {updateInfo?.has_update ? (
+            {versionUnavailable ? (
+              <TiltCard>
+                <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.2)">
+                  <div className="flex items-center gap-2 text-sm font-bold text-amber-400">
+                    <ShieldMotionIcon className="h-4 w-4" />
+                    <span>{t('versionUnavailable')}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-300">{t('versionUnavailableMsg')}</p>
+                </SpotlightCard>
+              </TiltCard>
+            ) : updateInfo?.has_update ? (
               <TiltCard>
                 <SpotlightCard spotlightColor="rgba(16, 185, 129, 0.2)">
                   <div className="flex items-center gap-2 text-sm font-bold text-emerald-400">

@@ -43,15 +43,16 @@ if not exist "gui_frontend\dist\index.html" (
 :: [3/3] Servidor
 echo.
 echo [3/3] Iniciando servidor FastAPI + WebSockets...
-echo Abriendo http://127.0.0.1:8000 en tu navegador...
+echo Si el puerto 8000 esta ocupado (p. ej. SillyTavern), la GUI usara
+echo automaticamente el siguiente puerto libre y abrira el navegador ahi.
+echo Para forzar un puerto fijo: set GUI_PORT=8001  antes de ejecutar.
 echo.
-start "" "http://127.0.0.1:8000"
 python server_gui_server.py
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [ERROR] Se produjo un error al ejecutar el servidor de la GUI.
-    echo         Si el puerto 8000 esta en uso, cierra la otra instancia.
+    echo         Revisa la consola de arriba para ver el motivo exacto.
 )
 echo.
 pause

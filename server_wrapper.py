@@ -46,6 +46,22 @@ RETRY_BACKOFF_MAX_SEC = 60              # Tope del backoff exponencial
 MAX_CONSECUTIVE_SNAPSHOT_RETRIES = 10   # Abandono del reintento hasta el proximo intervalo normal
 
 # ═══════════════════════════════════════════════════════════════
+# PATRONES DE DETECCION DEL LOG DE BDS (D5)
+# ───────────────────────────────────────────────────────────────
+# Strings ingleses que BDS imprime en el log. Si Mojang cambia el formato,
+# la deteccion falla SILENCIOSAMENTE: se pierden jugadores online y el save
+# query (los backups frios siguen funcionando). Centralizados aqui para
+# revisarlos en un solo lugar; la GUI los importa de este modulo.
+# ═══════════════════════════════════════════════════════════════
+BDS_PLAYER_CONNECTED = "Player connected:"
+BDS_PLAYER_DISCONNECTED = "Player disconnected:"
+BDS_SAVE_READY = "Data saved. Files are now ready to be copied."
+BDS_PLAYERS_LIST_HEAD = "players online:"
+_RE_PLAYER_CONNECT = re.compile(r"Player\s+connected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
+_RE_PLAYER_DISCONNECT = re.compile(r"Player\s+disconnected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
+_RE_PLAYERS_LIST = re.compile(r"There are (\d+)/\d+ players online:(.*)")
+
+# ═══════════════════════════════════════════════════════════════
 # ESTADO GLOBAL (protegido por state_lock)
 # ═══════════════════════════════════════════════════════════════
 state_lock = threading.Lock()           # Protege TODAS las variables de estado
@@ -72,7 +88,6 @@ snapshot_retry_at = 0.0                 # Timestamp del proximo reintento permit
 
 server_process = None
 
-
 # ═══════════════════════════════════════════════════════════════
 # Envio de comandos al servidor
 # ═══════════════════════════════════════════════════════════════
@@ -87,7 +102,6 @@ def send_command(cmd):
         pass
     except Exception as e:
         print(f"[Wrapper] Error enviando comando '{cmd}': {e}")
-
 
 def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
     """Renombra un archivo .zip a _POSIBLEMENTE_CORRUPTO si ocurrió una anomalia.
@@ -106,7 +120,6 @@ def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
             print(f"[Worker] Backup marcado por desincronización: {os.path.basename(corrupt_name)}")
         except Exception as e:
             print(f"[Worker] No se pudo renombrar el backup {zip_filepath}: {e}")
-
 
 def parse_save_query_files(line):
     """Extrae pares (ruta_relativa, bytes) de una línea de save query."""
@@ -129,7 +142,6 @@ def parse_save_query_files(line):
             parsed.append((clean_rel, int(size_str)))
     return parsed
 
-
 def _is_snapshot_failure(error_msg):
     """True si el error del worker merece reintento inmediato del ciclo caliente.
 
@@ -148,7 +160,6 @@ def _is_snapshot_failure(error_msg):
         return False
     return True
 
-
 def _snapshot_retry_delay(attempt):
     """Backoff exponencial entre reintentos de snapshot: 5, 10, 20, ... 60 s tope.
 
@@ -157,7 +168,6 @@ def _snapshot_retry_delay(attempt):
     sostenida (el watchdog solo limita cuando BDS NO responde).
     """
     return min(RETRY_BACKOFF_MAX_SEC, RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1)))
-
 
 # ═══════════════════════════════════════════════════════════════
 # PROCESO WORKER: Compresión en E/S aislada
@@ -195,21 +205,6 @@ class _FileCancelEvent:
         except Exception:
             pass
 
-
-def _run_backup_process(trigger_name, file_snapshot, cancel_event, result_queue, external_lock):
-    """Función de nivel superior (picklable) para ejecutar en un proceso aislado."""
-    import auto_backup
-    try:
-        zip_path = auto_backup.create_backup(
-            trigger_name,
-            file_snapshot=file_snapshot,
-            cancel_event=cancel_event,
-            external_lock=external_lock
-        )
-        result_queue.put({"zip": zip_path, "error": None})
-    except Exception as e:
-        result_queue.put({"zip": None, "error": str(e)})
-
 # ═══════════════════════════════════════════════════════════════
 # Forzar terminacion del proceso de compresion
 # ═══════════════════════════════════════════════════════════════
@@ -232,6 +227,20 @@ def _force_kill_compress_process(proc):
         # Reemplazar el lock IPC (puede quedar en mal estado tras kill)
         backup_ipc_lock = multiprocessing.Lock()
         active_compress_process = None
+
+        # FIX D4: el worker muerto pudo dejar un .tmp a medias; se limpia ya
+        # (antes quedaba huerfano hasta el siguiente backup). Bajo state_lock:
+        # no puede haber otro backup escribiendo al mismo tiempo.
+        try:
+            import glob as _glob
+            for orphan in _glob.glob(os.path.join(auto_backup.BACKUP_DIR, "*.tmp")):
+                try:
+                    os.remove(orphan)
+                    print(f"[Wrapper] Limpieza: eliminado {os.path.basename(orphan)} tras kill.")
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
 # ═══════════════════════════════════════════════════════════════
 # Hilo worker de compresion
@@ -391,8 +400,6 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 snapshot_retry_at = 0.0
                 last_backup_completed_time = time.time()
 
-
-
     except Exception as e:
         print(f"[Worker] [WARN] Excepcion en worker de backup: {type(e).__name__}: {e}")
         print("[Worker]          Limpiando estado del worker...")
@@ -432,14 +439,14 @@ def read_stdout():
                 pass
 
             # --- Detectar conexión de jugador ---
-            match_conn = re.search(r"Player connected:\s*(.+?),\s*xuid:", line)
+            match_conn = _RE_PLAYER_CONNECT.search(line)
             if match_conn:
                 name = match_conn.group(1).strip()
                 with state_lock:
                     players_online.add(name)
 
             # --- Detectar desconexión de jugador ---
-            match_disc = re.search(r"Player disconnected:\s*(.+?),\s*xuid:", line)
+            match_disc = _RE_PLAYER_DISCONNECT.search(line)
             if match_disc:
                 name = match_disc.group(1).strip()
                 with state_lock:
@@ -453,7 +460,7 @@ def read_stdout():
             with state_lock:
                 is_expecting_list = expecting_list_names and not backup_in_progress
 
-            match_list = re.search(r"There are (\d+)/\d+ players online:(.*)", line)
+            match_list = _RE_PLAYERS_LIST.search(line)
             if match_list:
                 count = int(match_list.group(1))
                 names_str = match_list.group(2).strip()
@@ -495,7 +502,7 @@ def read_stdout():
                                     expecting_list_names = False
 
             # --- Detectar respuesta exitosa de save query ---
-            save_ready_in_line = "Data saved. Files are now ready to be copied." in line
+            save_ready_in_line = BDS_SAVE_READY in line
 
             # --- Parsear líneas de respuesta de 'save query' (Archivos y truncado de bytes) ---
             parsed_files = parse_save_query_files(line)
@@ -526,7 +533,6 @@ def read_stdout():
                 print(f"[Wrapper] [WARN] Error en read_stdout: {type(e).__name__}: {e}")
             except Exception:
                 pass
-
 
 # ═══════════════════════════════════════════════════════════════
 # HILO scheduler: Reloj maestro, Watchdog ATÓMICO y Sincronización
@@ -637,7 +643,6 @@ def backup_scheduler():
             except Exception:
                 pass
 
-
 # ═══════════════════════════════════════════════════════════════
 # Apagado del servidor
 # ═══════════════════════════════════════════════════════════════
@@ -681,7 +686,6 @@ def initiate_shutdown(reason="shutdown"):
         print("[Wrapper] Enviando comando 'stop' al servidor...")
         send_command("stop")
 
-
 # ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdin (comandos del usuario)
 # ═══════════════════════════════════════════════════════════════
@@ -708,7 +712,6 @@ def _begin_manual_hot_backup():
         expecting_list_names = False
         snapshot_retry_at = 0.0  # el ciclo manual consume cualquier reintento pendiente
     return True
-
 
 def read_stdin():
     """Lee comandos del usuario y los reenvía al servidor."""
@@ -740,7 +743,6 @@ def read_stdin():
         except Exception:
             break
 
-
 # ═══════════════════════════════════════════════════════════════
 # Backup final de cierre
 # ═══════════════════════════════════════════════════════════════
@@ -752,7 +754,6 @@ def execute_final_backup():
             print("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.")
     except Exception as e:
         print(f"[Wrapper] Falló el backup final: {e}")
-
 
 # ═══════════════════════════════════════════════════════════════
 # PUNTO DE ENTRADA PRINCIPAL
