@@ -1,7 +1,7 @@
 # Informe de Auditoría — Servidor de Guapo TEST
 
 **Fecha:** 2026-07-21
-**Directorio:** `Servidor_de_Guapo_TEST`
+**Directorio:** `C:\Users\guapo\Downloads\Servidor_de_Guapo_TEST`
 **Archivos auditados:** `server_wrapper.py`, `auto_backup.py`, `restore_backup.py`, `enable_beta_apis.py`, `enable_beta_apis_v2.py`, `update_items.py`, `update_items_v2.py`, `iniciar_servidor.bat`, `01_hacer_backup.bat`, `02_restaurar_backup.bat`, `03_regresar_al_anterior.bat`
 **Total bugs encontrados:** 12
 **Total bugs corregidos:** 12
@@ -25,15 +25,15 @@
 ## Fase 1 — Paths Hardcodeados a PRODUCCIÓN (5 bugs)
 
 ### Descripción
-El directorio `Servidor_de_Guapo_TEST` es una copia de prueba del servidor real. Sin embargo, 5 archivos contenían rutas absolutas apuntando al servidor de **PRODUCCIÓN** (`Servidor_de_Guapo_PROD`). Ejecutar cualquiera de estos scripts desde TEST habría manipulado accidentalmente el mundo de producción.
+El directorio `Servidor_de_Guapo_TEST` es una copia de prueba del servidor real. Sin embargo, 5 archivos contenían rutas absolutas apuntando al servidor de **PRODUCCIÓN** (`C:\Users\guapo\Downloads\Servidores_Minecraft\Servidor de Guapo`). Ejecutar cualquiera de estos scripts desde TEST habría manipulado accidentalmente el mundo de producción.
 
 ### Bugs encontrados
 
 #### B1 — `restore_backup.py` (línea 8-9)
 ```python
 # ANTES:
-WORLD_DIR = r"Servidor_de_Guapo_PROD\worlds\Bedrock level"
-BACKUP_DIR = r"..\\..../Backups_Minecraft\auto_backups"
+WORLD_DIR = r"C:\Users\guapo\Downloads\Servidores_Minecraft\Servidor de Guapo\worlds\Bedrock level"
+BACKUP_DIR = r"C:\Users\guapo\Downloads\Backups_Minecraft\auto_backups"
 
 # DESPUÉS:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +45,7 @@ BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecra
 #### B2 — `iniciar_servidor.bat` (línea 22)
 ```batch
 :: ANTES:
-cd /d "Servidor_de_Guapo_PROD"
+cd /d "C:\Users\guapo\Downloads\Servidores_Minecraft\Servidor de Guapo"
 
 :: DESPUÉS:
 cd /d "%~dp0"
@@ -54,8 +54,8 @@ cd /d "%~dp0"
 #### B3 — `01_hacer_backup.bat` (línea 9-10)
 ```batch
 :: ANTES:
-set WORLD_DIR=Servidor_de_Guapo_PROD\worlds\Bedrock level
-set BACKUP_BASE=..\\..../Backups_Minecraft
+set WORLD_DIR=C:\Users\guapo\Downloads\Servidores_Minecraft\Servidor de Guapo\worlds\Bedrock level
+set BACKUP_BASE=C:\Users\guapo\Downloads\Backups_Minecraft
 
 :: DESPUÉS:
 set WORLD_DIR=%~dp0worlds\Bedrock level
@@ -65,7 +65,7 @@ set BACKUP_BASE=%~dp0..\..\Backups_Minecraft
 #### B4 — `02_restaurar_backup.bat` (línea 4)
 ```batch
 :: ANTES:
-cd /d "Servidor_de_Guapo_PROD"
+cd /d "C:\Users\guapo\Downloads\Servidores_Minecraft\Servidor de Guapo"
 
 :: DESPUÉS:
 cd /d "%~dp0"
@@ -74,8 +74,8 @@ cd /d "%~dp0"
 #### B5 — `03_regresar_al_anterior.bat` (línea 9-10)
 ```batch
 :: ANTES:
-set WORLD_DIR=Servidor_de_Guapo_PROD\worlds\Bedrock level
-set BACKUP_BASE=..\\..../Backups_Minecraft
+set WORLD_DIR=C:\Users\guapo\Downloads\Servidores_Minecraft\Servidor de Guapo\worlds\Bedrock level
+set BACKUP_BASE=C:\Users\guapo\Downloads\Backups_Minecraft
 
 :: DESPUÉS:
 set WORLD_DIR=%~dp0worlds\Bedrock level
@@ -175,9 +175,9 @@ Script: `__audit_test_rotate.py`
 
 ```python
 # Ejecutar desde C:\Users\guapo (CWD deliberadamente incorrecto)
-r = subprocess.run([sys.executable, "update_items.py"], cwd="<otro_directorio>")
+r = subprocess.run([sys.executable, "update_items.py"], cwd="C:\\Users\\guapo")
 # ANTES: "File not found: behavior_packs/..." (paths relativos)
-# DESPUÉS: "File not found: Servidor_de_Guapo_TEST\behavior_packs/..." (paths absolutos)
+# DESPUÉS: "File not found: C:\Users\guapo\Downloads\Servidor_de_Guapo_TEST\behavior_packs/..." (paths absolutos)
 ```
 
 Resultado: **2/2 PASS** — todos los paths ahora son absolutos, resolviéndose desde `BASE_DIR`.

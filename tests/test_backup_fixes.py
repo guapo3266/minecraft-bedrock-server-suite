@@ -16,6 +16,8 @@ import time
 import shutil
 import tempfile
 import datetime
+import asyncio
+import types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import pytest
@@ -219,7 +221,9 @@ def test_almacenamiento_no_reintentable(monkeypatch):
         def _disk_full(self, *args, **kwargs):
             raise OSError("[Errno 28] No space left on device")
 
-        monkeypatch.setattr(_zipfile.ZipFile, "writestr", _disk_full)
+        # El modo snapshot escribe en streaming via ZipFile.open (fix F3),
+        # no via writestr: se inyecta el fallo en el mecanismo real.
+        monkeypatch.setattr(_zipfile.ZipFile, "open", _disk_full)
 
         result = auto_backup.create_backup("test", file_snapshot=snap)
         assert result is False, (
@@ -239,6 +243,75 @@ def test_parse_prefixed_LOG():
         "[2026-07-30 12:00:00:001 LOG] db/000030.ldb:5"
     ) == [("db/000030.ldb", 5)]
     assert sw.parse_save_query_files("[WARN] [LOG] a:1") == [("a", 1)]
+
+
+def test_check_update_no_miente_si_version_instalada_es_desconocida(monkeypatch):
+    """Sin version local conocida, el endpoint no debe afirmar que todo esta actualizado."""
+    class Resp:
+        status_code = 200
+        text = "https://cdn.example/bedrock-server-1.26.33.2.zip"
+
+    class Req:
+        client = types.SimpleNamespace(host="127.0.0.1")
+
+    old_version = sgs.manager.installed_version
+    monkeypatch.setattr(sgs.manager, "installed_version", None)
+    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: Resp())
+    try:
+        result = asyncio.run(sgs.check_update(Req()))
+        assert result["latest_version"] == "1.26.33.2"
+        assert result["has_update"] is None
+    finally:
+        sgs.manager.installed_version = old_version
+
+
+def test_spawn_wrapper_limpia_evento_de_salida_antes_de_publicar_proceso(monkeypatch):
+    """Un proceso nuevo nunca debe heredar el evento set del proceso anterior."""
+    class FakeProcess:
+        pass
+
+    monkeypatch.setattr(sgs.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    was_set = sgs.manager.wrapper_exit_event.is_set()
+    sgs.manager.wrapper_exit_event.set()
+    try:
+        process = sgs._spawn_wrapper_process()
+        assert isinstance(process, FakeProcess)
+        assert not sgs.manager.wrapper_exit_event.is_set()
+    finally:
+        if was_set:
+            sgs.manager.wrapper_exit_event.set()
+        else:
+            sgs.manager.wrapper_exit_event.clear()
+
+
+def test_run_wrapper_actualiza_version_aunque_hubiera_version_anterior(monkeypatch):
+    """Cada arranque debe reemplazar la version capturada por la del nuevo log."""
+    class FakeStdout:
+        def __init__(self):
+            self.lines = iter(["Version: 1.26.33.2\n", ""])
+
+        def readline(self):
+            return next(self.lines)
+
+    class FakeProcess:
+        stdout = FakeStdout()
+
+        def wait(self):
+            return None
+
+    old_version = sgs.manager.installed_version
+    old_process = sgs.manager.wrapper_process
+    old_running = sgs.manager.is_running
+    monkeypatch.setattr(sgs.manager, "update_status", lambda: None)
+    monkeypatch.setattr(sgs.manager, "add_log", lambda *args, **kwargs: None)
+    sgs.manager.installed_version = "1.26.32.2"
+    try:
+        sgs.run_wrapper_thread(FakeProcess())
+        assert sgs.manager.installed_version == "1.26.33.2"
+    finally:
+        sgs.manager.installed_version = old_version
+        sgs.manager.wrapper_process = old_process
+        sgs.manager.is_running = old_running
 
 
 # ── 8) guard TOCTOU de /api/restore: 409 dentro del threadpool ────────────────
@@ -432,6 +505,44 @@ def test_apply_staged_update_rollback_restaura_instalacion(monkeypatch):
         assert not [d for d in os.listdir(base) if d.startswith("bds_update_prev_")]
 
 
+def test_recover_interrupted_update_restores_old_and_removes_new():
+    """Un proceso terminado entre fases deja una instalacion recuperable."""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = os.path.join(tmp, "base")
+        prev = os.path.join(base, "bds_update_prev_crash")
+        os.makedirs(prev)
+        _write(os.path.join(base, "a.dll"), b"new-a")
+        _write(os.path.join(base, "new.dll"), b"new-file")
+        _write(os.path.join(prev, "a.dll"), b"old-a")
+        _write(
+            os.path.join(prev, sgs._UPDATE_MANIFEST_NAME),
+            b'[{"path":"a.dll","had_previous":true},'
+            b'{"path":"new.dll","had_previous":false}]',
+        )
+
+        sgs.recover_interrupted_updates(base)
+
+        assert open(os.path.join(base, "a.dll"), "rb").read() == b"old-a"
+        assert not os.path.exists(os.path.join(base, "new.dll"))
+        assert not os.path.exists(prev)
+
+
+def test_cli_restore_excluye_backups_marcados():
+    import restore_backup
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in (
+            "auto_backup_bueno.zip",
+            "auto_backup_malo_CORRUPTO.zip",
+            "auto_backup_grande_EXCEDIDO.zip",
+        ):
+            open(os.path.join(tmp, name), "wb").close()
+
+        listed = restore_backup._list_backup_files(tmp)
+
+        assert [os.path.basename(path) for path in listed] == ["auto_backup_bueno.zip"]
+
+
 def test_start_rechaza_busy_con_operacion_en_curso():
     """Si una restauracion/actualizacion tiene op_lock, el start se rechaza
     con 'busy' (no espera ni lanza un segundo wrapper)."""
@@ -460,10 +571,23 @@ def test_doble_start_solo_lanza_un_wrapper(monkeypatch):
 
     calls = {"n": 0}
 
-    def fake_run_wrapper():
+    def fake_run_wrapper(*args, **kwargs):
         calls["n"] += 1
 
     monkeypatch.setattr(sgs, "run_wrapper_thread", fake_run_wrapper)
+
+    class _DummyProc:
+        stdin = type("S", (), {"write": lambda *a: None, "flush": lambda *a: None})()
+        stdout = type("O", (), {"readline": lambda *a: ""})()
+
+        def wait(self):
+            return 0
+
+        def poll(self):
+            return None
+
+    # FIX G1: el handler crea el subproceso bajo op_lock via _spawn_wrapper_process
+    monkeypatch.setattr(sgs, "_spawn_wrapper_process", lambda: _DummyProc())
     sgs.manager.is_running = False
     try:
         with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:

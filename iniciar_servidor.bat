@@ -19,6 +19,8 @@ echo  Para detener el servidor escribe: stop
 echo  ==========================================
 echo.
 
+:: Ejecutar el wrapper de ESTA instalacion (la carpeta del propio .bat),
+:: no una ruta hardcodeada a otra instalacion.
 cd /d "%~dp0"
 python server_wrapper.py
 

@@ -32,6 +32,8 @@ from urllib.parse import urlsplit
 
 # Importar lógica de auto_backup para consultar directorio de backups
 import auto_backup
+# D5: patrones de deteccion del log de BDS centralizados en server_wrapper
+from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
@@ -183,6 +185,7 @@ class ServerManager:
         self.last_backup_time = "Ninguno"
         self.backup_in_progress = False
         self.update_in_progress = False
+        self.installed_version = None  # FIX F1: version real capturada del log de BDS
         self.wrapper_exit_event = threading.Event()
         self.wrapper_exit_event.set()  # Sin wrapper en ejecución al inicio
         self.active_websockets: Set[WebSocket] = set()
@@ -239,11 +242,45 @@ manager = ServerManager()
 # ═══════════════════════════════════════════════════════════════
 # PROCESO WRAPPER EN SEGUNDO PLANO
 # ═══════════════════════════════════════════════════════════════
-def run_wrapper_thread():
-    """Ejecuta server_wrapper.py como un subproceso y redirige su stdout."""
-    python_exe = sys.executable
-    wrapper_path = os.path.join(BASE_DIR, "server_wrapper.py")
+def _spawn_wrapper_process():
+    """Crea el subproceso del wrapper (server_wrapper.py).
 
+    FIX G1: se llama SIEMPRE bajo op_lock desde start/restart, de modo que
+    manager.wrapper_process existe antes de liberar el lock: update_bds y
+    restore ya no pueden ver is_running=True con wrapper_process=None y
+    saltarse la detencion del servidor.
+    """
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    process = subprocess.Popen(
+        [sys.executable, "-u", os.path.join(BASE_DIR, "server_wrapper.py")],
+        cwd=BASE_DIR,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    # Limpia el estado de salida anterior antes de liberar op_lock. Si no,
+    # update_bds puede ver un proceso nuevo pero un evento todavía marcado
+    # como terminado y continuar sin esperar su cierre.
+    manager.wrapper_exit_event.clear()
+    return process
+
+
+def run_wrapper_thread(process=None):
+    """Hilo que consume el stdout del wrapper y mantiene el estado de la GUI.
+
+    `process` es el subproceso ya creado bajo op_lock (FIX G1); si es None
+    (flujo legacy), el hilo lo crea el mismo.
+    """
+
+    # Cada arranque debe volver a descubrir la versión del proceso actual.
+    manager.installed_version = None
     manager.add_log("[GUI Backend] Iniciando wrapper de Minecraft Bedrock...", "system")
     manager.wrapper_exit_event.clear()
     manager.is_running = True
@@ -251,22 +288,8 @@ def run_wrapper_thread():
     manager.update_status()
 
     try:
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUTF8"] = "1"
-
-        process = subprocess.Popen(
-            [python_exe, "-u", wrapper_path],
-            cwd=BASE_DIR,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            encoding="utf-8",
-            errors="replace",
-            env=env
-        )
+        if process is None:
+            process = _spawn_wrapper_process()
         manager.wrapper_process = process
 
         # Leer stdout en tiempo real
@@ -278,27 +301,45 @@ def run_wrapper_thread():
             if not line_str:
                 continue
 
+            # FIX F1: capturar la version instalada real desde el log de BDS
+            # ("Version: 1.26.33.2"); se usa en /api/check_update
+            m_ver = re.search(r"Version:\s*(\d+\.\d+\.\d+\.\d+)", line_str)
+            if m_ver:
+                manager.installed_version = m_ver.group(1)
+
             # Determinar tipo de log para coloreado en la GUI
             log_type = "info"
-            if "Player connected:" in line_str:
+            # D5: patrones compartidos con server_wrapper (una sola fuente)
+            m_conn = _RE_PLAYER_CONNECT.search(line_str)
+            m_disc = _RE_PLAYER_DISCONNECT.search(line_str)
+            if m_conn:
                 log_type = "join"
                 try:
-                    name = line_str.split("Player connected:")[1].split(",")[0].strip()
+                    name = m_conn.group(1).strip()
+                    if not name:
+                        raise ValueError("nombre de jugador ausente")
                     manager.players_online.add(name)
                     manager.update_status()
                 except Exception:
                     pass
-            elif "Player disconnected:" in line_str:
+            elif m_disc:
                 log_type = "leave"
                 try:
-                    name = line_str.split("Player disconnected:")[1].split(",")[0].strip()
+                    name = m_disc.group(1).strip()
+                    if not name:
+                        raise ValueError("nombre de jugador ausente")
                     manager.players_online.discard(name)
                     manager.update_status()
                 except Exception:
                     pass
-            elif "backup" in line_str.lower() or "compresión" in line_str.lower() or "save query" in line_str.lower():
+            elif any(k in line_str.lower() for k in ("backup", "compres", "save query")):
+                # FIX F2: "compres" es el prefijo comun de "compresion" y
+                # "compresión": la condicion externa NO debe excluir la linea
+                # del worker ("Iniciando compresion de archivos...", sin acento,
+                # y sin la palabra "backup").
                 log_type = "backup"
-                if "Iniciando compresión" in line_str or "Iniciando proceso de backup" in line_str:
+                # la cadena debe coincidir EXACTA con la del wrapper
+                if "Iniciando compresion de archivos en proceso separado" in line_str:
                     manager.backup_in_progress = True
                     manager.update_status()
                 elif "Compresión exitosa" in line_str or "Backup completado" in line_str:
@@ -335,6 +376,10 @@ async def hardware_metrics_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     manager.loop = asyncio.get_running_loop()
+    try:
+        recover_interrupted_updates()
+    except Exception as exc:
+        manager.add_log(f"[Actualizador BDS] No se pudo revisar una actualizacion interrumpida: {exc}", "error")
     task = asyncio.create_task(hardware_metrics_loop())
     yield
     task.cancel()
@@ -430,10 +475,23 @@ async def handle_action(action_name: str, request: Request):
         try:
             if manager.is_running:
                 return {"status": "already_running"}
+            # FIX G1: el subproceso del wrapper se crea BAJO el lock, de modo
+            # que wrapper_process existe antes de liberarlo: update_bds y
+            # restore ya no pueden ver is_running=True con wrapper_process
+            # None y saltarse la detencion del servidor durante el arranque.
+            try:
+                proc = _spawn_wrapper_process()
+            except Exception as e:
+                manager.add_log(f"[GUI Backend] Error al iniciar el wrapper: {e}", "error")
+                return {"status": "error", "message": str(e)}
+            # FIX G2: wrapper_process se asigna BAJO el lock (el hilo lo
+            # re-afirma al arrancar): tras la respuesta de start, /stop ya
+            # nunca ve is_running=True con wrapper_process=None.
+            manager.wrapper_process = proc
             manager.is_running = True  # el hilo lo reafirma al arrancar
         finally:
             manager.op_lock.release()
-        threading.Thread(target=run_wrapper_thread, daemon=True).start()
+        threading.Thread(target=run_wrapper_thread, args=(proc,), daemon=True).start()
         return {"status": "starting"}
 
     elif action == "stop":
@@ -474,7 +532,13 @@ async def handle_action(action_name: str, request: Request):
                 if manager.is_running:
                     manager.add_log("[GUI Backend] Otro inicio detectado durante el reinicio. Abortando.", "error")
                     return
-                threading.Thread(target=run_wrapper_thread, daemon=True).start()
+                # FIX G1: crear el subproceso bajo el lock (igual que start)
+                proc = _spawn_wrapper_process()
+                # FIX G2: wrapper_process asignado bajo el lock
+                manager.wrapper_process = proc
+                threading.Thread(target=run_wrapper_thread, args=(proc,), daemon=True).start()
+            except Exception as e:
+                manager.add_log(f"[GUI Backend] Error al iniciar el wrapper: {e}", "error")
             finally:
                 manager.op_lock.release()
 
@@ -483,6 +547,11 @@ async def handle_action(action_name: str, request: Request):
 
     elif action == "backup":
         if not manager.is_running or not manager.wrapper_process:
+            # FIX G5: un backup en frio ya en curso -> rechazar con 409
+            # (antes cada clic apilaba un hilo y dos backups del mismo
+            # segundo podian pisarse por compartir nombre).
+            if manager.backup_in_progress:
+                return {"status": "busy", "message": "Ya hay un backup en curso"}
             def manual_off_backup():
                 # op_lock durante TODA la copia: un start inmediato modificaria
                 # el mundo mientras se comprime, dando un backup inconsistente.
@@ -494,6 +563,15 @@ async def handle_action(action_name: str, request: Request):
                     if manager.is_running:
                         manager.add_log(
                             "[GUI Backend] El servidor se encendió; backup en frío cancelado (usa el backup en caliente).",
+                            "error",
+                        )
+                        return
+                    # Re-chequeo atomico bajo el lock (FIX G5): dos clics
+                    # simultaneos pueden pasar el check del handler; aqui se
+                    # descarta el segundo con op_lock ya adquirido.
+                    if manager.backup_in_progress:
+                        manager.add_log(
+                            "[GUI Backend] Ya hay un backup en frío en curso; solicitud ignorada.",
                             "error",
                         )
                         return
@@ -534,6 +612,8 @@ async def handle_action(action_name: str, request: Request):
 
         def do_update():
             temp_zip = os.path.join(BASE_DIR, "bds_update.zip")
+            downloaded_version = None
+            staging_dir = None
             # op_lock durante TODO el ciclo de actualizacion (detener el
             # servidor, backup preventivo, descarga, extraccion): un start o
             # restart durante cualquiera de esas fases arrancaria BDS mientras
@@ -550,7 +630,13 @@ async def handle_action(action_name: str, request: Request):
                         pass
                     # Esperar a que el proceso termine de verdad antes de tocar archivos
                     if not manager.wrapper_exit_event.wait(timeout=30):
-                        manager.add_log("[Actualizador BDS] El servidor no se detuvo en 30s. Actualización cancelada.", "error")
+                        # D6: comportamiento intencional (nunca actualizar con el
+                        # servidor vivo); el mensaje deja claro el estado y como seguir.
+                        manager.add_log(
+                            "[Actualizador BDS] El servidor no se detuvo en 30s. Actualización cancelada; "
+                            "el servidor quedó detenido. Reinícialo con ▶ Iniciar.",
+                            "error",
+                        )
                         return
 
                 manager.add_log("[Actualizador BDS] Ejecutando backup preventivo de seguridad...", "backup")
@@ -566,9 +652,10 @@ async def handle_action(action_name: str, request: Request):
                 try:
                     r = requests.get("https://www.minecraft.net/en-us/download/server/bedrock", headers=headers, timeout=5)
                     if r.status_code == 200:
-                        match = re.search(r'https://[^\s"]+?bedrock-server-\d+\.\d+\.\d+\.\d+\.zip', r.text)
+                        match = re.search(r'https://[^\s"]+?bedrock-server-(\d+\.\d+\.\d+\.\d+)\.zip', r.text)
                         if match:
                             url = match.group(0)
+                            downloaded_version = match.group(1)
                 except Exception:
                     pass
                 if not url:
@@ -613,14 +700,15 @@ async def handle_action(action_name: str, request: Request):
                             continue
                         z.extract(item, staging_dir)
 
-                if not os.path.exists(os.path.join(staging_dir, "bedrock_server.exe")):
-                    raise RuntimeError(
-                        "El zip descargado no contiene bedrock_server.exe; se aborta sin tocar la instalacion."
-                    )
+                # D3: raiz efectiva del staging (zip plano actual o una unica
+                # carpeta raiz historica); falla cerrada ante estructuras ambiguas.
+                update_root = _resolve_update_root(staging_dir)
 
                 # Aplica con rollback: si algo falla a mitad, la instalacion
                 # vuelve a los binarios anteriores (sin versiones mezcladas).
-                _apply_staged_update(staging_dir, BASE_DIR, preserve_files, preserve_dirs)
+                _apply_staged_update(update_root, BASE_DIR, preserve_files, preserve_dirs)
+                if downloaded_version:
+                    manager.installed_version = downloaded_version
 
                 manager.add_log("[Actualizador BDS] ¡Servidor actualizado exitosamente a la versión oficial de Mojang!", "system")
             except Exception as e:
@@ -630,6 +718,8 @@ async def handle_action(action_name: str, request: Request):
                 if os.path.exists(temp_zip):
                     try: os.remove(temp_zip)
                     except Exception: pass
+                if staging_dir and os.path.exists(staging_dir):
+                    shutil.rmtree(staging_dir, ignore_errors=True)
                 manager.update_in_progress = False
                 manager.update_status()
                 manager.add_log("[Actualizador BDS] Proceso de actualización finalizado.", "system")
@@ -644,21 +734,27 @@ async def handle_action(action_name: str, request: Request):
 @app.get("/api/check_update")
 async def check_update(request: Request):
     _ensure_local(request.client.host if request.client else "")
-    current_ver = "1.21.0.0"
-    release_notes = os.path.join(BASE_DIR, "release-notes.txt")
-    if os.path.exists(release_notes):
-        try:
-            with open(release_notes, "r", encoding="utf-8") as f:
-                content = f.read()
-                match = re.search(r"(\d+\.\d+\.\d+\.\d+)", content)
-                if match:
-                    current_ver = match.group(1)
-        except Exception:
-            pass
 
-    latest_ver = current_ver
+    # FIX F1: la version instalada REAL se captura del log de BDS
+    # (run_wrapper_thread). Fallback al release-notes.txt (formato antiguo).
+    current_ver = manager.installed_version
+    if not current_ver:
+        release_notes = os.path.join(BASE_DIR, "release-notes.txt")
+        if os.path.exists(release_notes):
+            try:
+                with open(release_notes, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    match = re.search(r"(\d+\.\d+\.\d+\.\d+)", content)
+                    if match:
+                        current_ver = match.group(1)
+            except Exception:
+                pass
+
+    latest_ver = None
     download_url = None
-    has_update = False
+    has_update = None  # True/False solo cuando ambas versiones son conocidas
+    unavailable = False
+    reason = None
 
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -668,21 +764,68 @@ async def check_update(request: Request):
             if match:
                 download_url = match.group(0)
                 latest_ver = match.group(1)
-                # Comparación semántica numérica (evita falsos 'has_update' con versiones más nuevas)
-                if _version_tuple(latest_ver) > _version_tuple(current_ver):
-                    has_update = True
-    except Exception:
-        pass
+            else:
+                # La pagina actual de Mojang no expone el link del zip en el
+                # HTML servido (verificado en vivo 2026-08-03): no hay forma
+                # fiable de conocer la ultima version. Se reporta el estado
+                # como NO DISPONIBLE en vez de mentir con has_update=False.
+                unavailable = True
+                reason = "la pagina de Mojang no expone la version del zip en el HTML"
+        else:
+            unavailable = True
+            reason = "la pagina de Mojang respondio HTTP %d" % resp.status_code
+    except Exception as e:
+        unavailable = True
+        reason = "no se pudo consultar la pagina de Mojang: %s" % type(e).__name__
+
+    if latest_ver and current_ver:
+        # Comparación semántica numérica (evita falsos 'has_update' con versiones más nuevas)
+        has_update = _version_tuple(latest_ver) > _version_tuple(current_ver)
 
     return {
         "current_version": current_ver,
         "latest_version": latest_ver,
         "download_url": download_url,
-        "has_update": has_update
+        "has_update": has_update,
+        "unavailable": unavailable,
+        "reason": reason,
     }
 
 
 _CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
+
+
+def _resolve_update_root(staging_dir):
+    """Resuelve la raiz efectiva del staging extraido (D3).
+
+    El zip oficial actual es plano (validado con bedrock-server-1.26.33.2:
+    9761 entradas, bedrock_server.exe en la raiz), pero algunas distribuciones
+    envuelven el contenido en una unica carpeta raiz (p.ej.
+    'bedrock-server-X.Y.Z.W/'). Se acepta solo esa forma inequivoca; cualquier
+    estructura ambigua sigue fallando cerrada. Lanza RuntimeError si no hay
+    bedrock_server.exe en ninguna de las dos formas.
+    """
+    update_root = staging_dir
+    if not os.path.exists(os.path.join(update_root, "bedrock_server.exe")):
+        top_entries = os.listdir(staging_dir)
+        top_dirs = [
+            name for name in top_entries
+            if os.path.isdir(os.path.join(staging_dir, name))
+        ]
+        top_files = [
+            name for name in top_entries
+            if os.path.isfile(os.path.join(staging_dir, name))
+        ]
+        if len(top_dirs) == 1 and not top_files:
+            candidate = os.path.join(staging_dir, top_dirs[0])
+            if os.path.exists(os.path.join(candidate, "bedrock_server.exe")):
+                update_root = candidate
+
+    if not os.path.exists(os.path.join(update_root, "bedrock_server.exe")):
+        raise RuntimeError(
+            "El zip descargado no contiene bedrock_server.exe; se aborta sin tocar la instalacion."
+        )
+    return update_root
 
 
 def _is_preserved_update_path(rel, preserve_files, preserve_dirs):
@@ -691,6 +834,52 @@ def _is_preserved_update_path(rel, preserve_files, preserve_dirs):
     return rel_norm in preserve_files or any(
         rel_norm.startswith(d + "/") for d in preserve_dirs
     )
+
+
+_UPDATE_MANIFEST_NAME = ".bds_update_manifest.json"
+
+
+def recover_interrupted_updates(base_dir=BASE_DIR):
+    """Recupera una actualización interrumpida antes de aceptar operaciones.
+
+    `_apply_staged_update` escribe un manifiesto antes de mover el primer
+    binario. Si el proceso muere entre las dos fases, el manifiesto permite
+    quitar archivos nuevos y devolver exactamente los archivos que existían.
+    Un directorio antiguo sin manifiesto se conserva para inspección manual.
+    """
+    pattern = os.path.join(base_dir, "bds_update_prev_*")
+    for prev_dir in glob.glob(pattern):
+        if not os.path.isdir(prev_dir):
+            continue
+        manifest_path = os.path.join(prev_dir, _UPDATE_MANIFEST_NAME)
+        if not os.path.isfile(manifest_path):
+            continue
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+            if not isinstance(entries, list):
+                raise ValueError("manifiesto no es una lista")
+
+            for entry in entries:
+                rel = entry.get("path") if isinstance(entry, dict) else None
+                had_previous = entry.get("had_previous") if isinstance(entry, dict) else None
+                if not isinstance(rel, str) or not isinstance(had_previous, bool) or not _is_safe_zip_entry(rel):
+                    raise ValueError("entrada invalida en manifiesto")
+                target = os.path.abspath(os.path.join(base_dir, rel.replace("/", os.sep)))
+                if os.path.commonpath([os.path.abspath(base_dir), target]) != os.path.abspath(base_dir):
+                    raise ValueError("ruta fuera de la instalacion")
+                if os.path.isfile(target):
+                    os.remove(target)
+                if had_previous:
+                    old_path = os.path.join(prev_dir, rel.replace("/", os.sep))
+                    if os.path.isfile(old_path):
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        os.replace(old_path, target)
+            shutil.rmtree(prev_dir, ignore_errors=True)
+        except Exception as exc:
+            # No borrar un resguardo que no se pudo interpretar: conserva la
+            # posibilidad de recuperación manual y evita agravar el incidente.
+            print(f"[Actualizador BDS] No se pudo recuperar {os.path.basename(prev_dir)}: {exc}")
 
 
 def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
@@ -705,6 +894,22 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
     prev_dir = tempfile.mkdtemp(prefix="bds_update_prev_", dir=base_dir)
     applied = []  # rutas relativas ya movidas del staging al destino
     try:
+        manifest = []
+        for root, _dirs, names in os.walk(staging_dir):
+            for n in names:
+                rel = os.path.relpath(os.path.join(root, n), staging_dir)
+                if _is_preserved_update_path(rel, preserve_files, preserve_dirs):
+                    continue
+                target = os.path.join(base_dir, rel)
+                manifest.append({
+                    "path": rel.replace("\\", "/"),
+                    "had_previous": os.path.isfile(target),
+                })
+        manifest_tmp = os.path.join(prev_dir, _UPDATE_MANIFEST_NAME + ".tmp")
+        with open(manifest_tmp, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        os.replace(manifest_tmp, os.path.join(prev_dir, _UPDATE_MANIFEST_NAME))
+
         # Fase 1: resguardar los actuales que seran reemplazados
         for root, _dirs, names in os.walk(staging_dir):
             for n in names:
@@ -737,6 +942,8 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
         for root, _dirs, names in os.walk(prev_dir):
             for n in names:
                 rel = os.path.relpath(os.path.join(root, n), prev_dir)
+                if rel.replace("\\", "/") == _UPDATE_MANIFEST_NAME:
+                    continue
                 target = os.path.join(base_dir, rel)
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 os.replace(os.path.join(root, n), target)
