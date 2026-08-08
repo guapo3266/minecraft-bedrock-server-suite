@@ -89,6 +89,41 @@ def _resolve_snapshot_path(rel_path):
     return clean_rel_path, full_path
 
 
+# Carpetas de nivel servidor que se incluyen en los backups junto al mundo:
+# contienen los mods/addons (resource_packs y behavior_packs). Se guardan con
+# prefijo propio ("server_resource_packs/...", "server_behavior_packs/...")
+# para que la restauracion las devuelva a su ubicacion de servidor y no se
+# confundan con packs embebidos dentro de la carpeta del mundo.
+SERVER_PACK_DIRS = ("resource_packs", "behavior_packs")
+_PACK_ZIP_PREFIX = "server_"
+
+
+def _write_server_packs(zipf, total_bytes, cancel_event):
+    """Agrega los packs de nivel servidor (mods/addons) al ZIP en curso.
+
+    Devuelve total_bytes actualizado. Lanza RuntimeError si se excede
+    MAX_BACKUP_BYTES o si el backup fue cancelado.
+    """
+    for pack_dir in SERVER_PACK_DIRS:
+        src_dir = os.path.join(BASE_DIR, pack_dir)
+        if not os.path.isdir(src_dir):
+            continue
+        prefix = _PACK_ZIP_PREFIX + pack_dir + "/"
+        for root, dirs, files in os.walk(src_dir):
+            for fname in files:
+                if _cancelled(cancel_event):
+                    raise RuntimeError("Backup cancelado durante compresion de packs.")
+                full_f = os.path.join(root, fname)
+                arc = prefix + os.path.relpath(full_f, src_dir).replace(os.sep, "/")
+                zipf.write(full_f, arc)
+                total_bytes += os.path.getsize(full_f)
+                if total_bytes > MAX_BACKUP_BYTES:
+                    raise RuntimeError(
+                        f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando."
+                    )
+    return total_bytes
+
+
 def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wait_lock_timeout_sec=0, external_lock=None):
     """
     Crea una copia de seguridad comprimida del mundo.
@@ -271,6 +306,11 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                 raise RuntimeError(
                                     f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando."
                                 )
+
+                # Packs de nivel servidor (mods/addons) tambien van al backup,
+                # con prefijo propio para que la restauracion los devuelva a
+                # resource_packs/behavior_packs (no a la carpeta del mundo).
+                total_bytes = _write_server_packs(zipf, total_bytes, cancel_event)
             else:
                 # Backup completo tradicional (usado al inicio, apagar o caída por snapshot incompleto)
                 for root, dirs, files in os.walk(WORLD_DIR):
@@ -288,6 +328,9 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                 f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
                                 f"(acumulado: {total_bytes / (1024**3):.2f} GB). Abortando."
                             )
+
+                # Packs de nivel servidor (mods/addons) tambien van al backup
+                total_bytes = _write_server_packs(zipf, total_bytes, cancel_event)
 
         if _cancelled(cancel_event):
             raise RuntimeError("Backup cancelado antes de publicar ZIP.")
@@ -408,12 +451,52 @@ def _is_safe_zip_entry(filename: str) -> bool:
     return True
 
 
+def _pack_dest(entry_filename):
+    """Clasifica una entrada del ZIP.
+
+    Si pertenece a un pack de nivel servidor devuelve (kind, folder, rel_path),
+    con kind en SERVER_PACK_DIRS, folder = carpeta del pack y rel_path relativo
+    a esa carpeta. Devuelve None para entradas del mundo (o entradas de pack
+    sin archivo, como directorios vacios).
+    """
+    norm = entry_filename.replace("\\", "/")
+    for kind in SERVER_PACK_DIRS:
+        prefix = _PACK_ZIP_PREFIX + kind + "/"
+        if norm.startswith(prefix):
+            rest = norm[len(prefix):]
+            if rest.endswith("/") or not rest:
+                return None  # entrada de directorio: no se restaura
+            parts = rest.split("/")
+            if len(parts) >= 2 and parts[0]:
+                return kind, parts[0], "/".join(parts[1:])
+            return None
+    return None
+
+
+def _extract_pack_entry(zipf, entry, base_dir, rel_path):
+    """Extrae una entrada de pack a base_dir con doble chequeo anti traversal.
+
+    rel_path proviene de una entrada ya validada con _is_safe_zip_entry y de
+    un prefijo fijo, pero se revalida igual: el destino nunca escapa de
+    base_dir.
+    """
+    segs = rel_path.split("/")
+    if any(s == ".." for s in segs) or os.path.isabs(rel_path) or ":" in segs[0]:
+        raise ValueError(f"Entrada de pack insegura: {entry.filename}")
+    dest = os.path.join(base_dir, *segs)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with zipf.open(entry, "r") as src, open(dest, "wb") as out:
+        shutil.copyfileobj(src, out)
+
+
 def restore_backup(filename: str) -> str:
-    """Restaura un backup ZIP al mundo. Requiere servidor APAGADO.
+    """Restaura un backup ZIP al mundo y a los packs de nivel servidor.
+    Requiere servidor APAGADO.
 
     - Valida el ZIP (zip-slip + CRC) ANTES de tocar el mundo.
-    - Resguarda el mundo actual en `WORLD_DIR.bak`.
-    - Si la extraccion falla, hace rollback automatico del resguardo.
+    - Resguarda el mundo actual en `WORLD_DIR.bak` y cada carpeta de pack
+      afectada en `<carpeta>.bak`.
+    - Si la extraccion falla, hace rollback automatico de los resguardos.
     Devuelve la ruta del backup restaurado.
     """
     if os.path.basename(filename) != filename:
@@ -422,16 +505,25 @@ def restore_backup(filename: str) -> str:
     if not os.path.isfile(zip_path):
         raise FileNotFoundError("Backup no encontrado")
 
-    # 1. Validar el ZIP antes de tocar el mundo
+    # 1. Validar el ZIP antes de tocar el mundo y separar entradas:
+    #    packs de servidor (server_resource_packs/..., server_behavior_packs/...)
+    #    vs entradas del mundo.
     with zipfile.ZipFile(zip_path, "r") as zf:
+        world_infos, pack_infos = [], []
         for entry in zf.infolist():
             if not _is_safe_zip_entry(entry.filename):
                 raise ValueError(f"Entrada insegura en el backup: {entry.filename}")
+            parsed = _pack_dest(entry.filename)
+            if parsed:
+                pack_infos.append((entry, parsed))
+            else:
+                world_infos.append(entry)
         bad = zf.testzip()
         if bad is not None:
             raise ValueError(f"Backup corrupto (CRC fallido): {bad}")
 
     bak_dir = WORLD_DIR + ".bak"
+    pack_baks = []  # (destino, bak) para rollback
 
     # 2. Resguardar el mundo actual (si existe)
     if os.path.exists(WORLD_DIR):
@@ -439,26 +531,45 @@ def restore_backup(filename: str) -> str:
             shutil.rmtree(bak_dir, ignore_errors=True)
         os.rename(WORLD_DIR, bak_dir)
 
-    # 3. Extraer con doble chequeo de seguridad.
-    # FIX G3: os.makedirs(WORLD_DIR) va DENTRO del try para que el rollback
-    # recupere el mundo si la creacion del directorio falla (permisos/espacio).
     try:
+        # 2b. Resguardar las carpetas de packs afectadas (si existen)
+        pack_dests = set()
+        for _entry, (kind, folder, _rel) in pack_infos:
+            pack_dests.add(os.path.join(BASE_DIR, kind, folder))
+        for dest in sorted(pack_dests):
+            if os.path.exists(dest):
+                bak = dest + ".bak"
+                if os.path.exists(bak):
+                    shutil.rmtree(bak, ignore_errors=True)
+                os.rename(dest, bak)
+                pack_baks.append((dest, bak))
+
+        # 3. Extraer con doble chequeo de seguridad.
+        # FIX G3: os.makedirs(WORLD_DIR) va DENTRO del try para que el rollback
+        # recupere el mundo si la creacion del directorio falla (permisos/espacio).
         os.makedirs(WORLD_DIR, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
-            for entry in zf.infolist():
-                if not _is_safe_zip_entry(entry.filename):
-                    raise ValueError(f"Entrada insegura: {entry.filename}")
+            for entry in world_infos:
                 zf.extract(entry, WORLD_DIR)
+            for entry, (kind, folder, rel) in pack_infos:
+                _extract_pack_entry(zf, entry, os.path.join(BASE_DIR, kind, folder), rel)
     except Exception as exc:
-        # Rollback: recuperar el mundo anterior
+        # Rollback: recuperar el mundo y los packs anteriores
         shutil.rmtree(WORLD_DIR, ignore_errors=True)
         if os.path.exists(bak_dir):
             os.rename(bak_dir, WORLD_DIR)
+        for dest, bak in reversed(pack_baks):
+            shutil.rmtree(dest, ignore_errors=True)
+            if os.path.exists(bak):
+                os.rename(bak, dest)
         raise RuntimeError(f"Fallo la extraccion: {exc}") from exc
 
-    # 4. Limpieza del resguardo si todo salio bien
+    # 4. Limpieza de los resguardos si todo salio bien
     if os.path.exists(bak_dir):
         shutil.rmtree(bak_dir, ignore_errors=True)
+    for dest, bak in pack_baks:
+        if os.path.exists(bak):
+            shutil.rmtree(bak, ignore_errors=True)
     return zip_path
 
 
