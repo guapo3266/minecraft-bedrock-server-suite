@@ -51,6 +51,42 @@ def _version_tuple(version: str):
         parts.append(0)
     return tuple(parts[:4])
 
+MOJANG_DOWNLOAD_API = "https://net-secondary.web.minecraft-services.net/api/v1.0/download/links"
+MOJANG_DOWNLOAD_PAGE = "https://www.minecraft.net/en-us/download/server/bedrock"
+_UA_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+
+def _fetch_latest_bedrock_download():
+    """Devuelve (url, version) de la ultima version estable de BDS, o (None, None).
+
+    Fuente primaria: la API interna que usa la propia web de Mojang
+    (/api/v1.0/download/links), que devuelve JSON con los links oficiales
+    (verificado en vivo 2026-08-04). El HTML de la pagina ya no expone el
+    link del zip, asi que el scrape queda solo como ultimo recurso.
+    """
+    try:
+        r = requests.get(MOJANG_DOWNLOAD_API, headers=_UA_HEADERS, timeout=5)
+        if r.status_code == 200:
+            for link in r.json().get("result", {}).get("links", []):
+                if link.get("downloadType") == "serverBedrockWindows":
+                    url = link.get("downloadUrl") or ""
+                    match = re.search(r"bedrock-server-(\d+\.\d+\.\d+\.\d+)\.zip", url)
+                    if match:
+                        return url, match.group(1)
+    except Exception:
+        pass
+    # Ultimo recurso: scrape de la pagina oficial (fragil, puede dejar de funcionar).
+    try:
+        r = requests.get(MOJANG_DOWNLOAD_PAGE, headers=_UA_HEADERS, timeout=5)
+        if r.status_code == 200:
+            match = re.search(r'https://[^\s"]+?bedrock-server-(\d+\.\d+\.\d+\.\d+)\.zip', r.text)
+            if match:
+                return match.group(0), match.group(1)
+    except Exception:
+        pass
+    return None, None
+
+
 def _ensure_local(client_host: str):
     """S1: Solo acepta peticiones desde la propia máquina (loopback)."""
     if client_host not in ("127.0.0.1", "::1"):
@@ -646,18 +682,8 @@ async def handle_action(action_name: str, request: Request):
                 except Exception as e:
                     manager.add_log(f"[Actualizador BDS] Error en backup preventivo: {e}", "error")
 
-                # Obtener la URL oficial de descarga (sin fallback hardcodeado obsoleto)
-                url = None
-                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-                try:
-                    r = requests.get("https://www.minecraft.net/en-us/download/server/bedrock", headers=headers, timeout=5)
-                    if r.status_code == 200:
-                        match = re.search(r'https://[^\s"]+?bedrock-server-(\d+\.\d+\.\d+\.\d+)\.zip', r.text)
-                        if match:
-                            url = match.group(0)
-                            downloaded_version = match.group(1)
-                except Exception:
-                    pass
+                # Obtener la URL oficial de descarga (API que usa la web de Mojang)
+                url, downloaded_version = _fetch_latest_bedrock_download()
                 if not url:
                     manager.add_log("[Actualizador BDS] No se pudo obtener la URL de descarga oficial. Abortando.", "error")
                     return
@@ -665,7 +691,7 @@ async def handle_action(action_name: str, request: Request):
                 manager.add_log("[Actualizador BDS] Descargando binarios desde Mojang...", "system")
                 # S3: límite de tamaño de descarga para no llenar el disco
                 max_bytes = 400 * 1024 * 1024
-                dl = requests.get(url, headers=headers, stream=True, timeout=30)
+                dl = requests.get(url, headers=_UA_HEADERS, stream=True, timeout=30)
                 content_length = dl.headers.get("Content-Length")
                 try:
                     if content_length and int(content_length) > max_bytes:
@@ -756,27 +782,14 @@ async def check_update(request: Request):
     unavailable = False
     reason = None
 
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = requests.get("https://www.minecraft.net/en-us/download/server/bedrock", headers=headers, timeout=5)
-        if resp.status_code == 200:
-            match = re.search(r'https://[^\s"]+?bedrock-server-(\d+\.\d+\.\d+\.\d+)\.zip', resp.text)
-            if match:
-                download_url = match.group(0)
-                latest_ver = match.group(1)
-            else:
-                # La pagina actual de Mojang no expone el link del zip en el
-                # HTML servido (verificado en vivo 2026-08-03): no hay forma
-                # fiable de conocer la ultima version. Se reporta el estado
-                # como NO DISPONIBLE en vez de mentir con has_update=False.
-                unavailable = True
-                reason = "la pagina de Mojang no expone la version del zip en el HTML"
-        else:
-            unavailable = True
-            reason = "la pagina de Mojang respondio HTTP %d" % resp.status_code
-    except Exception as e:
+    # API oficial que usa la web de Mojang (la pagina HTML ya no expone el zip)
+    download_url, latest_ver = _fetch_latest_bedrock_download()
+    if latest_ver:
+        unavailable = False
+    else:
+        # Se reporta NO DISPONIBLE en vez de mentir con has_update=False.
         unavailable = True
-        reason = "no se pudo consultar la pagina de Mojang: %s" % type(e).__name__
+        reason = "la API de Mojang no devolvio el link de descarga de Windows"
 
     if latest_ver and current_ver:
         # Comparación semántica numérica (evita falsos 'has_update' con versiones más nuevas)

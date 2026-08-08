@@ -141,34 +141,36 @@ def test_check_update_detecta_update_real(monkeypatch):
 
 
 @pytest.mark.e2e
-def test_check_update_pagina_real_mojang_reporta_no_disponible():
-    """CORREGIDO (F1): la pagina actual de Mojang no contiene ningun link
-    bedrock-server-*.zip (verificado en vivo 2026-08-03); el endpoint lo
-    reporta como NO DISPONIBLE (has_update=None) en vez de mentir con
-    has_update=False. Se salta si no hay red."""
+def test_check_update_api_real_mojang_detecta_version():
+    """CORREGIDO (F1): el endpoint usa la API interna de la web de Mojang
+    (/api/v1.0/download/links); con red, debe detectar la version estable
+    real (no reportar NO DISPONIBLE). Se salta si no hay red."""
     import requests as req
 
     from fastapi.testclient import TestClient
 
     try:
         r = req.get(
-            "https://www.minecraft.net/en-us/download/server/bedrock",
+            "https://net-secondary.web.minecraft-services.net/api/v1.0/download/links",
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=15,
         )
         assert r.status_code == 200
+        links = r.json().get("result", {}).get("links", [])
     except Exception as e:
         pytest.skip("sin red: %s" % e)
 
-    import re as _re
+    win = [l for l in links if l.get("downloadType") == "serverBedrockWindows"]
+    assert win, "la API cambio de formato; actualizar el hallazgo: %s" % links[:3]
 
-    hits = _re.findall(r"https://[^\s\"]+?bedrock-server-\d+\.\d+\.\d+\.\d+\.zip", r.text)
     with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
         j = c.get("/api/check_update").json()
-    assert len(hits) == 0, "la pagina cambio de formato; actualizar el hallazgo: %s" % hits[:3]
-    assert j["unavailable"] is True, j
-    assert j["has_update"] is None, j
-    assert j["latest_version"] is None, j
+    assert j["unavailable"] is False, j
+    assert j["latest_version"] is not None, j
+    assert j["download_url"] == win[0]["downloadUrl"], j
+    # Si la version instalada es conocida y mas vieja, debe ofrecer la actualizacion
+    if j["current_version"] and gui._version_tuple(j["latest_version"]) > gui._version_tuple(j["current_version"]):
+        assert j["has_update"] is True, j
 
 
 # ═══════════════════════════════════════════════════════════════════════

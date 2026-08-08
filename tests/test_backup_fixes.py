@@ -245,21 +245,67 @@ def test_parse_prefixed_LOG():
     assert sw.parse_save_query_files("[WARN] [LOG] a:1") == [("a", 1)]
 
 
-def test_check_update_no_miente_si_version_instalada_es_desconocida(monkeypatch):
-    """Sin version local conocida, el endpoint no debe afirmar que todo esta actualizado."""
+def _api_resp(url="https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.26.40.8.zip"):
     class Resp:
         status_code = 200
-        text = "https://cdn.example/bedrock-server-1.26.33.2.zip"
+        text = "<html>sin zip de bedrock aqui</html>"
 
+        def json(self):
+            return {"result": {"links": [
+                {"downloadType": "serverBedrockWindows", "downloadUrl": url},
+                {"downloadType": "serverJar", "downloadUrl": "https://x/server.jar"},
+            ]}}
+
+    return Resp()
+
+
+def test_check_update_no_miente_si_version_instalada_es_desconocida(monkeypatch):
+    """Sin version local conocida, el endpoint no debe afirmar que todo esta actualizado."""
     class Req:
         client = types.SimpleNamespace(host="127.0.0.1")
 
     old_version = sgs.manager.installed_version
     monkeypatch.setattr(sgs.manager, "installed_version", None)
-    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: Resp())
+    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: _api_resp())
     try:
         result = asyncio.run(sgs.check_update(Req()))
-        assert result["latest_version"] == "1.26.33.2"
+        assert result["latest_version"] == "1.26.40.8"
+        assert result["has_update"] is None
+        assert result["unavailable"] is False
+    finally:
+        sgs.manager.installed_version = old_version
+
+
+def test_check_update_detecta_version_nueva_por_api(monkeypatch):
+    """La API oficial de Mojang (/api/v1.0/download/links) detecta versiones nuevas."""
+    class Req:
+        client = types.SimpleNamespace(host="127.0.0.1")
+
+    old_version = sgs.manager.installed_version
+    monkeypatch.setattr(sgs.manager, "installed_version", "1.26.33.2")
+    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: _api_resp())
+    try:
+        result = asyncio.run(sgs.check_update(Req()))
+        assert result["latest_version"] == "1.26.40.8"
+        assert result["download_url"].endswith("bedrock-server-1.26.40.8.zip")
+        assert result["has_update"] is True
+        assert result["unavailable"] is False
+    finally:
+        sgs.manager.installed_version = old_version
+
+
+def test_check_update_sin_link_de_windows_marca_no_disponible(monkeypatch):
+    """Si la API no trae el link de Windows, se reporta unavailable (no se miente)."""
+    class Req:
+        client = types.SimpleNamespace(host="127.0.0.1")
+
+    old_version = sgs.manager.installed_version
+    monkeypatch.setattr(sgs.manager, "installed_version", "1.26.33.2")
+    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: _api_resp(url=""))
+    try:
+        result = asyncio.run(sgs.check_update(Req()))
+        assert result["unavailable"] is True
+        assert result["latest_version"] is None
         assert result["has_update"] is None
     finally:
         sgs.manager.installed_version = old_version
@@ -631,6 +677,16 @@ def test_update_toma_op_lock_durante_todo_el_ciclo(monkeypatch):
     class FakeResp:
         status_code = 200
         text = "<html>sin zip de bedrock aqui</html>"
+        headers = {}
+
+        def json(self):
+            return {"result": {"links": [
+                {"downloadType": "serverBedrockWindows",
+                 "downloadUrl": "https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.26.40.8.zip"},
+            ]}}
+
+        def iter_content(self, chunk_size):
+            return iter([])
 
     monkeypatch.setattr(sgs.auto_backup, "create_backup", fake_create_backup)
     monkeypatch.setattr(sgs.requests, "get", lambda *a, **k: FakeResp())
