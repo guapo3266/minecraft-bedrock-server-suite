@@ -19,14 +19,15 @@ def _setup_env():
     fake_world = os.path.join(tmp, "worlds", "Bedrock level")
     os.makedirs(fake_bkp)
     os.makedirs(fake_world)
-    old = (auto_backup.BACKUP_DIR, auto_backup.WORLD_DIR)
+    old = (auto_backup.BACKUP_DIR, auto_backup.WORLD_DIR, auto_backup.BASE_DIR)
     auto_backup.BACKUP_DIR = fake_bkp
     auto_backup.WORLD_DIR = fake_world
+    auto_backup.BASE_DIR = tmp
     return tmp, fake_bkp, fake_world, old
 
 
 def _teardown(tmp, old):
-    auto_backup.BACKUP_DIR, auto_backup.WORLD_DIR = old
+    auto_backup.BACKUP_DIR, auto_backup.WORLD_DIR, auto_backup.BASE_DIR = old
     shutil.rmtree(tmp, ignore_errors=True)
 
 

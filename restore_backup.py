@@ -67,6 +67,42 @@ def _list_backup_files(backup_dir):
     ]
 
 
+# Carpetas de nivel servidor que el backup incluye junto al mundo (mods/addons).
+# Mismas constantes que auto_backup.py: los zips guardan estas carpetas con
+# prefijo propio ("server_resource_packs/...", "server_behavior_packs/...") y
+# la restauracion las devuelve a su ubicacion de servidor.
+_SERVER_PACK_DIRS = ("resource_packs", "behavior_packs")
+_PACK_ZIP_PREFIX = "server_"
+
+
+def _pack_dest(entry_filename):
+    """Clasifica una entrada del ZIP: pack de nivel servidor -> (kind, folder,
+    rel_path) con rel_path relativo a la carpeta del pack; None = mundo."""
+    norm = entry_filename.replace("\\", "/")
+    for kind in _SERVER_PACK_DIRS:
+        prefix = _PACK_ZIP_PREFIX + kind + "/"
+        if norm.startswith(prefix):
+            rest = norm[len(prefix):]
+            if rest.endswith("/") or not rest:
+                return None  # entrada de directorio: no se restaura
+            parts = rest.split("/")
+            if len(parts) >= 2 and parts[0]:
+                return kind, parts[0], "/".join(parts[1:])
+            return None
+    return None
+
+
+def _extract_pack_entry(zipf, entry, base_dir, rel_path):
+    """Extrae una entrada de pack a base_dir con doble chequeo anti traversal."""
+    segs = rel_path.split("/")
+    if any(s == ".." for s in segs) or os.path.isabs(rel_path) or ":" in segs[0]:
+        raise ValueError(f"Entrada de pack insegura: {entry.filename}")
+    dest = os.path.join(base_dir, *segs)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with zipf.open(entry, "r") as src, open(dest, "wb") as out:
+        shutil.copyfileobj(src, out)
+
+
 def list_and_restore():
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 60)
@@ -136,7 +172,21 @@ def list_and_restore():
         input("\nPresiona Enter para salir...")
         return
 
+    # Separar entradas del ZIP: mundo vs packs de nivel servidor (mods/addons).
+    # _validate_backup ya rechazo traversal y CRC corrupto; aqui solo se
+    # clasifica para restaurar cada parte a su destino.
+    with zipfile.ZipFile(selected_zip, "r") as zipf:
+        world_infos, pack_infos = [], []
+        for entry in zipf.infolist():
+            parsed = _pack_dest(entry.filename)
+            if parsed:
+                pack_infos.append((entry, parsed))
+            else:
+                world_infos.append(entry)
+
     bak_dir = WORLD_DIR + ".bak"
+    pack_baks = []  # (destino, bak) para rollback
+
     print("[*] Resguardando mundo actual...")
     if os.path.exists(WORLD_DIR):
         if os.path.exists(bak_dir):
@@ -153,20 +203,37 @@ def list_and_restore():
             input("\nApaga el servidor primero y vuelve a intentarlo. Presiona Enter...")
             return
 
-    os.makedirs(WORLD_DIR, exist_ok=True)
-
-    print("[*] Descomprimiendo y restaurando backup...")
+    print("[*] Descomprimiendo y restaurando backup (mundo + packs de servidor)...")
     try:
+        # Resguardar las carpetas de packs afectadas (si existen)
+        pack_dests = set()
+        for _entry, (kind, folder, _rel) in pack_infos:
+            pack_dests.add(os.path.join(BASE_DIR, kind, folder))
+        for dest in sorted(pack_dests):
+            if os.path.exists(dest):
+                bak = dest + ".bak"
+                if os.path.exists(bak):
+                    shutil.rmtree(bak, ignore_errors=True)
+                os.rename(dest, bak)
+                pack_baks.append((dest, bak))
+
+        os.makedirs(WORLD_DIR, exist_ok=True)
         with zipfile.ZipFile(selected_zip, "r") as zipf:
-            for entry in zipf.infolist():
-                if not _is_safe_zip_entry(entry.filename):
-                    raise ValueError(f"Entrada insegura: {entry.filename}")
+            for entry in world_infos:
                 zipf.extract(entry, WORLD_DIR)
+            for entry, (kind, folder, rel) in pack_infos:
+                _extract_pack_entry(zipf, entry, os.path.join(BASE_DIR, kind, folder), rel)
         if os.path.exists(bak_dir):
             try:
                 shutil.rmtree(bak_dir)
             except Exception:
                 print("[AVISO] No se pudo eliminar el resguardo .bak (puedes borrarlo a mano).")
+        for dest, bak in pack_baks:
+            if os.path.exists(bak):
+                try:
+                    shutil.rmtree(bak)
+                except Exception:
+                    print(f"[AVISO] No se pudo eliminar el resguardo {bak} (puedes borrarlo a mano).")
         print("\n=====================================================")
         print("  [OK] MUNDO RESTAURADO EXITOSAMENTE!")
         print("=====================================================")
@@ -180,6 +247,14 @@ def list_and_restore():
                 print("[RECUPERADO] Se restauro el mundo anterior desde el resguardo.")
             except Exception as e2:
                 print(f"[CRITICO] No se pudo recuperar el resguardo: {e2}. El mundo anterior esta en: {bak_dir}")
+        for dest, bak in reversed(pack_baks):
+            try:
+                shutil.rmtree(dest, ignore_errors=True)
+                if os.path.exists(bak):
+                    os.rename(bak, dest)
+                    print(f"[RECUPERADO] Se restauro la carpeta de pack: {dest}")
+            except Exception as e2:
+                print(f"[CRITICO] No se pudo recuperar el pack: {dest}. Resguardo en: {bak}")
 
     input("\nPresiona Enter para cerrar...")
 

@@ -44,6 +44,7 @@ def _fake_env(monkeypatch, tmp_path):
     os.makedirs(fake_bkp)
     monkeypatch.setattr(auto_backup, "WORLD_DIR", fake_world)
     monkeypatch.setattr(auto_backup, "BACKUP_DIR", fake_bkp)
+    monkeypatch.setattr(auto_backup, "BASE_DIR", str(tmp_path))
     return fake_world, fake_bkp
 
 
