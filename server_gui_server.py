@@ -32,6 +32,7 @@ from urllib.parse import urlsplit
 
 # Importar lógica de auto_backup para consultar directorio de backups
 import auto_backup
+from console_lang import L, set_lang as _set_lang
 # D5: patrones de deteccion del log de BDS centralizados en server_wrapper
 from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT
 
@@ -341,7 +342,7 @@ def run_wrapper_thread(process=None):
 
     # Cada arranque debe volver a descubrir la versión del proceso actual.
     manager.installed_version = None
-    manager.add_log("[GUI Backend] Iniciando wrapper de Minecraft Bedrock...", "system")
+    manager.add_log(L("[GUI Backend] Iniciando wrapper de Minecraft Bedrock...", "[GUI Backend] Starting Minecraft Bedrock wrapper..."), "system")
     manager.wrapper_exit_event.clear()
     manager.server_stopped_event.clear()
     manager.is_running = True
@@ -371,7 +372,8 @@ def run_wrapper_thread(process=None):
             # G8: BDS confirmado detenido. El wrapper lo anuncia al empezar su
             # limpieza final; en ese momento el mundo ya está quieto, aunque el
             # proceso del wrapper siga vivo haciendo el backup de cierre.
-            if "BDS detenido" in line_str:
+            # (Marcador bilingue: la consola adapta el texto al idioma GUI.)
+            if "BDS stopped" in line_str or "BDS detenido" in line_str:
                 manager.server_stopped_event.set()
 
             # Determinar tipo de log para coloreado en la GUI
@@ -400,27 +402,30 @@ def run_wrapper_thread(process=None):
                 except Exception:
                     pass
             elif any(k in line_str.lower() for k in ("backup", "compres", "save query")):
-                # FIX F2: "compres" es el prefijo comun de "compresion" y
-                # "compresión": la condicion externa NO debe excluir la linea
-                # del worker ("Iniciando compresion de archivos...", sin acento,
-                # y sin la palabra "backup").
+                # FIX F2: "compres" es el prefijo comun de "compression"/"compresion":
+                # la condicion externa NO debe excluir la linea del worker
+                # ("Starting compression in a separate process...", sin la palabra
+                # "backup").
                 log_type = "backup"
-                # la cadena debe coincidir EXACTA con la del wrapper
-                if "Iniciando compresion de archivos en proceso separado" in line_str:
+                # la cadena debe coincidir EXACTA con la del wrapper (bilingue)
+                if ("Starting compression in a separate process" in line_str
+                        or "Iniciando compresion de archivos en proceso separado" in line_str):
                     manager.backup_in_progress = True
                     manager.update_status()
-                elif "Compresión exitosa" in line_str or "Backup completado" in line_str:
+                elif ("Compression successful" in line_str or "Compresión exitosa" in line_str
+                      or "Backup completed" in line_str or "Backup completado" in line_str):
                     manager.backup_in_progress = False
                     manager.last_backup_time = time.strftime("%H:%M:%S")
                     manager.update_status()
-                elif "Backup finalizado" in line_str:
+                elif "Backup finished" in line_str or "Backup finalizado" in line_str:
                     # H3: fin incondicional del ciclo de compresion (exito,
                     # fallo, timeout, watchdog o excepcion). Sin este reset el
                     # flag quedaba en True tras un backup fallido y el boton de
                     # backup en frio quedaba bloqueado hasta reiniciar la GUI.
                     manager.backup_in_progress = False
                     manager.update_status()
-            elif "ERROR" in line_str or "WARN" in line_str or "Excepcion" in line_str:
+            elif ("ERROR" in line_str or "WARN" in line_str
+                  or "Exception" in line_str or "Excepcion" in line_str or "Excepción" in line_str):
                 log_type = "error"
 
             manager.add_log(line_str, log_type)
@@ -428,7 +433,7 @@ def run_wrapper_thread(process=None):
         process.wait()
 
     except Exception as e:
-        manager.add_log(f"[GUI Backend] Error en el wrapper: {e}", "error")
+        manager.add_log(L(f"[GUI Backend] Error en el wrapper: {e}", f"[GUI Backend] Error in the wrapper: {e}"), "error")
     finally:
         manager.is_running = False
         manager.backup_in_progress = False
@@ -437,7 +442,7 @@ def run_wrapper_thread(process=None):
         manager.wrapper_exit_event.set()
         # G8: respaldo: si el hilo muere, BDS ya no corre.
         manager.server_stopped_event.set()
-        manager.add_log("[GUI Backend] Servidor de Minecraft detenido.", "system")
+        manager.add_log(L("[GUI Backend] Servidor de Minecraft detenido.", "[GUI Backend] Minecraft server stopped."), "system")
         manager.update_status()
 
 
@@ -455,7 +460,7 @@ async def lifespan(app: FastAPI):
     try:
         recover_interrupted_updates()
     except Exception as exc:
-        manager.add_log(f"[Actualizador BDS] No se pudo revisar una actualizacion interrumpida: {exc}", "error")
+        manager.add_log(L(f"[Actualizador BDS] No se pudo revisar una actualizacion interrumpida: {exc}", f"[Actualizador BDS] Could not check for an interrupted update: {exc}"), "error")
     task = asyncio.create_task(hardware_metrics_loop())
     yield
     task.cancel()
@@ -523,7 +528,7 @@ async def send_command(req: CommandRequest, request: Request):
 
     if not manager.is_running or not manager.wrapper_process or manager.wrapper_process.poll() is not None:
         manager.add_log(f"> {cmd}", "command")
-        manager.add_log("[SISTEMA] El servidor de Minecraft está APAGADO. Presiona '▶ Iniciar Servidor' primero.", "error")
+        manager.add_log(L("[SISTEMA] El servidor de Minecraft está APAGADO. Presiona '▶ Iniciar Servidor' primero.", "[SISTEMA] The Minecraft server is OFF. Press '▶ Start Server' first."), "error")
         return {"status": "offline", "message": "El servidor no está en ejecución"}
     
     try:
@@ -532,7 +537,7 @@ async def send_command(req: CommandRequest, request: Request):
         manager.add_log(f"> {cmd}", "command")
         return {"status": "ok", "command": cmd}
     except Exception as e:
-        manager.add_log(f"[GUI Backend] Error enviando comando: {e}", "error")
+        manager.add_log(L(f"[GUI Backend] Error enviando comando: {e}", f"[GUI Backend] Error sending command: {e}"), "error")
         return {"status": "error", "message": str(e)}
 
 
@@ -558,7 +563,7 @@ async def handle_action(action_name: str, request: Request):
             try:
                 proc = _spawn_wrapper_process()
             except Exception as e:
-                manager.add_log(f"[GUI Backend] Error al iniciar el wrapper: {e}", "error")
+                manager.add_log(L(f"[GUI Backend] Error al iniciar el wrapper: {e}", f"[GUI Backend] Error starting the wrapper: {e}"), "error")
                 return {"status": "error", "message": str(e)}
             # FIX G2: wrapper_process se asigna BAJO el lock (el hilo lo
             # re-afirma al arrancar): tras la respuesta de start, /stop ya
@@ -576,7 +581,7 @@ async def handle_action(action_name: str, request: Request):
         try:
             manager.wrapper_process.stdin.write("stop\n")
             manager.wrapper_process.stdin.flush()
-            manager.add_log("[GUI Backend] Comando 'stop' enviado...", "system")
+            manager.add_log(L("[GUI Backend] Comando 'stop' enviado...", "[GUI Backend] 'stop' command sent..."), "system")
         except Exception:
             pass
         return {"status": "stopping"}
@@ -590,7 +595,7 @@ async def handle_action(action_name: str, request: Request):
                     manager.wrapper_process.stdin.flush()
                 except Exception:
                     pass
-                manager.add_log("[GUI Backend] Reiniciando servidor...", "system")
+                manager.add_log(L("[GUI Backend] Reiniciando servidor...", "[GUI Backend] Restarting server..."), "system")
                 # G8: espera en DOS fases antes de lanzar otro wrapper (evita
                 # dobles instancias y pisado de estado):
                 #  Fase 1: que BDS muera (evento propio, independiente del
@@ -601,8 +606,10 @@ async def handle_action(action_name: str, request: Request):
                 #    servidor ya se hubiera detenido.
                 if not manager.server_stopped_event.wait(timeout=SERVER_STOP_TIMEOUT_SEC):
                     manager.add_log(
-                        f"[GUI Backend] El servidor no se detuvo en {SERVER_STOP_TIMEOUT_SEC}s. "
-                        "Reinicio cancelado.",
+                        L(f"[GUI Backend] El servidor no se detuvo en {SERVER_STOP_TIMEOUT_SEC}s. "
+                          "Reinicio cancelado.",
+                          f"[GUI Backend] The server did not stop within {SERVER_STOP_TIMEOUT_SEC}s. "
+                          "Restart cancelled."),
                         "error",
                     )
                     return
@@ -611,9 +618,12 @@ async def handle_action(action_name: str, request: Request):
                 #    comprimiendo el mismo mundo pisarian sus copias.
                 if not exit_event.wait(timeout=WRAPPER_EXIT_TIMEOUT_SEC):
                     manager.add_log(
-                        f"[GUI Backend] El wrapper no termino en {WRAPPER_EXIT_TIMEOUT_SEC}s "
-                        "(incluye el backup final de cierre). Reinicio cancelado; "
-                        "inicia el servidor manualmente.",
+                        L(f"[GUI Backend] El wrapper no termino en {WRAPPER_EXIT_TIMEOUT_SEC}s "
+                          "(incluye el backup final de cierre). Reinicio cancelado; "
+                          "inicia el servidor manualmente.",
+                          f"[GUI Backend] The wrapper did not finish within {WRAPPER_EXIT_TIMEOUT_SEC}s "
+                          "(includes the final shutdown backup). Restart cancelled; "
+                          "start the server manually."),
                         "error",
                     )
                     return
@@ -622,12 +632,12 @@ async def handle_action(action_name: str, request: Request):
             # (arrancar mientras se reemplazan binarios o se copia el mundo
             # corromperia ambos).
             if not manager.op_lock.acquire(blocking=False):
-                manager.add_log("[GUI Backend] Operación en curso (actualización/restauración/backup); reinicio abortado.", "error")
+                manager.add_log(L("[GUI Backend] Operación en curso (actualización/restauración/backup); reinicio abortado.", "[GUI Backend] Operation in progress (update/restore/backup); restart aborted."), "error")
                 return
             try:
                 # Alguien más pudo arrancar el servidor mientras esperábamos; no duplicar
                 if manager.is_running:
-                    manager.add_log("[GUI Backend] Otro inicio detectado durante el reinicio. Abortando.", "error")
+                    manager.add_log(L("[GUI Backend] Otro inicio detectado durante el reinicio. Abortando.", "[GUI Backend] Another start detected during restart. Aborting."), "error")
                     return
                 # FIX G1: crear el subproceso bajo el lock (igual que start)
                 proc = _spawn_wrapper_process()
@@ -639,7 +649,7 @@ async def handle_action(action_name: str, request: Request):
                 manager.is_running = True
                 threading.Thread(target=run_wrapper_thread, args=(proc,), daemon=True).start()
             except Exception as e:
-                manager.add_log(f"[GUI Backend] Error al iniciar el wrapper: {e}", "error")
+                manager.add_log(L(f"[GUI Backend] Error al iniciar el wrapper: {e}", f"[GUI Backend] Error starting the wrapper: {e}"), "error")
             finally:
                 manager.op_lock.release()
 
@@ -652,7 +662,7 @@ async def handle_action(action_name: str, request: Request):
             # (antes cada clic apilaba un hilo y dos backups del mismo
             # segundo podian pisarse por compartir nombre).
             if manager.backup_in_progress:
-                return {"status": "busy", "message": "Ya hay un backup en curso"}
+                return {"status": "busy", "message": L("Ya hay un backup en curso", "A backup is already in progress")}
             def manual_off_backup():
                 # op_lock durante TODA la copia: un start inmediato modificaria
                 # el mundo mientras se comprime, dando un backup inconsistente.
@@ -663,7 +673,7 @@ async def handle_action(action_name: str, request: Request):
                     # mundo vivo seria inconsistente.
                     if manager.is_running:
                         manager.add_log(
-                            "[GUI Backend] El servidor se encendió; backup en frío cancelado (usa el backup en caliente).",
+                            L("[GUI Backend] El servidor se encendió; backup en frío cancelado (usa el backup en caliente).", "[GUI Backend] The server started; cold backup cancelled (use the hot backup)."),
                             "error",
                         )
                         return
@@ -672,22 +682,22 @@ async def handle_action(action_name: str, request: Request):
                     # descarta el segundo con op_lock ya adquirido.
                     if manager.backup_in_progress:
                         manager.add_log(
-                            "[GUI Backend] Ya hay un backup en frío en curso; solicitud ignorada.",
+                            L("[GUI Backend] Ya hay un backup en frío en curso; solicitud ignorada.", "[GUI Backend] A cold backup is already in progress; request ignored."),
                             "error",
                         )
                         return
                     manager.backup_in_progress = True
                     manager.update_status()
-                    manager.add_log("[GUI Backend] Ejecutando backup en frío...", "backup")
+                    manager.add_log(L("[GUI Backend] Ejecutando backup en frío...", "[GUI Backend] Running cold backup..."), "backup")
                     try:
                         zip_path = auto_backup.create_backup("gui_manual")
                         if zip_path:
                             manager.last_backup_time = time.strftime("%H:%M:%S")
-                            manager.add_log(f"[GUI Backend] Backup exitoso: {os.path.basename(zip_path)}", "backup")
+                            manager.add_log(L(f"[GUI Backend] Backup exitoso: {os.path.basename(zip_path)}", f"[GUI Backend] Backup successful: {os.path.basename(zip_path)}"), "backup")
                         else:
-                            manager.add_log("[GUI Backend] Error en backup: no se produjo un ZIP (revisa la consola del servidor).", "error")
+                            manager.add_log(L("[GUI Backend] Error en backup: no se produjo un ZIP (revisa la consola del servidor).", "[GUI Backend] Backup error: no ZIP was produced (check the server console)."), "error")
                     except Exception as e:
-                        manager.add_log(f"[GUI Backend] Error en backup: {e}", "error")
+                        manager.add_log(L(f"[GUI Backend] Error en backup: {e}", f"[GUI Backend] Backup error: {e}"), "error")
                     finally:
                         manager.backup_in_progress = False
                         manager.update_status()
@@ -698,9 +708,9 @@ async def handle_action(action_name: str, request: Request):
             try:
                 manager.wrapper_process.stdin.write("backup\n")
                 manager.wrapper_process.stdin.flush()
-                manager.add_log("[GUI Backend] Disparando backup en caliente (comando backup)...", "backup")
+                manager.add_log(L("[GUI Backend] Disparando backup en caliente (comando backup)...", "[GUI Backend] Triggering hot backup (backup command)..."), "backup")
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error al iniciar backup: {e}")
+                raise HTTPException(status_code=500, detail=L(f"Error al iniciar backup: {e}", f"Error starting backup: {e}"))
             return {"status": "hot_backup_dispatched"}
 
     elif action == "update_bds":
@@ -721,9 +731,9 @@ async def handle_action(action_name: str, request: Request):
             # se reemplazan los binarios. El finally libera en todos los caminos.
             manager.op_lock.acquire()
             try:
-                manager.add_log("[Actualizador BDS] Iniciando proceso de actualización de Mojang...", "system")
+                manager.add_log(L("[Actualizador BDS] Iniciando proceso de actualización de Mojang...", "[Actualizador BDS] Starting Mojang update process..."), "system")
                 if manager.is_running and manager.wrapper_process:
-                    manager.add_log("[Actualizador BDS] Deteniendo servidor de Minecraft...", "system")
+                    manager.add_log(L("[Actualizador BDS] Deteniendo servidor de Minecraft...", "[Actualizador BDS] Stopping Minecraft server..."), "system")
                     try:
                         manager.wrapper_process.stdin.write("stop\n")
                         manager.wrapper_process.stdin.flush()
@@ -740,9 +750,12 @@ async def handle_action(action_name: str, request: Request):
                         # H1: si vencio la fase 1, BDS puede seguir deteniendose:
                         # el mensaje no da por hecho que quedo detenido.
                         manager.add_log(
-                            f"[Actualizador BDS] El servidor no se detuvo en {SERVER_STOP_TIMEOUT_SEC}s. "
-                            "Actualización cancelada; "
-                            "si el servidor quedó detenido, reinícialo con ▶ Iniciar.",
+                            L(f"[Actualizador BDS] El servidor no se detuvo en {SERVER_STOP_TIMEOUT_SEC}s. "
+                              "Actualización cancelada; "
+                              "si el servidor quedó detenido, reinícialo con ▶ Iniciar.",
+                              f"[Actualizador BDS] The server did not stop within {SERVER_STOP_TIMEOUT_SEC}s. "
+                              "Update cancelled; "
+                              "if the server ended up stopped, restart it with ▶ Start."),
                             "error",
                         )
                         return
@@ -751,34 +764,37 @@ async def handle_action(action_name: str, request: Request):
                     #    el backup preventivo.
                     if not manager.wrapper_exit_event.wait(timeout=WRAPPER_EXIT_TIMEOUT_SEC):
                         manager.add_log(
-                            f"[Actualizador BDS] El wrapper no termino en {WRAPPER_EXIT_TIMEOUT_SEC}s "
-                            "(incluye el backup final de cierre). Actualización cancelada; "
-                            "el servidor quedó detenido. Reinícialo con ▶ Iniciar.",
+                            L(f"[Actualizador BDS] El wrapper no termino en {WRAPPER_EXIT_TIMEOUT_SEC}s "
+                              "(incluye el backup final de cierre). Actualización cancelada; "
+                              "el servidor quedó detenido. Reinícialo con ▶ Iniciar.",
+                              f"[Actualizador BDS] The wrapper did not finish within {WRAPPER_EXIT_TIMEOUT_SEC}s "
+                              "(includes the final shutdown backup). Update cancelled; "
+                              "the server ended up stopped. Restart it with ▶ Start."),
                             "error",
                         )
                         return
 
-                manager.add_log("[Actualizador BDS] Ejecutando backup preventivo de seguridad...", "backup")
+                manager.add_log(L("[Actualizador BDS] Ejecutando backup preventivo de seguridad...", "[Actualizador BDS] Running preventive safety backup..."), "backup")
                 try:
                     zip_b = auto_backup.create_backup("pre_update_backup")
-                    manager.add_log(f"[Actualizador BDS] Backup de seguridad listo: {os.path.basename(zip_b)}", "backup")
+                    manager.add_log(L(f"[Actualizador BDS] Backup de seguridad listo: {os.path.basename(zip_b)}", f"[Actualizador BDS] Safety backup ready: {os.path.basename(zip_b)}"), "backup")
                 except Exception as e:
-                    manager.add_log(f"[Actualizador BDS] Error en backup preventivo: {e}", "error")
+                    manager.add_log(L(f"[Actualizador BDS] Error en backup preventivo: {e}", f"[Actualizador BDS] Error in preventive backup: {e}"), "error")
 
                 # Obtener la URL oficial de descarga (API que usa la web de Mojang)
                 url, downloaded_version = _fetch_latest_bedrock_download()
                 if not url:
-                    manager.add_log("[Actualizador BDS] No se pudo obtener la URL de descarga oficial. Abortando.", "error")
+                    manager.add_log(L("[Actualizador BDS] No se pudo obtener la URL de descarga oficial. Abortando.", "[Actualizador BDS] Could not get the official download URL. Aborting."), "error")
                     return
 
-                manager.add_log("[Actualizador BDS] Descargando binarios desde Mojang...", "system")
+                manager.add_log(L("[Actualizador BDS] Descargando binarios desde Mojang...", "[Actualizador BDS] Downloading binaries from Mojang..."), "system")
                 # S3: límite de tamaño de descarga para no llenar el disco
                 max_bytes = 400 * 1024 * 1024
                 dl = requests.get(url, headers=_UA_HEADERS, stream=True, timeout=30)
                 content_length = dl.headers.get("Content-Length")
                 try:
                     if content_length and int(content_length) > max_bytes:
-                        manager.add_log(f"[Actualizador BDS] Descarga demasiado grande ({content_length} bytes). Abortando.", "error")
+                        manager.add_log(L(f"[Actualizador BDS] Descarga demasiado grande ({content_length} bytes). Abortando.", f"[Actualizador BDS] Download too large ({content_length} bytes). Abortando."), "error")
                         return
                 except (TypeError, ValueError):
                     pass
@@ -787,11 +803,11 @@ async def handle_action(action_name: str, request: Request):
                     for chunk in dl.iter_content(chunk_size=8192):
                         total_bytes += len(chunk)
                         if total_bytes > max_bytes:
-                            manager.add_log("[Actualizador BDS] Descarga excede el límite de 400 MB. Abortando.", "error")
+                            manager.add_log(L("[Actualizador BDS] Descarga excede el límite de 400 MB. Abortando.", "[Actualizador BDS] Download exceeds the 400 MB limit. Aborting."), "error")
                             return
                         f.write(chunk)
 
-                manager.add_log("[Actualizador BDS] Descomprimiendo y actualizando ejecutable...", "system")
+                manager.add_log(L("[Actualizador BDS] Descomprimiendo y actualizando ejecutable...", "[Actualizador BDS] Extracting and updating executable..."), "system")
                 preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
                 preserve_dirs = {"worlds", "backups", "web", "gui_frontend"}
 
@@ -805,7 +821,7 @@ async def handle_action(action_name: str, request: Request):
                         name = item.filename
                         # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
                         if not _is_safe_zip_entry(name):
-                            manager.add_log(f"[Actualizador BDS] Entrada insegura en el zip ignorada: {name}", "error")
+                            manager.add_log(L(f"[Actualizador BDS] Entrada insegura en el zip ignorada: {name}", f"[Actualizador BDS] Unsafe zip entry ignored: {name}"), "error")
                             continue
                         z.extract(item, staging_dir)
 
@@ -819,9 +835,9 @@ async def handle_action(action_name: str, request: Request):
                 if downloaded_version:
                     manager.installed_version = downloaded_version
 
-                manager.add_log("[Actualizador BDS] ¡Servidor actualizado exitosamente a la versión oficial de Mojang!", "system")
+                manager.add_log(L("[Actualizador BDS] ¡Servidor actualizado exitosamente a la versión oficial de Mojang!", "[Actualizador BDS] Server successfully updated to the official Mojang version!"), "system")
             except Exception as e:
-                manager.add_log(f"[Actualizador BDS] Error al actualizar: {e}", "error")
+                manager.add_log(L(f"[Actualizador BDS] Error al actualizar: {e}", f"[Actualizador BDS] Error updating: {e}"), "error")
             finally:
                 manager.op_lock.release()
                 if os.path.exists(temp_zip):
@@ -831,7 +847,7 @@ async def handle_action(action_name: str, request: Request):
                     shutil.rmtree(staging_dir, ignore_errors=True)
                 manager.update_in_progress = False
                 manager.update_status()
-                manager.add_log("[Actualizador BDS] Proceso de actualización finalizado.", "system")
+                manager.add_log(L("[Actualizador BDS] Proceso de actualización finalizado.", "[Actualizador BDS] Update process finished."), "system")
 
         threading.Thread(target=do_update, daemon=True).start()
         return {"status": "update_dispatched"}
@@ -1106,7 +1122,7 @@ async def restore_backup(request: Request):
             detail="Debes apagar el servidor antes de reestablecer un backup",
         )
 
-    manager.add_log(f"[GUI] Restaurando backup: {filename}", "backup")
+    manager.add_log(L(f"[GUI] Restaurando backup: {filename}", f"[GUI] Restoring backup: {filename}"), "backup")
 
     def _restore_with_running_guard():
         # Re-chequeo ATOMICO dentro del threadpool: op_lock excluye a start y
@@ -1127,14 +1143,59 @@ async def restore_backup(request: Request):
         # tal cual; no dejarlo caer en el except Exception -> 500.
         raise
     except FileNotFoundError as e:
-        manager.add_log(f"[GUI] Error al restaurar {filename}: {e}", "error")
+        manager.add_log(L(f"[GUI] Error al restaurar {filename}: {e}", f"[GUI] Error restoring {filename}: {e}"), "error")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        manager.add_log(f"[GUI] Error al restaurar {filename}: {e}", "error")
+        manager.add_log(L(f"[GUI] Error al restaurar {filename}: {e}", f"[GUI] Error restoring {filename}: {e}"), "error")
         raise HTTPException(status_code=500, detail=str(e))
 
-    manager.add_log(f"[GUI] Backup restaurado: {os.path.basename(restored_path)}", "backup")
+    manager.add_log(L(f"[GUI] Backup restaurado: {os.path.basename(restored_path)}", f"[GUI] Backup restored: {os.path.basename(restored_path)}"), "backup")
     manager.last_backup_time = time.strftime("%H:%M:%S")
+    return {"status": "ok", "backup": filename}
+
+
+@app.get("/api/backups/{filename}/download")
+async def download_backup(filename: str, request: Request):
+    """Descarga un backup ZIP ya existente en el directorio de backups.
+
+    Misma validacion de nombre que /api/restore (solo basename, sin
+    traversal): el archivo debe estar dentro de BACKUP_DIR.
+    """
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+    if not filename or os.path.basename(filename) != filename:
+        raise HTTPException(status_code=400, detail="Nombre de backup invalido")
+    full = os.path.join(auto_backup.BACKUP_DIR, filename)
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail="Backup no encontrado")
+    return FileResponse(full, filename=filename, media_type="application/zip")
+
+
+@app.post("/api/backups/{filename}/delete")
+async def delete_backup(filename: str, request: Request):
+    """Elimina un backup ZIP.
+
+    Rechaza mientras haya un backup en curso (el archivo podria estar
+    escribiendose) y con el mismo filtro de nombre que /api/restore.
+    """
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+    if not filename or os.path.basename(filename) != filename:
+        raise HTTPException(status_code=400, detail="Nombre de backup invalido")
+    if manager.backup_in_progress:
+        raise HTTPException(
+            status_code=409,
+            detail="Hay un backup en curso; espera a que termine antes de eliminar",
+        )
+    full = os.path.join(auto_backup.BACKUP_DIR, filename)
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail="Backup no encontrado")
+    try:
+        os.remove(full)
+    except OSError as e:
+        manager.add_log(L(f"[GUI] Error al eliminar backup {filename}: {e}", f"[GUI] Error deleting backup {filename}: {e}"), "error")
+        raise HTTPException(status_code=500, detail=str(e))
+    manager.add_log(L(f"[GUI] Backup eliminado: {filename}", f"[GUI] Backup deleted: {filename}"), "backup")
     return {"status": "ok", "backup": filename}
 
 
@@ -1150,6 +1211,10 @@ async def websocket_endpoint(websocket: WebSocket):
         return
     await websocket.accept()
     manager.active_websockets.add(websocket)
+
+    # Idioma de la consola: query param (primer arranque) o mensaje set_lang
+    # (cambios en vivo). Fija WRAPPER_LANG, que usan L() y el wrapper.
+    _set_lang(websocket.query_params.get("lang"))
 
     with manager.lock:
         logs = list(manager.log_history)
@@ -1183,6 +1248,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif msg.get("type") == "ping":
                     # Medición real de latencia del frontend
                     await websocket.send_json({"type": "pong"})
+                elif msg.get("type") == "set_lang":
+                    _set_lang(msg.get("lang"))
             except Exception:
                 pass
     except WebSocketDisconnect:

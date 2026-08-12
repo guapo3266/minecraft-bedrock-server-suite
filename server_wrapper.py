@@ -21,6 +21,8 @@ import os
 
 import auto_backup
 
+from console_lang import L
+
 # ═══════════════════════════════════════════════════════════════
 # ADVERTENCIA: Las detecciones de jugadores y save query dependen de
 # strings literales en ingles. Si BDS cambia el formato de log o el
@@ -106,7 +108,7 @@ def send_command(cmd):
     except (BrokenPipeError, OSError, ValueError):
         pass
     except Exception as e:
-        print(f"[Wrapper] Error enviando comando '{cmd}': {e}")
+        print(L(f"[Wrapper] Error enviando comando '{cmd}': {e}", f"[Wrapper] Error sending command '{cmd}': {e}"))
 
 def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
     """Renombra un archivo .zip a _POSIBLEMENTE_CORRUPTO si ocurrió una anomalia.
@@ -122,9 +124,9 @@ def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
         corrupt_name = f"{base}_{reason}.zip"
         try:
             os.rename(zip_filepath, corrupt_name)
-            print(f"[Worker] Backup marcado por desincronización: {os.path.basename(corrupt_name)}")
+            print(L(f"[Worker] Backup marcado por desincronización: {os.path.basename(corrupt_name)}", f"[Worker] Backup flagged for desync: {os.path.basename(corrupt_name)}"))
         except Exception as e:
-            print(f"[Worker] No se pudo renombrar el backup {zip_filepath}: {e}")
+            print(L(f"[Worker] No se pudo renombrar el backup {zip_filepath}: {e}", f"[Worker] Could not rename backup {zip_filepath}: {e}"))
 
 def parse_save_query_files(line):
     """Extrae pares (ruta_relativa, bytes) de una línea de save query."""
@@ -159,9 +161,9 @@ def _is_snapshot_failure(error_msg):
     msg = (error_msg or "").lower()
     if "snapshot" not in msg:
         return False
-    if "cancelado" in msg:
+    if "cancelled" in msg or "cancelado" in msg:
         return False
-    if "excede el limite" in msg:
+    if "exceeds the" in msg or "excede el limite" in msg:
         return False
     return True
 
@@ -227,7 +229,7 @@ def _force_kill_compress_process(proc):
             proc.kill()
             proc.join()
         except Exception as e:
-            print(f"[Wrapper] Error forzando kill del proceso de compresión: {e}")
+            print(L(f"[Wrapper] Error forzando kill del proceso de compresión: {e}", f"[Wrapper] Error forcing kill of compression process: {e}"))
             
         # Reemplazar el lock IPC (puede quedar en mal estado tras kill)
         backup_ipc_lock = multiprocessing.Lock()
@@ -241,7 +243,7 @@ def _force_kill_compress_process(proc):
             for orphan in _glob.glob(os.path.join(auto_backup.BACKUP_DIR, "*.tmp")):
                 try:
                     os.remove(orphan)
-                    print(f"[Wrapper] Limpieza: eliminado {os.path.basename(orphan)} tras kill.")
+                    print(L(f"[Wrapper] Limpieza: eliminado {os.path.basename(orphan)} tras kill.", f"[Wrapper] Cleanup: removed {os.path.basename(orphan)} after kill."))
                 except Exception:
                     pass
         except Exception:
@@ -255,7 +257,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
     global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock, snapshot_retry_count, snapshot_retry_at
     try:
 
-        print("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...")
+        print(L("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...", "[Worker] Starting compression in a separate process (subprocess)..."))
 
         import pickle as _pickle
         _base = os.path.dirname(os.path.abspath(__file__))
@@ -285,7 +287,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             comp_proc.is_alive = lambda: comp_proc.poll() is None
             comp_proc.join = lambda timeout=None: comp_proc.wait(timeout=timeout)
         except Exception as e:
-            print(f"[Worker] [WARN] No se pudo lanzar el worker: {e}")
+            print(L(f"[Worker] [WARN] No se pudo lanzar el worker: {e}", f"[Worker] [WARN] Could not launch the worker: {e}"))
             for _p in (_snap_path, _marker, _result):
                 try:
                     os.remove(_p)
@@ -310,8 +312,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
         # --- CASO A: Compresión excedió el tiempo máximo (Timeout interno) ---
         if comp_proc.is_alive():
-            print(f"[Worker] [WARN] Timeout de compresion ({WORKER_COMPRESSION_TIMEOUT_SEC}s).")
-            print("[Worker]          Terminando proceso de compresion...")
+            print(L(f"[Worker] [WARN] Timeout de compresion ({WORKER_COMPRESSION_TIMEOUT_SEC}s).", f"[Worker] [WARN] Compression timeout ({WORKER_COMPRESSION_TIMEOUT_SEC}s)."))
+            print(L("[Worker]          Terminando proceso de compresion...", "[Worker]          Terminating compression process..."))
         
             _force_kill_compress_process(comp_proc)
 
@@ -349,7 +351,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             with open(_result, "rb") as _f:
                 result = _pickle.load(_f)
         except Exception:
-            result = {"zip": None, "error": "El proceso termino sin devolver un resultado"}
+            result = {"zip": None, "error": L("El proceso termino sin devolver un resultado", "The process exited without returning a result")}
         for _p in (_snap_path, _marker, _result):
             try:
                 os.remove(_p)
@@ -357,22 +359,22 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 pass
         retry_soon = _is_snapshot_failure(result.get("error"))
         if result["error"]:
-            print(f"[Worker] [ERROR] Falló la compresión: {result['error']}")
+            print(L(f"[Worker] [ERROR] Falló la compresión: {result['error']}", f"[Worker] [ERROR] Compression failed: {result['error']}"))
         elif not result["zip"]:
-            print("[Worker] [ERROR] El backup no produjo un ZIP válido.")
+            print(L("[Worker] [ERROR] El backup no produjo un ZIP válido.", "[Worker] [ERROR] The backup did not produce a valid ZIP."))
 
         with state_lock:
             was_watchdog = watchdog_fired
 
         if was_watchdog:
-            print("[Worker] El watchdog ya había reanudado escrituras previamente.")
+            print(L("[Worker] El watchdog ya había reanudado escrituras previamente.", "[Worker] The watchdog had already resumed writes earlier."))
             if result["zip"]:
                 mark_corrupt_zip(result["zip"], "POSIBLEMENTE_CORRUPTO")
         else:
             if result["zip"]:
-                print("[Worker] Compresión exitosa. Reanudando escritura (save resume)...")
+                print(L("[Worker] Compresión exitosa. Reanudando escritura (save resume)...", "[Worker] Compression successful. Resuming writes (save resume)..."))
             else:
-                print("[Worker] Reanudando escritura tras fallo de backup (save resume)...")
+                print(L("[Worker] Reanudando escritura tras fallo de backup (save resume)...", "[Worker] Resuming writes after failed backup (save resume)..."))
             send_command("save resume")
 
         with state_lock:
@@ -390,14 +392,16 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 # hasta el proximo intervalo normal de 30 min.
                 snapshot_retry_count += 1
                 if snapshot_retry_count >= MAX_CONSECUTIVE_SNAPSHOT_RETRIES:
-                    print(f"[Worker] {snapshot_retry_count} reintentos consecutivos de snapshot fallidos; "
-                          "se espera el proximo intervalo normal de backup.")
+                    print(L(f"[Worker] {snapshot_retry_count} reintentos consecutivos de snapshot fallidos; "
+                          "se espera el proximo intervalo normal de backup.",
+                          f"[Worker] {snapshot_retry_count} consecutive snapshot retries failed; "
+                          "waiting for the next normal backup interval."))
                     snapshot_retry_count = 0
                     snapshot_retry_at = 0.0
                 else:
                     delay = _snapshot_retry_delay(snapshot_retry_count)
                     snapshot_retry_at = time.time() + delay
-                    print(f"[Worker] Snapshot incompleto: reintento en {delay}s (intento {snapshot_retry_count}).")
+                    print(L(f"[Worker] Snapshot incompleto: reintento en {delay}s (intento {snapshot_retry_count}).", f"[Worker] Incomplete snapshot: retrying in {delay}s (intento {snapshot_retry_count})."))
                 last_backup_completed_time = time.time()
             else:
                 # Exito o fallo operativo: el patron de snapshot termina.
@@ -406,8 +410,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 last_backup_completed_time = time.time()
 
     except Exception as e:
-        print(f"[Worker] [WARN] Excepcion en worker de backup: {type(e).__name__}: {e}")
-        print("[Worker]          Limpiando estado del worker...")
+        print(L(f"[Worker] [WARN] Excepcion en worker de backup: {type(e).__name__}: {e}", f"[Worker] [WARN] Exception in backup worker: {type(e).__name__}: {e}"))
+        print(L("[Worker]          Limpiando estado del worker...", "[Worker]          Cleaning up worker state..."))
         with state_lock:
             backup_in_progress = False
             backup_dispatched = False
@@ -427,7 +431,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
         # backup_in_progress con esta linea; sin el, un backup fallido dejaba
         # el boton de backup en frio bloqueado ("Ya hay un backup en curso")
         # hasta reiniciar la GUI.
-        print("[Worker] Backup finalizado")
+        print(L("[Worker] Backup finalizado", "[Worker] Backup finished"))
 # ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdout del servidor
 # ═══════════════════════════════════════════════════════════════
@@ -544,7 +548,7 @@ def read_stdout():
 
         except Exception as e:
             try:
-                print(f"[Wrapper] [WARN] Error en read_stdout: {type(e).__name__}: {e}")
+                print(L(f"[Wrapper] [WARN] Error en read_stdout: {type(e).__name__}: {e}", f"[Wrapper] [WARN] Error in read_stdout: {type(e).__name__}: {e}"))
             except Exception:
                 pass
 
@@ -597,12 +601,12 @@ def backup_scheduler():
                                 daemon=True
                             )
                             backup_thread = worker_to_start
-                            print(f"[Wrapper] Despachando worker (vía timeout de resguardo) con snapshot ({snapshot_len} archivos)...")
+                            print(L(f"[Wrapper] Despachando worker (vía timeout de resguardo) con snapshot ({snapshot_len} archivos)...", f"[Wrapper] Dispatching worker (via fallback timeout) with snapshot ({snapshot_len} files)..."))
                             worker_to_start.start()
                         # Estado HOLDING: verificar Watchdog de 60s
                         elif (now - save_hold_timestamp) > WATCHDOG_HOLDING_TIMEOUT_SEC:
-                            print("[Wrapper] [WARN] Servidor no respondio a save query en 60s.")
-                            print("[Wrapper]          Forzando save resume.")
+                            print(L("[Wrapper] [WARN] Servidor no respondio a save query en 60s.", "[Wrapper] [WARN] Server did not respond to save query in 60s."))
+                            print(L("[Wrapper]          Forzando save resume.", "[Wrapper]          Forcing save resume."))
                             backup_in_progress = False
                             backup_dispatched = False
                             save_query_ready_seen = False
@@ -620,7 +624,7 @@ def backup_scheduler():
                     retry_due = snapshot_retry_at > 0 and now >= snapshot_retry_at
                     if (now - last_backup_completed_time) > BACKUP_INTERVAL_SEC or retry_due:
                         if len(players_online) > 0:
-                            print(f"[Wrapper] Hay {len(players_online)} jugador(es) online. Iniciando backup en caliente...")
+                            print(L(f"[Wrapper] Hay {len(players_online)} jugador(es) online. Iniciando backup en caliente...", f"[Wrapper] Hay {len(players_online)} player(s) online. Starting hot backup..."))
                             backup_in_progress = True
                             backup_dispatched = False
                             watchdog_fired = False
@@ -653,7 +657,7 @@ def backup_scheduler():
 
         except Exception as e:
             try:
-                print(f"[Wrapper] [WARN] Excepción no esperada en backup_scheduler: {e}")
+                print(L(f"[Wrapper] [WARN] Excepción no esperada en backup_scheduler: {e}", f"[Wrapper] [WARN] Unexpected exception in backup_scheduler: {e}"))
             except Exception:
                 pass
 
@@ -677,9 +681,9 @@ def initiate_shutdown(reason="shutdown"):
         if not shutting_down:
             shutting_down = True
             shutdown_requested_at = time.time()  # H1: arranca el reloj del tope de stop
-            print(f"\n[Wrapper] Apagado iniciado ({reason}).")
+            print(L(f"\n[Wrapper] Apagado iniciado ({reason}).", f"\n[Wrapper] Shutdown initiated ({reason})."))
             if backup_in_progress:
-                print("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...")
+                print(L("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...", "[Wrapper] Cancelling running hot backup before stopping the server..."))
                 cancel_worker = backup_cancel_event
                 should_send_resume = True
                 backup_in_progress = False
@@ -689,7 +693,7 @@ def initiate_shutdown(reason="shutdown"):
                 watchdog_fired = True
             should_send_stop = True
         else:
-            print(f"\n[Wrapper] Apagado ya en progreso, ignorando ({reason})...")
+            print(L(f"\n[Wrapper] Apagado ya en progreso, ignorando ({reason})...", f"\n[Wrapper] Shutdown already in progress, ignoring ({reason})..."))
 
     if cancel_worker:
         cancel_worker.set()
@@ -698,7 +702,7 @@ def initiate_shutdown(reason="shutdown"):
         send_command("save resume")
 
     if should_send_stop:
-        print("[Wrapper] Enviando comando 'stop' al servidor...")
+        print(L("[Wrapper] Enviando comando 'stop' al servidor...", "[Wrapper] Sending 'stop' command to the server..."))
         send_command("stop")
 
 # ═══════════════════════════════════════════════════════════════
@@ -747,9 +751,9 @@ def read_stdin():
                 started = _begin_manual_hot_backup()
                 if started:
                     send_command("save hold")
-                    print("[Wrapper] Backup manual solicitado; ciclo caliente iniciado.")
+                    print(L("[Wrapper] Backup manual solicitado; ciclo caliente iniciado.", "[Wrapper] Manual backup requested; hot cycle started."))
                 else:
-                    print("[Wrapper] Ya hay un backup en curso; solicitud manual ignorada.")
+                    print(L("[Wrapper] Ya hay un backup en curso; manual request ignored.", "[Wrapper] A backup is already in progress; manual request ignored."))
             elif cmd.lower() == "stop":
                 initiate_shutdown("comando 'stop' en consola")
                 break
@@ -766,23 +770,23 @@ def execute_final_backup():
     try:
         result = auto_backup.create_backup("cierre", file_snapshot=None, wait_lock_timeout_sec=FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=backup_ipc_lock)
         if not result:
-            print("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.")
+            print(L("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.", "[Wrapper] The final backup did not produce a valid ZIP or was aborted by timeout."))
     except Exception as e:
-        print(f"[Wrapper] Falló el backup final: {e}")
+        print(L(f"[Wrapper] Falló el backup final: {e}", f"[Wrapper] Final backup failed: {e}"))
 
 # ═══════════════════════════════════════════════════════════════
 # PUNTO DE ENTRADA PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print("=========================================================")
-    print("  INICIANDO SERVIDOR CON WRAPPER")
+    print(L("  INICIANDO SERVIDOR CON WRAPPER", "  STARTING SERVER WITH WRAPPER"))
     print("=========================================================")
 
     # Backup inicial (antes de arrancar el proceso de Bedrock)
     try:
         auto_backup.create_backup("inicio", file_snapshot=None, external_lock=backup_ipc_lock)
     except Exception as e:
-        print(f"[Wrapper] Error en backup inicial: {e}")
+        print(L(f"[Wrapper] Error en backup inicial: {e}", f"[Wrapper] Error in initial backup: {e}"))
 
     with state_lock:
         last_backup_completed_time = time.time()
@@ -801,7 +805,7 @@ if __name__ == "__main__":
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
     except Exception as e:
-        print(f"[Wrapper] Error al iniciar BDS: {e}")
+        print(L(f"[Wrapper] Error al iniciar BDS: {e}", f"[Wrapper] Error starting BDS: {e}"))
         sys.exit(1)
 
     # Lanzar hilos de servicio
@@ -833,14 +837,14 @@ if __name__ == "__main__":
             if server_process:
                 server_process.wait(timeout=15)
         except subprocess.TimeoutExpired:
-            print("[Wrapper] [WARN] Servidor no respondio al cierre. Forzando terminacion...")
+            print(L("[Wrapper] [WARN] Servidor no respondio al cierre. Forzando terminacion...", "[Wrapper] [WARN] Server did not respond to shutdown. Forcing termination..."))
             try:
                 server_process.kill()
                 server_process.wait()
             except Exception:
                 pass
         except KeyboardInterrupt:
-            print("[Wrapper] Terminando proceso del servidor...")
+            print(L("[Wrapper] Terminando proceso del servidor...", "[Wrapper] Terminating server process..."))
             try:
                 if server_process:
                     server_process.kill()
@@ -854,7 +858,7 @@ if __name__ == "__main__":
         # cierre debe correr sobre un mundo quieto. Idempotente: si BDS ya
         # cerro, poll() no es None y no se toca nada.
         if server_process is not None and server_process.poll() is None:
-            print("[Wrapper] [WARN] BDS no cerro tras el tope de apagado; forzando terminacion...")
+            print(L("[Wrapper] [WARN] BDS no cerro tras el tope de apagado; forzando terminacion...", "[Wrapper] [WARN] BDS did not close after the shutdown timeout; forcing termination..."))
             try:
                 server_process.kill()
                 server_process.wait()
@@ -866,7 +870,7 @@ if __name__ == "__main__":
         # terminó". La GUI (server_gui_server) espera esta linea para saber que
         # el mundo quedo quieto; NO espera la salida del proceso (que tarda el
         # backup final de cierre, hasta 240s).
-        print("[Wrapper] BDS detenido. Iniciando limpieza final de cierre...")
+        print(L("[Wrapper] BDS detenido. Iniciando limpieza final de cierre...", "[Wrapper] BDS stopped. Starting final shutdown cleanup..."))
         try:
             with state_lock:
                 shutting_down = True
@@ -874,14 +878,14 @@ if __name__ == "__main__":
 
             # ── Paso 1: Esperar al worker de backup si está activo ──
             if current_worker and current_worker.is_alive():
-                print(f"[Wrapper] Esperando a que termine el backup en curso (Max {WORKER_JOIN_ON_SHUTDOWN_SEC}s)...")
+                print(L(f"[Wrapper] Esperando a que termine el backup en curso (Max {WORKER_JOIN_ON_SHUTDOWN_SEC}s)...", f"[Wrapper] Waiting for the running backup to finish (Max {WORKER_JOIN_ON_SHUTDOWN_SEC}s)..."))
                 try:
                     current_worker.join(timeout=WORKER_JOIN_ON_SHUTDOWN_SEC)
                 except KeyboardInterrupt:
-                    print("[Wrapper] Interrupción por teclado durante join del worker.")
+                    print(L("[Wrapper] Interrupción por teclado durante join del worker.", "[Wrapper] Keyboard interrupt during worker join."))
 
                 if current_worker.is_alive():
-                    print("[Wrapper] Worker de compresion no termino a tiempo. forzando terminacion del proceso de compresion...")
+                    print(L("[Wrapper] Worker de compresion no termino a tiempo. forzando terminacion del proceso de compresion...", "[Wrapper] Compression worker did not finish in time. Forcing termination of the compression process..."))
                     
                     with state_lock:
                         proc_to_kill = active_compress_process
@@ -909,7 +913,7 @@ if __name__ == "__main__":
                 cancel_worker = None
                 with state_lock:
                     if backup_in_progress:
-                        print("[Wrapper] Recuperación: enviando save resume residual...")
+                        print(L("[Wrapper] Recuperación: enviando save resume residual...", "[Wrapper] Recovery: sending residual save resume..."))
                         cancel_worker = backup_cancel_event
                         backup_in_progress = False
                         backup_dispatched = False
@@ -925,19 +929,19 @@ if __name__ == "__main__":
 
             # ── Paso 2: Backup final de cierre ──
             if server_process and server_process.returncode is not None and server_process.returncode != 0:
-                print("[Wrapper] ADVERTENCIA: El servidor no finalizó con código 0. El backup de cierre puede ser de un estado inconsistente.")
+                print(L("[Wrapper] ADVERTENCIA: El servidor no finalizó con código 0. El backup de cierre puede ser de un estado inconsistente.", "[Wrapper] WARNING: The server did not exit with code 0. El backup de cierre puede ser de un estado inconsistente."))
 
-            print("[Wrapper] Creando backup final de cierre...")
+            print(L("[Wrapper] Creando backup final de cierre...", "[Wrapper] Creating final shutdown backup..."))
             final_thread = threading.Thread(target=execute_final_backup, daemon=True)
             final_thread.start()
             try:
                 final_thread.join(timeout=FINAL_BACKUP_TIMEOUT_SEC)
             except KeyboardInterrupt:
-                print("[Wrapper] Interrupción por teclado durante backup final.")
+                print(L("[Wrapper] Interrupción por teclado durante backup final.", "[Wrapper] Keyboard interrupt during final backup."))
 
             if final_thread.is_alive():
-                print(f"[Wrapper] [WARN] Backup de cierre excedio los {FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.")
+                print(L(f"[Wrapper] [WARN] Backup de cierre excedio los {FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.", f"[Wrapper] [WARN] Shutdown backup exceeded {FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso."))
 
-            print("[Wrapper] Servidor finalizado limpiamente. Adiós.")
+            print(L("[Wrapper] Servidor finalizado limpiamente. Adiós.", "[Wrapper] Server finished cleanly. Goodbye."))
         except BaseException as e:
-            print(f"[Wrapper] Excepción durante limpieza final: {e}")
+            print(L(f"[Wrapper] Excepción durante limpieza final: {e}", f"[Wrapper] Exception during final cleanup: {e}"))

@@ -179,13 +179,13 @@ def test_is_snapshot_failure():
     retry = [
         # Mensajes del worker con prefijo "Snapshot:" (solo SnapshotDesyncError:
         # desincronizacion del snapshot, que un nuevo save query puede arreglar)
-        "Snapshot: Snapshot Bedrock vacio o invalido; se aborta backup caliente.",
-        "Snapshot: Snapshot sin level.dat; snapshot incompleto o invalido.",
-        "Snapshot: Snapshot incompleto: 1 < 4 archivos reales en db/.",
-        "Snapshot: Snapshot truncado en 'db/000030.ldb': 5 < 1917505 bytes.",
-        "Snapshot: Desincronizacion de snapshot en 'x': archivo mas grande que snapshot.",
-        "Snapshot: Archivo de snapshot no encontrado en disco: db/000030.ldb",
-        "Snapshot: Archivo de snapshot desaparecido durante la copia: db/000030.ldb",
+        "Snapshot: Empty or invalid Bedrock snapshot; aborting hot backup.",
+        "Snapshot: Snapshot missing level.dat; incomplete or invalid snapshot.",
+        "Snapshot: Incomplete snapshot: 1 < 4 real files in db/.",
+        "Snapshot: Snapshot truncated at 'db/000030.ldb': 5 < 1917505 bytes.",
+        "Snapshot: Snapshot desync at 'x': file larger than snapshot.",
+        "Snapshot: Snapshot file not found on disk: db/000030.ldb",
+        "Snapshot: Snapshot file disappeared during copy: db/000030.ldb",
     ]
     for err in retry:
         assert sw._is_snapshot_failure(err) is True, err
@@ -198,14 +198,14 @@ def test_is_snapshot_failure():
         # no los resuelve
         "[Errno 28] No space left on device",
         "[Errno 13] Permission denied: 'C:\\\\Backups\\\\auto_backup_x.zip'",
-        "Backup excede el limite de 10 GB (acumulado: 12.00 GB). Abortando.",
-        "Backup cancelado antes de publicar ZIP.",
+        "Backup exceeds the 10 GB limit (accumulated: 12.00 GB). Aborting.",
+        "Backup cancelled before publishing ZIP.",
         # Defensa en profundidad: aunque llegaran prefijados, no reintentan
-        "Snapshot: Backup cancelado antes de publicar ZIP.",
-        "Snapshot: Backup excede el limite de 10 GB (acumulado: 12.00 GB). Abortando.",
+        "Snapshot: Backup cancelled before publishing ZIP.",
+        "Snapshot: Backup exceeds the 10 GB limit (accumulated: 12.00 GB). Aborting.",
         # Ajenos al modo snapshot (fallo fuera del worker o resultado perdido)
-        "El proceso termino sin devolver un resultado",
-        "No se pudo escribir el resultado: boom",
+        "The process exited without returning a result",
+        "Could not write the result: boom",
     ]
     for err in no_retry:
         assert sw._is_snapshot_failure(err) is False, repr(err)

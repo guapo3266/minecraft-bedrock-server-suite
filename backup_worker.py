@@ -22,6 +22,8 @@ import sys
 import time
 import pickle
 
+from console_lang import L
+
 
 class _FileCancel:
     """Cancel_event compatible (is_set) basado en un archivo marcador."""
@@ -64,7 +66,7 @@ def _main():
         with open(result_path, "wb") as f:
             pickle.dump(result, f)
     except Exception as e:
-        result = {"zip": None, "error": "No se pudo escribir el resultado: %s" % e}
+        result = {"zip": None, "error": L("No se pudo escribir el resultado: %s", "Could not write the result: %s") % e}
         try:
             with open(result_path, "wb") as f:
                 pickle.dump(result, f)
@@ -72,9 +74,9 @@ def _main():
             pass
 
     if result["zip"]:
-        print("[Worker] Compresion OK en %.1fs -> %s" % (time.time() - t0, result["zip"]))
+        print(L("[Worker] Compresion OK en %.1fs -> %s", "[Worker] Compression OK in %.1fs -> %s") % (time.time() - t0, result["zip"]))
     else:
-        print("[Worker] Compresion fallida: %s" % result["error"])
+        print(L("[Worker] Falló la compresión: %s", "[Worker] Compression failed: %s") % result["error"])
 
 
 if __name__ == "__main__":

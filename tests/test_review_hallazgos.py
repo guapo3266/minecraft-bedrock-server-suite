@@ -190,9 +190,9 @@ def test_gui_busca_la_cadena_exacta_del_wrapper():
     src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
     gui_src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
     gui_thread = gui_src.split("def run_wrapper_thread")[1]
-    assert "Iniciando compresion de archivos en proceso separado" in src
+    assert "Starting compression in a separate process" in src
     assert (
-        '"Iniciando compresion de archivos en proceso separado" in line_str' in gui_thread
+        '"Starting compression in a separate process" in line_str' in gui_thread
     )
     assert "Iniciando compresión" not in gui_thread
     # condicion externa de la rama: debe incluir "compres" (prefijo comun
@@ -200,7 +200,7 @@ def test_gui_busca_la_cadena_exacta_del_wrapper():
     # contiene "backup" ni "compresión" acentuada
     assert '"compres"' in gui_thread
     linea_real = (
-        "[Worker] Iniciando compresion de archivos en proceso separado (subprocess)..."
+        "[Worker] Starting compression in a separate process (subprocess)..."
     )
     assert any(k in linea_real.lower() for k in ("backup", "compres", "save query"))
 
@@ -351,11 +351,11 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
                 if saw_exitosa:
                     cycle_done = True
                     break
-                if wait_for_new_log(lambda t: "Compresión exitosa" in t, 1):
+                if wait_for_new_log(lambda t: "Compression successful" in t, 1):
                     saw_exitosa = True
                     cycle_done = True
                     break
-                if wait_for_new_log(lambda t: "Compresion fallida" in t, 1):
+                if wait_for_new_log(lambda t: "Compression failed" in t, 1):
                     fallida_count += 1
                     cycle_done = True
                     break
@@ -380,7 +380,7 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
         # ── assertions del FIX (F2) ──
         # evidencia retrospectiva sobre TODOS los logs recibidos:
         recibio_linea_inicio = any(
-            "Iniciando compresion de archivos en proceso separado" in t for t in logs
+            "Starting compression in a separate process" in t for t in logs
         )
         assert recibio_linea_inicio, (
             "la GUI debio recibir la linea del worker; logs: %s"
@@ -975,7 +975,7 @@ def test_restart_fase1_aborta_si_bds_no_se_detiene(monkeypatch):
         assert spawned["n"] == 0, "se lanzo un wrapper con BDS vivo"
         assert "stop\n" in fake_stdin.lines, "el stop no se escribio al wrapper"
         logs = "\n".join(_logs_since(gui.manager.log_history, log_start))
-        assert "no se detuvo" in logs and "Reinicio cancelado" in logs, logs
+        assert "did not stop" in logs and "Restart cancelled" in logs, logs
     finally:
         _reset_manager_state()
 
@@ -1059,7 +1059,7 @@ def test_restart_fase2_aborta_si_wrapper_nunca_termina(monkeypatch):
             time.sleep(1.0)
         assert spawned["n"] == 0, "se lanzo un wrapper con el anterior aun vivo"
         logs = "\n".join(_logs_since(gui.manager.log_history, log_start))
-        assert "wrapper no termino" in logs and "Reinicio cancelado" in logs, logs
+        assert "wrapper did not finish" in logs and "Restart cancelled" in logs, logs
     finally:
         _reset_manager_state()
 
@@ -1102,7 +1102,7 @@ def test_update_bds_espera_fase2_antes_de_tocar_instalacion(monkeypatch):
         assert applied["backup"] == 0, "el backup preventivo corrio con el wrapper vivo"
         assert applied["staged"] == 0, "se aplicaron binarios con el wrapper vivo"
         logs = "\n".join(_logs_since(gui.manager.log_history, log_start))
-        assert "wrapper no termino" in logs and "Actualización cancelada" in logs, logs
+        assert "wrapper did not finish" in logs and "Update cancelled" in logs, logs
     finally:
         _reset_manager_state()
         shutil.rmtree(os.path.join(BASE_DIR, "bds_update_staging"), ignore_errors=True)
@@ -1177,8 +1177,8 @@ def test_stop_normal_tiene_tope_y_fuerza_terminacion():
     src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
     assert "BDS_STOP_TIMEOUT_SEC" in src
     assert "shutdown_requested_at" in src
-    assert "forzando terminacion" in src
-    assert "forzando terminacion" in src.split("finally:")[-1], (
+    assert "forcing termination" in src
+    assert "forcing termination" in src.split("finally:")[-1], (
         "el kill forzado debe ocurrir en el finally, antes del backup final"
     )
 
@@ -1194,7 +1194,9 @@ def test_wrapper_marca_fin_de_ciclo_en_finally():
     src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
     worker = src.split("def execute_backup_worker")[1].split("def read_stdout")[0]
     assert "finally:" in worker
-    assert 'print("[Worker] Backup finalizado")' in worker
+    assert '"[Worker] Backup finalizado"' in worker
+    assert '"[Worker] Backup finished"' in worker
+    assert "print(L(" in worker
     # el finally va despues del except: cubre tambien los returns tempranos
     assert worker.index("finally:") > worker.index("except Exception as e:")
 
@@ -1205,7 +1207,7 @@ def test_gui_resetea_flag_con_backup_finalizado():
     boton de backup en frio no quede bloqueado tras un backup fallido."""
     gui_src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
     gui_thread = gui_src.split("def run_wrapper_thread")[1]
-    assert '"Backup finalizado" in line_str' in gui_thread
+    assert '"Backup finished" in line_str' in gui_thread
     assert "backup_in_progress = False" in gui_thread
 
 

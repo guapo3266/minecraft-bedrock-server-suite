@@ -9,9 +9,11 @@ import UpdateModal from './components/UpdateModal';
 import { useI18n } from './i18n.jsx';
 
 export default function App() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const tRef = useRef(t);
   tRef.current = t;
+  const langRef = useRef(lang);
+  langRef.current = lang;
 
   const [status, setStatus] = useState({
     running: false,
@@ -36,7 +38,7 @@ export default function App() {
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/ws?lang=${langRef.current}`;
 
     const connect = () => {
       const ws = new WebSocket(wsUrl);
@@ -55,6 +57,7 @@ export default function App() {
         setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('wsConnected'), type: 'system' }]);
         fetchBackups();
         sendPing();
+        ws.send(JSON.stringify({ type: 'set_lang', lang: langRef.current }));
         pingTimer = setInterval(sendPing, 3000);
       };
 
@@ -100,6 +103,13 @@ export default function App() {
       setIsUpdateModalOpen(false);
     }
   }, [status.update_in_progress, updateStarted, isUpdating]);
+
+  // Reenvía el idioma al backend cuando el usuario cambia ES/EN en el navbar
+  useEffect(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'set_lang', lang }));
+    }
+  }, [lang]);
 
   const fetchBackups = async () => {
     try {

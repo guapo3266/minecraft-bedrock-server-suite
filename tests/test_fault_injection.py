@@ -85,7 +85,7 @@ def test_backup_cancelado_libera_lock_y_limpia_tmp(capsys):
                                            cancel_event=cancel, external_lock=lock)
         out = capsys.readouterr().out
         assert result is False
-        assert "Backup cancelado" in out
+        assert "Backup cancelled" in out
         # Sin .tmp huerfanos ni zip publicado
         assert not glob_tmp(fake_bkp), "quedaron .tmp huerfanos"
         assert not any(f.endswith(".zip") for f in os.listdir(fake_bkp))
@@ -133,7 +133,7 @@ def test_backup_simultaneo_timeout_espera_y_aborta(capsys):
         elapsed = time.time() - start
         out = capsys.readouterr().out
         assert result is False
-        assert "Timeout esperando lock" in out
+        assert "Backup lock wait timed out" in out
         assert 0.9 <= elapsed < 5, "el timeout no respeto el limite"
     finally:
         _teardown(tmp, old)
@@ -159,7 +159,7 @@ def test_worker_abortado_no_deja_deadlock_ni_parciales(capsys):
         assert not th.is_alive(), "el worker quedo colgado"
         assert results.get("r") is False
         out = capsys.readouterr().out
-        assert "Backup cancelado" in out
+        assert "Backup cancelled" in out
         assert _lock_free(lock), "lock tomado para siempre tras aborto del worker"
         assert not glob_tmp(fake_bkp)
     finally:
@@ -176,7 +176,7 @@ def test_snapshot_vacio_rechazado(capsys):
         with pytest.raises(RuntimeError):
             auto_backup.create_backup("test", file_snapshot=[], external_lock=lock)
         out = capsys.readouterr().out
-        assert "Snapshot Bedrock vacio o invalido" in out
+        assert "Empty or invalid Bedrock snapshot" in out
     finally:
         _teardown(tmp, old)
 
@@ -196,7 +196,7 @@ def test_snapshot_con_pocos_archivos_rechazado(capsys):
             auto_backup.create_backup("test", file_snapshot=[("level.dat", 100)],
                                       external_lock=lock)
         out = capsys.readouterr().out
-        assert "Snapshot incompleto" in out
+        assert "Incomplete snapshot" in out
     finally:
         _teardown(tmp, old)
 
@@ -213,7 +213,7 @@ def test_snapshot_cobertura_db_insuficiente_rechazado(capsys):
         with pytest.raises(RuntimeError):
             auto_backup.create_backup("test", file_snapshot=snap, external_lock=lock)
         out = capsys.readouterr().out
-        assert "Snapshot incompleto" in out
+        assert "Incomplete snapshot" in out
     finally:
         _teardown(tmp, old)
 

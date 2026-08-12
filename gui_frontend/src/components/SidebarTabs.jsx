@@ -32,7 +32,7 @@ export default function SidebarTabs({ players, backups, onRefreshBackups, isRunn
       {/* Contenido de Pestaña */}
       <div className="transition-all duration-300">
         {activeTab === 'players' ? (
-          <PlayersSidebar players={players} />
+          <PlayersSidebar players={players} isRunning={isRunning} />
         ) : (
           <BackupsSidebar backups={backups} onRefresh={onRefreshBackups} isRunning={isRunning} />
         )}

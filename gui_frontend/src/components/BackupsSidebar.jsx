@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
-import { FolderArchive, RefreshCw, XCircle } from 'lucide-react';
+import { FolderArchive, RefreshCw, XCircle, Download, Trash2 } from 'lucide-react';
 import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon } from './hover/AnimatedStatusIcons';
 import { useI18n } from '../i18n.jsx';
 
@@ -12,6 +12,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
   const successIconRef = useRef(null);
   const alertIconRef = useRef(null);
   const [restoreTarget, setRestoreTarget] = useState(null); // backup a restaurar (confirm)
+  const [deleteTarget, setDeleteTarget] = useState(null); // backup a eliminar (confirm)
   const [alertOpen, setAlertOpen] = useState(false); // alerta "apaga el servidor"
   const [result, setResult] = useState(null); // { ok: bool, message: string } tras el intento
 
@@ -60,6 +61,31 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
     }
   };
 
+  const handleDeleteClick = (backup) => {
+    setResult(null);
+    setDeleteTarget(backup);
+  };
+
+  const handleConfirmDelete = async () => {
+    const backup = deleteTarget;
+    if (!backup) return;
+    try {
+      const res = await fetch(`/api/backups/${encodeURIComponent(backup.filename)}/delete`, {
+        method: 'POST'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setResult({ ok: true, message: t('deleteSuccess') });
+        onRefresh();
+      } else {
+        const detail = data.detail || res.statusText;
+        setResult({ ok: false, message: detail });
+      }
+    } catch (e) {
+      setResult({ ok: false, message: String(e) });
+    }
+  };
+
   return (
     <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.15)">
       <div className="flex items-center justify-between">
@@ -90,6 +116,25 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                   <span className="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-300">
                     {b.size_mb} MB
                   </span>
+                  <a
+                    href={`/api/backups/${encodeURIComponent(b.filename)}/download`}
+                    title={t('download')}
+                    aria-label={t('download')}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/25 hover:border-cyan-500/70 transition-all"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </a>
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                    onClick={() => handleDeleteClick(b)}
+                    title={t('delete')}
+                    aria-label={t('delete')}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/25 hover:border-rose-500/70"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </motion.button>
                   <motion.button
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.9 }}
@@ -141,6 +186,67 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
               <div className="mt-5 flex justify-end">
                 <ConfirmButton variant="rose" onClick={() => setAlertOpen(false)} className="px-4 py-2">
                   {t('cancel')}
+                </ConfirmButton>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmación de eliminación */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteTarget(null)}
+              className="absolute inset-0 bg-black/75 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.8, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+              className="relative z-10 w-full max-w-sm rounded-2xl border border-rose-500/40 bg-slate-950 p-6 shadow-2xl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
+                  <Trash2 className="h-5 w-5 text-rose-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">{t('deleteConfirm')}</h3>
+                  <p className="font-mono text-[11px] text-rose-300 truncate max-w-[240px]">{deleteTarget.filename}</p>
+                </div>
+              </div>
+              <p className="mt-4 text-xs text-slate-300 leading-relaxed">
+                {t('deleteWarning')}
+              </p>
+              <p className="mt-2 text-[11px] text-slate-400">
+                {deleteTarget.date} · {deleteTarget.size_mb} MB
+              </p>
+
+              {result && (
+                <div
+                  className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                    result.ok
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                      : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                  }`}
+                >
+                  {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                  <span className="break-all">{result.message}</span>
+                </div>
+              )}
+
+              <div className="mt-5 flex justify-end gap-3">
+                <ConfirmButton variant="amber" onClick={() => setDeleteTarget(null)} className="px-4 py-2">
+                  {t('cancel')}
+                </ConfirmButton>
+                <ConfirmButton variant="rose" onClick={handleConfirmDelete} className="px-4 py-2">
+                  <Trash2 className="h-4 w-4" />
+                  <span>{t('delete')}</span>
                 </ConfirmButton>
               </div>
             </motion.div>

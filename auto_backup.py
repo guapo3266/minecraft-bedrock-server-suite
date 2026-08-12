@@ -6,6 +6,8 @@ import multiprocessing
 import shutil
 import re
 
+from console_lang import L
+
 # Lock por defecto (multiprocessing safe)
 _backup_lock = multiprocessing.Lock()
 
@@ -92,9 +94,9 @@ def _resolve_snapshot_path(rel_path):
     try:
         common = os.path.commonpath([world_abs, full_path])
     except ValueError:
-        raise ValueError(f"Ruta invalida (unidades diferentes?): {rel_path}")
+        raise ValueError(L(f"Ruta invalida (unidades diferentes?): {rel_path}", f"Invalid path (different drives?): {rel_path}"))
     if common != world_abs:
-        raise ValueError(f"Ruta fuera del mundo rechazada: {rel_path}")
+        raise ValueError(L(f"Ruta fuera del mundo rechazada: {rel_path}", f"Path outside the world rejected: {rel_path}"))
 
     # Check 2: symlink traversal — realpath resuelve symlinks reales
     if os.path.exists(full_path):
@@ -103,9 +105,9 @@ def _resolve_snapshot_path(rel_path):
         try:
             real_common = os.path.commonpath([world_real, real_full])
         except ValueError:
-            raise ValueError(f"Symlink escapa del mundo (unidades diferentes): {rel_path}")
+            raise ValueError(L(f"Symlink escapa del mundo (unidades diferentes): {rel_path}", f"Symlink escapes the world (different drives): {rel_path}"))
         if real_common != world_real:
-            raise ValueError(f"Symlink fuera del mundo rechazado: {rel_path}")
+            raise ValueError(L(f"Symlink fuera del mundo rechazado: {rel_path}", f"Symlink outside the world rejected: {rel_path}"))
 
     return clean_rel_path, full_path
 
@@ -133,14 +135,14 @@ def _write_server_packs(zipf, total_bytes, cancel_event):
         for root, dirs, files in os.walk(src_dir):
             for fname in files:
                 if _cancelled(cancel_event):
-                    raise RuntimeError("Backup cancelado durante compresion de packs.")
+                    raise RuntimeError(L("Backup cancelado durante compresion de packs.", "Backup cancelled during pack compression."))
                 full_f = os.path.join(root, fname)
                 arc = prefix + os.path.relpath(full_f, src_dir).replace(os.sep, "/")
                 zipf.write(full_f, arc)
                 total_bytes += os.path.getsize(full_f)
                 if total_bytes > MAX_BACKUP_BYTES:
                     raise RuntimeError(
-                        f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando."
+                        L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
                     )
     return total_bytes
 
@@ -159,12 +161,12 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
 
     if wait_lock_timeout_sec > 0:
         if not lock_to_use.acquire(timeout=wait_lock_timeout_sec):
-            print(f"[ERROR] Timeout esperando lock de backup ({wait_lock_timeout_sec}s); se cancela esta solicitud.")
+            print(L(f"[ERROR] Backup lock wait timed out ({wait_lock_timeout_sec}s); se cancela esta solicitud.", f"[ERROR] Backup lock wait timed out ({wait_lock_timeout_sec}s); cancelling this request."))
             return False
         acquired_lock = True
     else:
         if not lock_to_use.acquire(False):
-            print("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.")
+            print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] Ya hay un backup ejecutandose; cancelling this request."))
             return False
         acquired_lock = True
 
@@ -178,11 +180,11 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             for orphan_tmp in glob.glob(os.path.join(BACKUP_DIR, "*.tmp")):
                 try:
                     os.remove(orphan_tmp)
-                    print(f"[*] Limpieza: Eliminado archivo huérfano {os.path.basename(orphan_tmp)}")
+                    print(L(f"[*] Limpieza: Eliminado archivo huérfano {os.path.basename(orphan_tmp)}", f"[*] Cleanup: removed orphan file {os.path.basename(orphan_tmp)}"))
                 except Exception:
                     pass
         if not os.path.exists(WORLD_DIR):
-            print(f"[ERROR] No se encontro la carpeta del mundo: {WORLD_DIR}")
+            print(L(f"[ERROR] No se encontro la carpeta del mundo: {WORLD_DIR}", f"[ERROR] World folder not found: {WORLD_DIR}"))
             return False
 
         os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -200,17 +202,17 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         if os.path.abspath(zip_filepath) != os.path.join(
             os.path.abspath(BACKUP_DIR), os.path.basename(zip_filepath)
         ):
-            raise RuntimeError(f"Nombre de backup invalido tras saneo: {trigger_name!r}")
+            raise RuntimeError(L(f"Nombre de backup invalido after sanitizing: {trigger_name!r}", f"Invalid backup name after sanitizing: {trigger_name!r}"))
         tmp_filepath = zip_filepath + ".tmp"
 
-        print(f"[*] Creando copia de seguridad comprimida ({trigger_name})...")
+        print(L(f"[*] Creando copia de seguridad comprimida ({trigger_name})...", f"[*] Creating compressed backup ({trigger_name})..."))
 
         use_snapshot = file_snapshot is not None
         
         # Modo tradicional: escanea WORLD_DIR directamente (abajo en el else)
         if use_snapshot:
             if not isinstance(file_snapshot, list) or len(file_snapshot) == 0:
-                raise SnapshotDesyncError("Snapshot Bedrock vacio o invalido; se aborta backup caliente.")
+                raise SnapshotDesyncError(L("Snapshot Bedrock vacio o invalido; se aborta backup caliente.", "Empty or invalid Bedrock snapshot; aborting hot backup."))
 
             # Validación de cobertura de snapshot: exige el archivo esencial del nivel.
             # (El conteo magico "<4" rechazaba mundos pequeños pero válidos; lo que
@@ -218,7 +220,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             # la cobertura real de db/ contra disco.)
             if not any(os.path.basename(p.replace("\\", "/")) == "level.dat" for p, _ in file_snapshot):
                 raise SnapshotDesyncError(
-                    "Snapshot sin level.dat; snapshot incompleto o inválido."
+                    L("Snapshot sin level.dat; snapshot incompleto o inválido.", "Snapshot missing level.dat; incomplete or invalid snapshot.")
                 )
 
             # Validacion cruzada contra disco: si el snapshot tiene < 70% de los archivos
@@ -236,25 +238,25 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 min_expected = max(1, int(len(real_db_files) * 0.70))
                 if len(real_db_files) > 0 and len(snapshot_db_files) < min_expected:
                     raise SnapshotDesyncError(
-                        f"Snapshot incompleto: {len(snapshot_db_files)} archivos db/ en snapshot vs {len(real_db_files)} en disco."
+                        L(f"Snapshot incompleto: {len(snapshot_db_files)} archivos db/ en snapshot vs {len(real_db_files)} en disco.", f"Incomplete snapshot: {len(snapshot_db_files)} db/ files in snapshot vs {len(real_db_files)} on disk.")
                     )
 
         with zipfile.ZipFile(tmp_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             total_bytes = 0
             if use_snapshot:
-                print(f"[*] Modo Snapshot Bedrock Nativo: guardando {len(file_snapshot)} archivo(s) congelados...")
+                print(L(f"[*] Modo Snapshot Bedrock Nativo: guardando {len(file_snapshot)} archivo(s) congelados...", f"[*] Native Bedrock Snapshot mode: saving {len(file_snapshot)} archivo(s) congelados..."))
                 for rel_path, byte_length in file_snapshot:
                     if _cancelled(cancel_event):
-                        raise RuntimeError("Backup cancelado durante compresion snapshot.")
+                        raise RuntimeError(L("Backup cancelado durante compresion snapshot.", "Backup cancelled during snapshot compression."))
 
                     if not isinstance(byte_length, int) or byte_length < 0:
-                        raise RuntimeError(f"Longitud invalida para '{rel_path}': {byte_length}")
+                        raise RuntimeError(L(f"Longitud invalida para '{rel_path}': {byte_length}", f"Invalid length for '{rel_path}': {byte_length}"))
 
                     clean_rel_path, full_path = _resolve_snapshot_path(rel_path)
                     arcname = os.path.relpath(full_path, WORLD_DIR)
 
                     if not os.path.exists(full_path):
-                        raise SnapshotDesyncError(f"Archivo de snapshot no encontrado en disco: {clean_rel_path}")
+                        raise SnapshotDesyncError(L(f"Archivo de snapshot no encontrado en disco: {clean_rel_path}", f"Snapshot file not found on disk: {clean_rel_path}"))
 
                     # FIX F3: copia en streaming por chunks (pico de RAM
                     # constante ~2x chunk); antes se leia el archivo entero en
@@ -272,7 +274,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                             copied = 0
                             while remaining > 0:
                                 if _cancelled(cancel_event):
-                                    raise RuntimeError("Backup cancelado durante compresion snapshot.")
+                                    raise RuntimeError(L("Backup cancelado durante compresion snapshot.", "Backup cancelled during snapshot compression."))
                                 chunk = f.read(min(_CHUNK, remaining))
                                 if not chunk:
                                     break
@@ -281,25 +283,25 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                 remaining -= len(chunk)
                             if copied < byte_length:
                                 raise SnapshotDesyncError(
-                                    f"Snapshot truncado en '{clean_rel_path}': {copied} < {byte_length} bytes."
+                                    L(f"Snapshot truncado en '{clean_rel_path}': {copied} < {byte_length} bytes.", f"Snapshot truncated at '{clean_rel_path}': {copied} < {byte_length} bytes.")
                                 )
                             if not is_wal and f.read(1):
                                 raise SnapshotDesyncError(
-                                    f"Desincronizacion de snapshot en '{clean_rel_path}': archivo mas grande que snapshot ({byte_length}+ bytes)."
+                                    L(f"Desincronizacion de snapshot en '{clean_rel_path}': file larger than snapshot ({byte_length}+ bytes).", f"Snapshot desync at '{clean_rel_path}': file larger than snapshot ({byte_length}+ bytes).")
                                 )
                     except FileNotFoundError as fnf:
                         # TOCTOU entre el exists() y el open(): BDS pudo borrar
                         # el archivo en ese intervalo. Es desincronizacion del
                         # snapshot (reintentable), no un error de almacenamiento.
                         raise SnapshotDesyncError(
-                            f"Archivo de snapshot desaparecido durante la copia: {clean_rel_path}"
+                            L(f"Archivo de snapshot desaparecido durante la copia: {clean_rel_path}", f"Snapshot file disappeared during copy: {clean_rel_path}")
                         ) from fnf
 
                     total_bytes += copied
                     if total_bytes > MAX_BACKUP_BYTES:
                         raise RuntimeError(
                             f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
-                            f"(acumulado: {total_bytes / (1024**3):.2f} GB). Abortando."
+                            f"(accumulated: {total_bytes / (1024**3):.2f} GB). Aborting."
                         )
 
                 # Bedrock 'save query' omite la configuracion de shaders/addons y el icono del mundo.
@@ -317,7 +319,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                     total_bytes += os.path.getsize(full_f)
                                     if total_bytes > MAX_BACKUP_BYTES:
                                         raise RuntimeError(
-                                            f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando."
+                                            L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
                                         )
                         else:
                             arc = os.path.relpath(static_path, WORLD_DIR)
@@ -325,7 +327,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                             total_bytes += os.path.getsize(static_path)
                             if total_bytes > MAX_BACKUP_BYTES:
                                 raise RuntimeError(
-                                    f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando."
+                                    L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
                                 )
 
                 # Packs de nivel servidor (mods/addons) tambien van al backup,
@@ -336,10 +338,10 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 # Backup completo tradicional (usado al inicio, apagar o caída por snapshot incompleto)
                 for root, dirs, files in os.walk(WORLD_DIR):
                     if _cancelled(cancel_event):
-                        raise RuntimeError("Backup cancelado durante escaneo tradicional.")
+                        raise RuntimeError(L("Backup cancelado durante escaneo tradicional.", "Backup cancelled during traditional scan."))
                     for file in files:
                         if _cancelled(cancel_event):
-                            raise RuntimeError("Backup cancelado durante compresion tradicional.")
+                            raise RuntimeError(L("Backup cancelado durante compresion tradicional.", "Backup cancelled during traditional compression."))
                         full_path = os.path.join(root, file)
                         arcname = os.path.relpath(full_path, WORLD_DIR)
                         zipf.write(full_path, arcname)
@@ -347,14 +349,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         if total_bytes > MAX_BACKUP_BYTES:
                             raise RuntimeError(
                                 f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
-                                f"(acumulado: {total_bytes / (1024**3):.2f} GB). Abortando."
+                                f"(accumulated: {total_bytes / (1024**3):.2f} GB). Aborting."
                             )
 
                 # Packs de nivel servidor (mods/addons) tambien van al backup
                 total_bytes = _write_server_packs(zipf, total_bytes, cancel_event)
 
         if _cancelled(cancel_event):
-            raise RuntimeError("Backup cancelado antes de publicar ZIP.")
+            raise RuntimeError(L("Backup cancelado antes de publicar ZIP.", "Backup cancelled before publishing ZIP."))
 
         os.replace(tmp_filepath, zip_filepath)
         # H1: el ZIP ya esta publicado: success se marca ANTES de cualquier
@@ -363,14 +365,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         # finally borraba un backup integro recien publicado (perdida de datos).
         success = True
         size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
-        print(f"[OK] Backup creado exitosamente: {zip_filename} ({size_mb:.2f} MB)")
+        print(L(f"[OK] Backup creado exitosamente: {zip_filename} ({size_mb:.2f} MB)", f"[OK] Backup created successfully: {zip_filename} ({size_mb:.2f} MB)"))
         # Rotacion ejecutada dentro del lock para evitar concurrencia
         try:
             rotate_backups()
         except Exception as e:
-            print(f"[WARN] Fallo en rotacion de backups: {e}")
+            print(L(f"[WARN] Fallo en rotacion de backups: {e}", f"[WARN] Backup rotation failed: {e}"))
     except Exception as e:
-        print(f"[ERROR] No se pudo crear el backup: {e}")
+        print(L(f"[ERROR] No se pudo crear el backup: {e}", f"[ERROR] Could not create the backup: {e}"))
         if isinstance(e, SnapshotDesyncError):
             # Snapshot desincronizado/incompleto: merece reintento (un nuevo
             # save query puede dar un snapshot consistente). Se propaga para
@@ -387,7 +389,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             if cleanup_path and os.path.exists(cleanup_path):
                 try:
                     os.remove(cleanup_path)
-                    print(f"[*] Limpieza: archivo parcial '{os.path.basename(cleanup_path)}' eliminado.")
+                    print(L(f"[*] Limpieza: archivo parcial '{os.path.basename(cleanup_path)}' eliminado.", f"[*] Limpieza: partial file '{os.path.basename(cleanup_path)}' eliminado."))
                 except Exception:
                     pass
         
@@ -469,12 +471,12 @@ def rotate_backups(now=None):
             try:
                 os.remove(b['path'])
                 deleted_count += 1
-                print(f"    - Rotacion: Eliminado {os.path.basename(b['path'])}")
+                print(L(f"    - Rotacion: Eliminado {os.path.basename(b['path'])}", f"    - Rotation: removed {os.path.basename(b['path'])}"))
             except Exception as e:
-                print(f"    - Error al eliminar {os.path.basename(b['path'])}: {e}")
+                print(L(f"    - Error al eliminar {os.path.basename(b['path'])}: {e}", f"    - Error deleting {os.path.basename(b['path'])}: {e}"))
 
     if deleted_count > 0:
-        print(f"[*] Limpieza completada. Backups retenidos: {len(keepers)}.")
+        print(L(f"[*] Limpieza completada. Backups retenidos: {len(keepers)}.", f"[*] Cleanup complete. Backups kept: {len(keepers)}."))
 
 def _is_safe_zip_entry(filename: str) -> bool:
     """True si la entrada del zip es segura para extraer (anti zip-slip).
@@ -529,7 +531,7 @@ def _extract_pack_entry(zipf, entry, base_dir, rel_path):
     """
     segs = rel_path.split("/")
     if any(s == ".." for s in segs) or os.path.isabs(rel_path) or ":" in segs[0]:
-        raise ValueError(f"Entrada de pack insegura: {entry.filename}")
+        raise ValueError(L(f"Entrada de pack insegura: {entry.filename}", f"Unsafe pack entry: {entry.filename}"))
     dest = os.path.join(base_dir, *segs)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with zipf.open(entry, "r") as src, open(dest, "wb") as out:
@@ -547,10 +549,10 @@ def restore_backup(filename: str) -> str:
     Devuelve la ruta del backup restaurado.
     """
     if os.path.basename(filename) != filename:
-        raise ValueError("Nombre de backup invalido")
+        raise ValueError(L("Nombre de backup invalido", "Invalid backup name"))
     zip_path = os.path.join(BACKUP_DIR, filename)
     if not os.path.isfile(zip_path):
-        raise FileNotFoundError("Backup no encontrado")
+        raise FileNotFoundError(L("Backup no encontrado", "Backup not found"))
 
     # 1. Validar el ZIP antes de tocar el mundo y separar entradas:
     #    packs de servidor (server_resource_packs/..., server_behavior_packs/...)
@@ -559,7 +561,7 @@ def restore_backup(filename: str) -> str:
         world_infos, pack_infos = [], []
         for entry in zf.infolist():
             if not _is_safe_zip_entry(entry.filename):
-                raise ValueError(f"Entrada insegura en el backup: {entry.filename}")
+                raise ValueError(L(f"Entrada insegura en el backup: {entry.filename}", f"Unsafe entry in the backup: {entry.filename}"))
             parsed = _pack_dest(entry.filename)
             if parsed:
                 pack_infos.append((entry, parsed))
@@ -567,7 +569,7 @@ def restore_backup(filename: str) -> str:
                 world_infos.append(entry)
         bad = zf.testzip()
         if bad is not None:
-            raise ValueError(f"Backup corrupto (CRC fallido): {bad}")
+            raise ValueError(L(f"Backup corrupto (CRC fallido): {bad}", f"Corrupt backup (CRC failed): {bad}"))
 
     bak_dir = WORLD_DIR + ".bak"
     pack_baks = []  # (destino, bak) para rollback
@@ -609,7 +611,7 @@ def restore_backup(filename: str) -> str:
             shutil.rmtree(dest, ignore_errors=True)
             if os.path.exists(bak):
                 os.rename(bak, dest)
-        raise RuntimeError(f"Fallo la extraccion: {exc}") from exc
+        raise RuntimeError(L(f"Fallo la extraccion: {exc}", f"Extraction failed: {exc}")) from exc
 
     # 4. Limpieza de los resguardos si todo salio bien
     if os.path.exists(bak_dir):
