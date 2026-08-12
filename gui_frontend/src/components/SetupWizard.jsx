@@ -7,6 +7,16 @@ import { useI18n } from '../i18n.jsx';
 // Subconjunto de campos para el setup inicial (los esenciales de primera puesta en marcha)
 const WIZARD_KEYS = ['server-name', 'gamemode', 'difficulty', 'server-port', 'max-players'];
 
+// Defaults de BDS cuando el campo viene vacio (instalacion nueva sin archivo):
+// el usuario puede cambiarlos, pero sin ellos un campo vacio seria rechazado
+// por la validacion del backend ("debe ser un entero").
+const WIZARD_DEFAULTS = {
+  'gamemode': 'survival',
+  'difficulty': 'easy',
+  'server-port': '19132',
+  'max-players': '10'
+};
+
 const inputClass =
   'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition-all';
 
@@ -25,8 +35,8 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const [attempt, setAttempt] = useState(0);
 
   // Precarga de los valores actuales de server.properties (vacio en instalacion nueva).
-  // Los selects sin valor toman su primera opcion: un valor vacio en gamemode/
-  // difficulty seria rechazado por la validacion del backend.
+  // Los campos sin valor toman el default de BDS (WIZARD_DEFAULTS): un valor
+  // vacio en port/max-players seria rechazado por la validacion del backend.
   useEffect(() => {
     (async () => {
       try {
@@ -34,8 +44,8 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
         const data = await res.json();
         if (data.fields) {
           const vals = { ...data.fields };
-          FIELDS.filter((f) => f.type === 'select').forEach((f) => {
-            if (!vals[f.key]) vals[f.key] = f.options[0];
+          Object.entries(WIZARD_DEFAULTS).forEach(([k, v]) => {
+            if (!vals[k]) vals[k] = v;
           });
           setValues(vals);
         }
