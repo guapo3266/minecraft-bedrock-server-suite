@@ -8,21 +8,7 @@ import TiltCard from './hover/TiltCard';
 import ShinyText from './reactbits/ShinyText';
 import Magnet from './reactbits/Magnet';
 import { useI18n } from '../i18n.jsx';
-
-const FIELDS = [
-  { key: 'server-name', type: 'text', label: 'propsServerName' },
-  { key: 'gamemode', type: 'select', label: 'propsGamemode', options: ['survival', 'creative', 'adventure'] },
-  { key: 'difficulty', type: 'select', label: 'propsDifficulty', options: ['peaceful', 'easy', 'normal', 'hard'] },
-  { key: 'allow-cheats', type: 'bool', label: 'propsAllowCheats' },
-  { key: 'max-players', type: 'number', label: 'propsMaxPlayers', min: 1, max: 999 },
-  { key: 'online-mode', type: 'bool', label: 'propsOnlineMode' },
-  { key: 'allow-list', type: 'bool', label: 'propsAllowList' },
-  { key: 'server-port', type: 'number', label: 'propsServerPort', min: 1, max: 65535 },
-  { key: 'view-distance', type: 'number', label: 'propsViewDistance', min: 5, max: 96 },
-  { key: 'tick-distance', type: 'number', label: 'propsTickDistance', min: 4, max: 12 },
-  { key: 'player-idle-timeout', type: 'number', label: 'propsIdleTimeout', min: 0, max: 10080 },
-  { key: 'default-player-permission-level', type: 'select', label: 'propsPermLevel', options: ['visitor', 'member', 'operator'] }
-];
+import { FIELDS } from '../propsFields';
 
 const inputClass =
   'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition-all';

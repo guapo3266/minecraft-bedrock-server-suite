@@ -7,6 +7,7 @@ import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
 import UpdateModal from './components/UpdateModal';
 import PropsModal from './components/PropsModal';
+import SetupWizard from './components/SetupWizard';
 import { useI18n } from './i18n.jsx';
 
 export default function App() {
@@ -39,6 +40,26 @@ export default function App() {
   const [latency, setLatency] = useState(null);
   const wsRef = useRef(null);
   const updateStartedRef = useRef(false);
+  const [setupInfo, setSetupInfo] = useState(null);
+  const [setupAttempt, setSetupAttempt] = useState(0);
+
+  // Estado del setup inicial (first-run): el wizard se muestra en
+  // instalaciones nuevas; las ya usadas (mundo existente) no lo ven.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/setup_status');
+        const data = await res.json();
+        if (!cancelled) setSetupInfo(data);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [setupAttempt]);
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -193,6 +214,17 @@ export default function App() {
       setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('commandError', { err: e }), type: 'error' }]);
     }
   };
+
+  // Setup inicial: reemplaza el dashboard hasta completarlo (instalaciones nuevas)
+  if (setupInfo && setupInfo.required) {
+    return (
+      <SetupWizard
+        bdsInstalled={!!setupInfo.bds_installed}
+        logs={logs}
+        onDone={() => setSetupAttempt((a) => a + 1)}
+      />
+    );
+  }
 
   return (
     <div className="relative min-h-screen text-slate-100 p-5 font-sans">

@@ -24,6 +24,9 @@ Backups_Minecraft/
 _POSIBLEMENTE_CORRUPTO*
 backups/
 
+# Marcador del setup inicial (first-run wizard): nunca viaja entre instalaciones
+data/setup_done.json
+
 # Python
 __pycache__/
 *.pyc

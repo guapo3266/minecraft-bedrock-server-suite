@@ -691,6 +691,97 @@ async def set_server_properties(request: Request):
     return {"status": "ok", "written": written, "restart_required": True}
 
 
+# ═══════════════════════════════════════════════════════════════
+# Setup inicial (first-run wizard)
+# ═══════════════════════════════════════════════════════════════
+# El marcador se escribe solo al completar el wizard. Una instalacion que ya
+# arranco alguna vez (BDS presente + mundo con level.dat) se considera
+# configurada aunque no tenga marcador: asi el wizard NO molesta a
+# instalaciones existentes (p. ej. Servidor de Guapo) tras una sincronizacion.
+SETUP_MARKER = os.path.join(BASE_DIR, "data", "setup_done.json")
+
+
+def _is_install_used():
+    """True si la instalacion ya arranco al menos una vez: existe bedrock_server.exe
+    y worlds/ contiene al menos un mundo con level.dat (el mundo nace en el
+    primer boot; un BDS recien extraido no lo tiene)."""
+    worlds_dir = os.path.join(BASE_DIR, "worlds")
+    if not os.path.isdir(worlds_dir):
+        return False
+    for name in os.listdir(worlds_dir):
+        if os.path.isfile(os.path.join(worlds_dir, name, "level.dat")):
+            return True
+    return False
+
+
+def _setup_required():
+    """True solo para instalaciones NUEVAS: sin marcador y sin uso previo."""
+    if os.path.exists(SETUP_MARKER):
+        return False
+    if os.path.exists(SERVER_EXE) and _is_install_used():
+        return False
+    return True
+
+
+@app.get("/api/setup_status")
+async def get_setup_status(request: Request):
+    """Estado del setup inicial para el frontend: si hay que mostrar el wizard."""
+    _ensure_local(request.client.host if request.client else "")
+    return {
+        "required": _setup_required(),
+        "bds_installed": os.path.exists(SERVER_EXE),
+    }
+
+
+@app.post("/api/setup/install_bds")
+async def setup_install_bds(request: Request):
+    """Instala el BDS oficial desde cero (instalacion nueva, sin servidor).
+
+    Reusa el pipeline de actualizacion (_download_and_install_bds) bajo
+    op_lock; rechaza con 409 si el servidor esta corriendo y con 'busy' si
+    hay otra operacion en curso. El progreso se sigue por los logs ([Setup]).
+    """
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+    if manager.is_running:
+        raise HTTPException(status_code=409, detail="El servidor esta en ejecucion; detenlo antes de instalar")
+    if not manager.op_lock.acquire(blocking=False):
+        return {"status": "busy", "message": "Operación en curso (actualización/restauración/backup)"}
+
+    def do_install():
+        try:
+            manager.add_log(L("[Setup] Iniciando instalacion de Bedrock Dedicated Server...", "[Setup] Starting Bedrock Dedicated Server installation..."), "system")
+            ok, version = _download_and_install_bds(tag="[Setup]")
+            if ok:
+                manager.add_log(L(f"[Setup] BDS instalado correctamente (v{version}).", f"[Setup] BDS installed successfully (v{version})."), "system")
+            else:
+                manager.add_log(L("[Setup] No se pudo completar la instalacion (sin red o descarga invalida). Revisa los mensajes anteriores y reintenta.", "[Setup] The installation could not be completed (no network or invalid download). Check the previous messages and retry."), "error")
+        except Exception as e:
+            manager.add_log(L(f"[Setup] Error durante la instalacion: {e}", f"[Setup] Error during installation: {e}"), "error")
+        finally:
+            manager.op_lock.release()
+
+    threading.Thread(target=do_install, daemon=True).start()
+    return {"status": "install_dispatched"}
+
+
+@app.post("/api/setup/complete")
+async def complete_setup(request: Request):
+    """Marca el setup inicial como completado (escribe el marcador)."""
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+    if not os.path.exists(SERVER_EXE):
+        raise HTTPException(status_code=409, detail="Instala BDS antes de finalizar el setup")
+    try:
+        os.makedirs(os.path.dirname(SETUP_MARKER), exist_ok=True)
+        with open(SETUP_MARKER, "w", encoding="utf-8") as f:
+            json.dump({"completed": True, "at": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"No se pudo escribir el marcador de setup: {e}")
+    manager.add_log(L("[Setup] Configuracion inicial completada.", "[Setup] Initial setup completed."), "system")
+    return {"status": "ok"}
+
+
 @app.post("/api/action/{action_name}")
 async def handle_action(action_name: str, request: Request):
     _ensure_local(request.client.host if request.client else "")
@@ -875,9 +966,6 @@ async def handle_action(action_name: str, request: Request):
         manager.update_status()
 
         def do_update():
-            temp_zip = os.path.join(BASE_DIR, "bds_update.zip")
-            downloaded_version = None
-            staging_dir = None
             # op_lock durante TODO el ciclo de actualizacion (detener el
             # servidor, backup preventivo, descarga, extraccion): un start o
             # restart durante cualquiera de esas fases arrancaria BDS mientras
@@ -935,70 +1023,15 @@ async def handle_action(action_name: str, request: Request):
                 except Exception as e:
                     manager.add_log(L(f"[Actualizador BDS] Error en backup preventivo: {e}", f"[Actualizador BDS] Error in preventive backup: {e}"), "error")
 
-                # Obtener la URL oficial de descarga (API que usa la web de Mojang)
-                url, downloaded_version = _fetch_latest_bedrock_download()
-                if not url:
-                    manager.add_log(L("[Actualizador BDS] No se pudo obtener la URL de descarga oficial. Abortando.", "[Actualizador BDS] Could not get the official download URL. Aborting."), "error")
-                    return
-
-                manager.add_log(L("[Actualizador BDS] Descargando binarios desde Mojang...", "[Actualizador BDS] Downloading binaries from Mojang..."), "system")
-                # S3: límite de tamaño de descarga para no llenar el disco
-                max_bytes = 400 * 1024 * 1024
-                dl = requests.get(url, headers=_UA_HEADERS, stream=True, timeout=30)
-                content_length = dl.headers.get("Content-Length")
-                try:
-                    if content_length and int(content_length) > max_bytes:
-                        manager.add_log(L(f"[Actualizador BDS] Descarga demasiado grande ({content_length} bytes). Abortando.", f"[Actualizador BDS] Download too large ({content_length} bytes). Abortando."), "error")
-                        return
-                except (TypeError, ValueError):
-                    pass
-                total_bytes = 0
-                with open(temp_zip, "wb") as f:
-                    for chunk in dl.iter_content(chunk_size=8192):
-                        total_bytes += len(chunk)
-                        if total_bytes > max_bytes:
-                            manager.add_log(L("[Actualizador BDS] Descarga excede el límite de 400 MB. Abortando.", "[Actualizador BDS] Download exceeds the 400 MB limit. Aborting."), "error")
-                            return
-                        f.write(chunk)
-
-                manager.add_log(L("[Actualizador BDS] Descomprimiendo y actualizando ejecutable...", "[Actualizador BDS] Extracting and updating executable..."), "system")
-                preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
-                preserve_dirs = {"worlds", "backups", "web", "gui_frontend"}
-
-                # Staging: nunca se toca la instalacion con un zip a medias.
-                # (op_lock ya cubre todo el ciclo desde el inicio de do_update.)
-                staging_dir = os.path.join(BASE_DIR, "bds_update_staging")
-                shutil.rmtree(staging_dir, ignore_errors=True)
-                os.makedirs(staging_dir, exist_ok=True)
-                with zipfile.ZipFile(temp_zip, "r") as z:
-                    for item in z.infolist():
-                        name = item.filename
-                        # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
-                        if not _is_safe_zip_entry(name):
-                            manager.add_log(L(f"[Actualizador BDS] Entrada insegura en el zip ignorada: {name}", f"[Actualizador BDS] Unsafe zip entry ignored: {name}"), "error")
-                            continue
-                        z.extract(item, staging_dir)
-
-                # D3: raiz efectiva del staging (zip plano actual o una unica
-                # carpeta raiz historica); falla cerrada ante estructuras ambiguas.
-                update_root = _resolve_update_root(staging_dir)
-
-                # Aplica con rollback: si algo falla a mitad, la instalacion
-                # vuelve a los binarios anteriores (sin versiones mezcladas).
-                _apply_staged_update(update_root, BASE_DIR, preserve_files, preserve_dirs)
-                if downloaded_version:
-                    manager.installed_version = downloaded_version
-
-                manager.add_log(L("[Actualizador BDS] ¡Servidor actualizado exitosamente a la versión oficial de Mojang!", "[Actualizador BDS] Server successfully updated to the official Mojang version!"), "system")
+                # Descarga + staging + aplicacion con rollback: pipeline
+                # compartido con el setup inicial (_download_and_install_bds).
+                ok, _downloaded_version = _download_and_install_bds()
+                if ok:
+                    manager.add_log(L("[Actualizador BDS] ¡Servidor actualizado exitosamente a la versión oficial de Mojang!", "[Actualizador BDS] Server successfully updated to the official Mojang version!"), "system")
             except Exception as e:
                 manager.add_log(L(f"[Actualizador BDS] Error al actualizar: {e}", f"[Actualizador BDS] Error updating: {e}"), "error")
             finally:
                 manager.op_lock.release()
-                if os.path.exists(temp_zip):
-                    try: os.remove(temp_zip)
-                    except Exception: pass
-                if staging_dir and os.path.exists(staging_dir):
-                    shutil.rmtree(staging_dir, ignore_errors=True)
                 manager.update_in_progress = False
                 manager.update_status()
                 manager.add_log(L("[Actualizador BDS] Proceso de actualización finalizado.", "[Actualizador BDS] Update process finished."), "system")
@@ -1217,6 +1250,83 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
         shutil.rmtree(prev_dir, ignore_errors=True)
+
+
+def _download_and_install_bds(tag="[Actualizador BDS]"):
+    """Descarga el BDS oficial y lo aplica a BASE_DIR con staging + rollback.
+
+    Pipeline COMPARTIDO entre update_bds y el setup inicial (first-run):
+    descarga con tope de tamano (400 MB), extraccion anti zip-slip, resolucion
+    de la raiz del zip (_resolve_update_root) y aplicacion con rollback
+    (_apply_staged_update). Los errores operativos quedan en el log y la
+    funcion devuelve (False, None); solo las excepciones inesperadas se
+    propagan al llamador. La limpieza del zip temporal y del staging ocurre
+    en el finally (todos los caminos).
+    """
+    temp_zip = os.path.join(BASE_DIR, "bds_update.zip")
+    staging_dir = None
+    downloaded_version = None
+    try:
+        url, downloaded_version = _fetch_latest_bedrock_download()
+        if not url:
+            manager.add_log(L(f"{tag} No se pudo obtener la URL de descarga oficial. Abortando.", f"{tag} Could not get the official download URL. Aborting."), "error")
+            return False, None
+
+        manager.add_log(L(f"{tag} Descargando binarios desde Mojang...", f"{tag} Downloading binaries from Mojang..."), "system")
+        # S3: límite de tamaño de descarga para no llenar el disco
+        max_bytes = 400 * 1024 * 1024
+        dl = requests.get(url, headers=_UA_HEADERS, stream=True, timeout=30)
+        content_length = dl.headers.get("Content-Length")
+        try:
+            if content_length and int(content_length) > max_bytes:
+                manager.add_log(L(f"{tag} Descarga demasiado grande ({content_length} bytes). Abortando.", f"{tag} Download too large ({content_length} bytes). Abortando."), "error")
+                return False, None
+        except (TypeError, ValueError):
+            pass
+        total_bytes = 0
+        with open(temp_zip, "wb") as f:
+            for chunk in dl.iter_content(chunk_size=8192):
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    manager.add_log(L(f"{tag} Descarga excede el límite de 400 MB. Abortando.", f"{tag} Download exceeds the 400 MB limit. Aborting."), "error")
+                    return False, None
+                f.write(chunk)
+
+        manager.add_log(L(f"{tag} Descomprimiendo y actualizando ejecutable...", f"{tag} Extracting and updating executable..."), "system")
+        preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
+        preserve_dirs = {"worlds", "backups", "web", "gui_frontend"}
+
+        # Staging: nunca se toca la instalacion con un zip a medias.
+        staging_dir = os.path.join(BASE_DIR, "bds_update_staging")
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        os.makedirs(staging_dir, exist_ok=True)
+        with zipfile.ZipFile(temp_zip, "r") as z:
+            for item in z.infolist():
+                name = item.filename
+                # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
+                if not _is_safe_zip_entry(name):
+                    manager.add_log(L(f"{tag} Entrada insegura en el zip ignorada: {name}", f"{tag} Unsafe zip entry ignored: {name}"), "error")
+                    continue
+                z.extract(item, staging_dir)
+
+        # D3: raiz efectiva del staging (zip plano actual o una unica
+        # carpeta raiz historica); falla cerrada ante estructuras ambiguas.
+        update_root = _resolve_update_root(staging_dir)
+
+        # Aplica con rollback: si algo falla a mitad, la instalacion
+        # vuelve a los binarios anteriores (sin versiones mezcladas).
+        _apply_staged_update(update_root, BASE_DIR, preserve_files, preserve_dirs)
+        if downloaded_version:
+            manager.installed_version = downloaded_version
+        return True, downloaded_version
+    finally:
+        if os.path.exists(temp_zip):
+            try:
+                os.remove(temp_zip)
+            except Exception:
+                pass
+        if staging_dir and os.path.exists(staging_dir):
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 def _list_backup_files(backup_dir):
