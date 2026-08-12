@@ -123,13 +123,8 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const wizardFields = FIELDS.filter((f) => WIZARD_KEYS.includes(f.key));
 
   return (
-    <div className="relative min-h-screen text-slate-100 p-5 font-sans">
-      <div className="mx-auto mt-10 w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
-        <div className="border-b border-white/10 pb-4 text-center">
-          <h1 className="text-lg font-bold text-white">{t('setupTitle')}</h1>
-          <p className="mt-1 text-xs text-slate-400">{t('setupSubtitle')}</p>
-        </div>
-
+    <div className="relative min-h-screen text-slate-100 font-sans">
+      <div className="mx-auto mt-8 w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
         <Stepper
           key={attempt}
           initialStep={1}
@@ -145,6 +140,10 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
           {/* ── Paso 1: Configuracion ── */}
           <Step>
             <div className="space-y-3">
+              <div className="mb-4 text-center">
+                <h1 className="text-lg font-bold text-white">{t('setupTitle')}</h1>
+                <p className="mt-1 text-xs text-slate-400">{t('setupSubtitle')}</p>
+              </div>
               <div className="flex items-center justify-between gap-3">
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                   {t('setupLangLabel')}
