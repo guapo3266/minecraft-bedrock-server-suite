@@ -285,7 +285,18 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             # Shims para compatibilidad con el codigo existente
             # (_force_kill_compress_process usa is_alive/kill/join).
             comp_proc.is_alive = lambda: comp_proc.poll() is None
-            comp_proc.join = lambda timeout=None: comp_proc.wait(timeout=timeout)
+            # R2-HIGH: Popen.wait(timeout) LANZA TimeoutExpired al vencer,
+            # mientras Process.join(timeout) devuelve None. El shim anterior
+            # propagaba la excepcion: el CASO A (timeout) era inalcanzable y
+            # el except generico huerfanaba el proceso vivo sin matarlo,
+            # dejando el lock de backups retenido hasta su fin (o para
+            # siempre, si el huerfano colgaba).
+            def _join(timeout=None):
+                try:
+                    comp_proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    pass
+            comp_proc.join = _join
         except Exception as e:
             print(L(f"[Worker] [WARN] No se pudo lanzar el worker: {e}", f"[Worker] [WARN] Could not launch the worker: {e}"))
             for _p in (_snap_path, _marker, _result):

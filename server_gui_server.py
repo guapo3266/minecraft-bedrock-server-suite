@@ -264,6 +264,11 @@ class ServerManager:
         # (rechaza con 'busy' si hay contención); restore/update lo toman
         # bloqueante dentro de sus hilos.
         self.op_lock = threading.Lock()
+        # Exclusion mutua de escrituras al stdin del wrapper (varios hilos:
+        # /api/command, WebSocket y las acciones stop/restart/backup/update).
+        # TextIOWrapper no es thread-safe: escrituras concurrentes pueden
+        # entremezclarse o corromper el buffer del pipe.
+        self.stdin_lock = threading.Lock()
 
     def add_log(self, text: str, log_type: str = "info"):
         timestamp = time.strftime("%H:%M:%S")
@@ -279,12 +284,14 @@ class ServerManager:
 
     def update_status(self):
         hw = get_hardware_metrics()
+        with self.lock:
+            players = list(self.players_online)
         status_payload = {
             "type": "status",
             "data": {
                 "running": self.is_running,
-                "players": list(self.players_online),
-                "player_count": len(self.players_online),
+                "players": players,
+                "player_count": len(players),
                 "last_backup": self.last_backup_time,
                 "backup_in_progress": self.backup_in_progress,
                 "update_in_progress": self.update_in_progress,
@@ -396,7 +403,8 @@ def run_wrapper_thread(process=None):
                     name = m_conn.group(1).strip()
                     if not name:
                         raise ValueError("nombre de jugador ausente")
-                    manager.players_online.add(name)
+                    with manager.lock:
+                        manager.players_online.add(name)
                     manager.update_status()
                 except Exception:
                     pass
@@ -406,7 +414,8 @@ def run_wrapper_thread(process=None):
                     name = m_disc.group(1).strip()
                     if not name:
                         raise ValueError("nombre de jugador ausente")
-                    manager.players_online.discard(name)
+                    with manager.lock:
+                        manager.players_online.discard(name)
                     manager.update_status()
                 except Exception:
                     pass
@@ -447,7 +456,8 @@ def run_wrapper_thread(process=None):
         manager.is_running = False
         manager.backup_in_progress = False
         manager.wrapper_process = None
-        manager.players_online.clear()
+        with manager.lock:
+            manager.players_online.clear()
         manager.wrapper_exit_event.set()
         # G8: respaldo: si el hilo muere, BDS ya no corre.
         manager.server_stopped_event.set()
@@ -511,10 +521,12 @@ async def serve_index():
 @app.get("/api/status")
 async def get_status(request: Request):
     _ensure_local(request.client.host if request.client else "")
+    with manager.lock:
+        players = list(manager.players_online)
     return {
         "running": manager.is_running,
-        "players": list(manager.players_online),
-        "player_count": len(manager.players_online),
+        "players": players,
+        "player_count": len(players),
         "last_backup": manager.last_backup_time,
         "backup_in_progress": manager.backup_in_progress,
         "update_in_progress": manager.update_in_progress,
@@ -541,8 +553,9 @@ async def send_command(req: CommandRequest, request: Request):
         return {"status": "offline", "message": "El servidor no está en ejecución"}
     
     try:
-        manager.wrapper_process.stdin.write(cmd + "\n")
-        manager.wrapper_process.stdin.flush()
+        with manager.stdin_lock:
+            manager.wrapper_process.stdin.write(cmd + "\n")
+            manager.wrapper_process.stdin.flush()
         manager.add_log(f"> {cmd}", "command")
         return {"status": "ok", "command": cmd}
     except Exception as e:
@@ -716,8 +729,9 @@ async def handle_action(action_name: str, request: Request):
         if not manager.is_running or not manager.wrapper_process:
             return {"status": "not_running"}
         try:
-            manager.wrapper_process.stdin.write("stop\n")
-            manager.wrapper_process.stdin.flush()
+            with manager.stdin_lock:
+                manager.wrapper_process.stdin.write("stop\n")
+                manager.wrapper_process.stdin.flush()
             manager.add_log(L("[GUI Backend] Comando 'stop' enviado...", "[GUI Backend] 'stop' command sent..."), "system")
         except Exception:
             pass
@@ -728,8 +742,9 @@ async def handle_action(action_name: str, request: Request):
             exit_event = manager.wrapper_exit_event
             if manager.is_running and manager.wrapper_process:
                 try:
-                    manager.wrapper_process.stdin.write("stop\n")
-                    manager.wrapper_process.stdin.flush()
+                    with manager.stdin_lock:
+                        manager.wrapper_process.stdin.write("stop\n")
+                        manager.wrapper_process.stdin.flush()
                 except Exception:
                     pass
                 manager.add_log(L("[GUI Backend] Reiniciando servidor...", "[GUI Backend] Restarting server..."), "system")
@@ -843,8 +858,9 @@ async def handle_action(action_name: str, request: Request):
             return {"status": "backup_dispatched"}
         else:
             try:
-                manager.wrapper_process.stdin.write("backup\n")
-                manager.wrapper_process.stdin.flush()
+                with manager.stdin_lock:
+                    manager.wrapper_process.stdin.write("backup\n")
+                    manager.wrapper_process.stdin.flush()
                 manager.add_log(L("[GUI Backend] Disparando backup en caliente (comando backup)...", "[GUI Backend] Triggering hot backup (backup command)..."), "backup")
             except Exception as e:
                 raise HTTPException(status_code=500, detail=L(f"Error al iniciar backup: {e}", f"Error starting backup: {e}"))
@@ -872,8 +888,9 @@ async def handle_action(action_name: str, request: Request):
                 if manager.is_running and manager.wrapper_process:
                     manager.add_log(L("[Actualizador BDS] Deteniendo servidor de Minecraft...", "[Actualizador BDS] Stopping Minecraft server..."), "system")
                     try:
-                        manager.wrapper_process.stdin.write("stop\n")
-                        manager.wrapper_process.stdin.flush()
+                        with manager.stdin_lock:
+                            manager.wrapper_process.stdin.write("stop\n")
+                            manager.wrapper_process.stdin.flush()
                     except Exception:
                         pass
                     # G8: espera en DOS fases antes de tocar binarios:
@@ -1390,14 +1407,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
     with manager.lock:
         logs = list(manager.log_history)
+        players = list(manager.players_online)
 
     await websocket.send_json({
         "type": "init",
         "logs": logs,
         "status": {
             "running": manager.is_running,
-            "players": list(manager.players_online),
-            "player_count": len(manager.players_online),
+            "players": players,
+            "player_count": len(players),
             "last_backup": manager.last_backup_time,
             "backup_in_progress": manager.backup_in_progress,
             "update_in_progress": manager.update_in_progress,
@@ -1414,8 +1432,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 if msg.get("type") == "command":
                     cmd = msg.get("command", "").strip()
                     if cmd and manager.is_running and manager.wrapper_process:
-                        manager.wrapper_process.stdin.write(cmd + "\n")
-                        manager.wrapper_process.stdin.flush()
+                        with manager.stdin_lock:
+                            manager.wrapper_process.stdin.write(cmd + "\n")
+                            manager.wrapper_process.stdin.flush()
                         manager.add_log(f"> {cmd}", "command")
                 elif msg.get("type") == "ping":
                     # Medición real de latencia del frontend

@@ -1220,3 +1220,113 @@ def test_lines_waited_for_list_se_reinicia_tras_parseo_exitoso():
     read_stdout_src = src.split("def read_stdout")[1].split("def backup_scheduler")[0]
     # resets: lista vacia (original) + parseo de nombres + continuacion parseada
     assert read_stdout_src.count("lines_waited_for_list = 0") >= 3
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Ronda de revision 2026-08-12: CASO A (timeout de compresion) muerto por
+# el shim de join, y races de la GUI (players_online y stdin sin lock)
+# ═══════════════════════════════════════════════════════════════════════
+def test_worker_timeout_compresion_mata_proceso_y_libera_estado(monkeypatch, tmp_path):
+    """CORREGIDO (R2-HIGH): si la compresion excede WORKER_COMPRESSION_TIMEOUT_SEC,
+    el worker llega al CASO A y MATA el proceso (kill + limpieza de .tmp +
+    lock IPC nuevo). Antes el shim comp_proc.join = wait(timeout) lanzaba
+    subprocess.TimeoutExpired (Popen.wait LANZA al vencer; Process.join
+    devuelve None): la excepcion caia en el except generico, que reseteaba
+    estado y dejaba active_compress_process=None SIN matar al huerfano. El
+    huerfano retenia el lock de backups y todos los backups dejaban de
+    funcionar hasta que terminara solo (o para siempre, si colgaba)."""
+    import server_wrapper as sw
+
+    fake_bkp = os.path.join(str(tmp_path), "backups")
+    os.makedirs(fake_bkp)
+    orphan_tmp = os.path.join(fake_bkp, "auto_backup_x.zip.tmp")
+    _write(orphan_tmp, b"parcial")
+    monkeypatch.setattr(sw.auto_backup, "BACKUP_DIR", fake_bkp)
+
+    killed = {"n": 0}
+
+    class FakeCompProc:
+        def poll(self):
+            return None  # sigue vivo: compresion lenta
+
+        def wait(self, timeout=None):
+            if timeout is not None:
+                raise subprocess.TimeoutExpired(cmd="backup_worker.py", timeout=timeout)
+            return 0
+
+        def kill(self):
+            killed["n"] += 1
+
+    fake = FakeCompProc()
+    monkeypatch.setattr(sw.subprocess, "Popen", lambda *a, **k: fake)
+
+    # estado de un ciclo caliente en plena compresion
+    with sw.state_lock:
+        prev = (sw.backup_in_progress, sw.backup_dispatched, sw.watchdog_fired,
+                sw.save_query_ready_seen, sw.backup_cancel_event,
+                sw.snapshot_retry_count, sw.snapshot_retry_at)
+        sw.backup_in_progress = True
+        sw.backup_dispatched = True
+        sw.watchdog_fired = False
+        sw.save_query_ready_seen = True
+        sw.backup_cancel_event = None
+        sw.snapshot_retry_count = 0
+        sw.snapshot_retry_at = 0.0
+    try:
+        sw.execute_backup_worker(file_snapshot=[("level.dat", 10)], cancel_event=None)
+        assert killed["n"] == 1, "CASO A no mato el proceso de compresion"
+        with sw.state_lock:
+            assert sw.backup_in_progress is False
+            assert sw.backup_dispatched is False
+            assert sw.save_query_ready_seen is False
+            assert sw.watchdog_fired is True
+            assert sw.active_compress_process is None
+            assert sw.last_backup_completed_time != 0
+        assert not os.path.exists(orphan_tmp), (
+            "el .tmp huerfano debio limpiarse tras el kill"
+        )
+    finally:
+        with sw.state_lock:
+            (sw.backup_in_progress, sw.backup_dispatched, sw.watchdog_fired,
+             sw.save_query_ready_seen, sw.backup_cancel_event,
+             sw.snapshot_retry_count, sw.snapshot_retry_at) = prev
+
+
+def test_gui_players_online_bajo_manager_lock():
+    """CORREGIDO (R2-LOW): las mutaciones y lecturas de players_online de la
+    GUI van bajo manager.lock. Antes el hilo del wrapper hacia
+    add/discard/clear sin lock mientras el event loop iteraba
+    list(players_online) (/api/status, update_status, init del WS): iterar un
+    set mientras otro hilo lo muta puede lanzar RuntimeError 'set changed
+    size during iteration' (500s intermitentes o desconexion del WS)."""
+    src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
+    for needle in (
+        "manager.players_online.add(name)",
+        "manager.players_online.discard(name)",
+        "manager.players_online.clear()",
+    ):
+        i = src.index(needle)
+        assert "with manager.lock:" in src[i - 300:i], (
+            "mutacion sin manager.lock cerca de %r" % needle
+        )
+    assert "players = list(self.players_online)" in src, (
+        "update_status debe leer players_online bajo el lock"
+    )
+    assert "players = list(manager.players_online)" in src, (
+        "/api/status y el init del WS deben leer players_online bajo el lock"
+    )
+
+
+def test_gui_stdin_bajo_stdin_lock():
+    """CORREGIDO (R2-LOW): todas las escrituras a wrapper_process.stdin (API,
+    WS y acciones) van bajo manager.stdin_lock. TextIOWrapper no es
+    thread-safe: un comando del chat + un stop simultaneos podian
+    entremezclarse en el pipe y mandar una linea corrupta al servidor."""
+    src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
+    assert "self.stdin_lock = threading.Lock()" in src
+    writes = src.count("manager.wrapper_process.stdin.write")
+    locks = src.count("with manager.stdin_lock:")
+    assert writes == 6, "numero inesperado de sitios de escritura: %d" % writes
+    assert locks == writes, (
+        "hay %d escrituras a stdin pero %d bloques con manager.stdin_lock" % (writes, locks)
+    )
