@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from fastapi.testclient import TestClient
 import server_gui_server as sgs
+import gui_backend.config as config
 
 
 @pytest.fixture
@@ -33,7 +34,7 @@ def props_client(monkeypatch, tmp_path):
         "# ultima linea\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(sgs, "PROPS_PATH", str(props))
+    monkeypatch.setattr(config, "PROPS_PATH", str(props))
     with TestClient(sgs.app, client=("127.0.0.1", 50000)) as c:
         yield c, props
 
@@ -107,7 +108,7 @@ def test_props_post_crea_archivo_si_no_existe(monkeypatch, tmp_path):
     (antes FileNotFoundError -> 500 en el wizard de setup inicial)."""
     props = tmp_path / "server.properties"
     assert not props.exists()
-    monkeypatch.setattr(sgs, "PROPS_PATH", str(props))
+    monkeypatch.setattr(config, "PROPS_PATH", str(props))
     with TestClient(sgs.app, client=("127.0.0.1", 50000)) as c:
         r = c.post(
             "/api/server_properties",

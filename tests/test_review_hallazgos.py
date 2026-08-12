@@ -28,6 +28,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import auto_backup
 import server_gui_server as gui
+import gui_backend.config as config
+import gui_backend.supervisor as supervisor
+import gui_backend.services.bds_update as bds_update
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BACKUP_DIR_REAL = auto_backup.BACKUP_DIR
@@ -103,7 +106,7 @@ def test_check_update_usa_version_instalada_del_log(monkeypatch):
         def iter_content(self, chunk_size=8192):
             yield b"x"
 
-    monkeypatch.setattr(gui.requests, "get", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
     gui.manager.installed_version = "1.26.33.2"
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
@@ -134,7 +137,7 @@ def test_check_update_detecta_update_real(monkeypatch):
         def iter_content(self, chunk_size=8192):
             yield b"x"
 
-    monkeypatch.setattr(gui.requests, "get", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
     gui.manager.installed_version = "1.21.0.0"
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
@@ -175,7 +178,7 @@ def test_check_update_api_real_mojang_detecta_version():
     assert j["latest_version"] is not None, j
     assert j["download_url"] == win[0]["downloadUrl"], j
     # Si la version instalada es conocida y mas vieja, debe ofrecer la actualizacion
-    if j["current_version"] and gui._version_tuple(j["latest_version"]) > gui._version_tuple(j["current_version"]):
+    if j["current_version"] and bds_update._version_tuple(j["latest_version"]) > bds_update._version_tuple(j["current_version"]):
         assert j["has_update"] is True, j
 
 
@@ -188,7 +191,7 @@ def test_gui_busca_la_cadena_exacta_del_wrapper():
     ('Iniciando compresion', sin acento), y la condicion EXTERNA de la rama
     no excluye la linea del worker (sin 'backup' y sin 'compresión')."""
     src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
-    gui_src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
+    gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
     gui_thread = gui_src.split("def run_wrapper_thread")[1]
     assert "Starting compression in a separate process" in src
     assert (
@@ -594,7 +597,7 @@ def test_update_bds_detiene_servidor_antes_de_aplicar(monkeypatch):
     _reset_manager_state()
     release = threading.Event()
     fake_proc = _FakeProc(release)
-    monkeypatch.setattr(gui, "_spawn_wrapper_process", lambda: fake_proc)
+    monkeypatch.setattr(supervisor, "_spawn_wrapper_process", lambda: fake_proc)
 
     zip_bytes = io.BytesIO()
     with zipfile.ZipFile(zip_bytes, "w") as z:
@@ -614,7 +617,7 @@ def test_update_bds_detiene_servidor_antes_de_aplicar(monkeypatch):
             for i in range(0, len(payload), chunk_size):
                 yield payload[i : i + chunk_size]
 
-    monkeypatch.setattr(gui.requests, "get", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
     monkeypatch.setattr(
         gui.auto_backup, "create_backup", lambda *a, **k: "dummy_pre_update.zip"
     )
@@ -625,7 +628,7 @@ def test_update_bds_detiene_servidor_antes_de_aplicar(monkeypatch):
         record["is_running"] = gui.manager.is_running
         record["wrapper_process"] = gui.manager.wrapper_process
 
-    monkeypatch.setattr(gui, "_apply_staged_update", fake_apply)
+    monkeypatch.setattr(bds_update, "_apply_staged_update", fake_apply)
 
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
@@ -666,7 +669,7 @@ def test_stop_durante_arranque_ahora_es_efectivo(monkeypatch):
     _reset_manager_state()
     release = threading.Event()
     fake_proc = _FakeProc(release)
-    monkeypatch.setattr(gui, "_spawn_wrapper_process", lambda: fake_proc)
+    monkeypatch.setattr(supervisor, "_spawn_wrapper_process", lambda: fake_proc)
 
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
@@ -850,14 +853,14 @@ def test_resolve_update_root_plano_prefijo_y_ambiguo(tmp_path):
     os.makedirs(flat)
     _write(os.path.join(flat, "bedrock_server.exe"), b"x")
     _write(os.path.join(flat, "allowlist.json"), b"x")
-    assert gui._resolve_update_root(flat) == flat
+    assert bds_update._resolve_update_root(flat) == flat
 
     # una unica carpeta raiz (forma historica)
     pref = os.path.join(str(tmp_path), "pref")
     inner = os.path.join(pref, "bedrock-server-1.26.33.2")
     os.makedirs(inner)
     _write(os.path.join(inner, "bedrock_server.exe"), b"x")
-    assert gui._resolve_update_root(pref) == inner
+    assert bds_update._resolve_update_root(pref) == inner
 
     # estructura ambigua: falla cerrada (no toca nada)
     amb = os.path.join(str(tmp_path), "amb")
@@ -866,7 +869,7 @@ def test_resolve_update_root_plano_prefijo_y_ambiguo(tmp_path):
     _write(os.path.join(amb, "a", "bedrock_server.exe"), b"x")
     _write(os.path.join(amb, "b", "bedrock_server.exe"), b"x")
     with pytest.raises(RuntimeError):
-        gui._resolve_update_root(amb)
+        bds_update._resolve_update_root(amb)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -922,7 +925,7 @@ def test_patrones_bds_centralizados_y_matchean_log_real():
     assert sw._RE_PLAYERS_LIST.search(line_list)
 
     # la GUI importa los patrones del wrapper: sin regex duplicados
-    gui_src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
+    gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
     assert (
         "from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT" in gui_src
     )
@@ -955,12 +958,12 @@ def test_restart_fase1_aborta_si_bds_no_se_detiene(monkeypatch):
 
     _reset_manager_state()
     spawned = {"n": 0}
-    monkeypatch.setattr(gui, "SERVER_STOP_TIMEOUT_SEC", 0.3)
+    monkeypatch.setattr(config, "SERVER_STOP_TIMEOUT_SEC", 0.3)
 
     def fake_spawn():
         spawned["n"] += 1
 
-    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
+    monkeypatch.setattr(supervisor, "_spawn_wrapper_process", fake_spawn)
     proc, fake_stdin = _fake_wrapper_proc()
     gui.manager.is_running = True
     gui.manager.wrapper_process = proc
@@ -989,16 +992,16 @@ def test_restart_fase2_espera_backup_final_y_arranca(monkeypatch):
 
     _reset_manager_state()
     spawned = {"n": 0}
-    monkeypatch.setattr(gui, "SERVER_STOP_TIMEOUT_SEC", 2)
-    monkeypatch.setattr(gui, "WRAPPER_EXIT_TIMEOUT_SEC", 2)
+    monkeypatch.setattr(config, "SERVER_STOP_TIMEOUT_SEC", 2)
+    monkeypatch.setattr(config, "WRAPPER_EXIT_TIMEOUT_SEC", 2)
     proc, fake_stdin = _fake_wrapper_proc()
 
     def fake_spawn():
         spawned["n"] += 1
         return proc
 
-    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
-    monkeypatch.setattr(gui, "run_wrapper_thread", lambda *a, **k: None)
+    monkeypatch.setattr(supervisor, "_spawn_wrapper_process", fake_spawn)
+    monkeypatch.setattr(supervisor, "run_wrapper_thread", lambda *a, **k: None)
 
     gui.manager.is_running = True
     gui.manager.wrapper_process = proc
@@ -1040,12 +1043,12 @@ def test_restart_fase2_aborta_si_wrapper_nunca_termina(monkeypatch):
 
     _reset_manager_state()
     spawned = {"n": 0}
-    monkeypatch.setattr(gui, "WRAPPER_EXIT_TIMEOUT_SEC", 0.3)
+    monkeypatch.setattr(config, "WRAPPER_EXIT_TIMEOUT_SEC", 0.3)
 
     def fake_spawn():
         spawned["n"] += 1
 
-    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
+    monkeypatch.setattr(supervisor, "_spawn_wrapper_process", fake_spawn)
     proc, fake_stdin = _fake_wrapper_proc()
     gui.manager.is_running = True
     gui.manager.wrapper_process = proc
@@ -1074,7 +1077,7 @@ def test_update_bds_espera_fase2_antes_de_tocar_instalacion(monkeypatch):
 
     _reset_manager_state()
     applied = {"backup": 0, "staged": 0}
-    monkeypatch.setattr(gui, "WRAPPER_EXIT_TIMEOUT_SEC", 0.3)
+    monkeypatch.setattr(config, "WRAPPER_EXIT_TIMEOUT_SEC", 0.3)
     proc, fake_stdin = _fake_wrapper_proc()
 
     def fake_backup(*a, **k):
@@ -1085,7 +1088,7 @@ def test_update_bds_espera_fase2_antes_de_tocar_instalacion(monkeypatch):
         applied["staged"] += 1
 
     monkeypatch.setattr(gui.auto_backup, "create_backup", fake_backup)
-    monkeypatch.setattr(gui, "_apply_staged_update", fake_apply)
+    monkeypatch.setattr(bds_update, "_apply_staged_update", fake_apply)
 
     gui.manager.is_running = True
     gui.manager.wrapper_process = proc
@@ -1154,8 +1157,8 @@ def test_restart_doble_simultaneo_no_lanza_dos_wrappers(monkeypatch):
         time.sleep(0.05)  # ensanchar la ventana de carrera
         return proc
 
-    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
-    monkeypatch.setattr(gui, "run_wrapper_thread", lambda *a, **k: None)
+    monkeypatch.setattr(supervisor, "_spawn_wrapper_process", fake_spawn)
+    monkeypatch.setattr(supervisor, "run_wrapper_thread", lambda *a, **k: None)
 
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
@@ -1205,7 +1208,7 @@ def test_gui_resetea_flag_con_backup_finalizado():
     """CORREGIDO (H3): la GUI resetea backup_in_progress con el marcador de
     fin del wrapper (ademas de las cadenas de exito existentes), para que el
     boton de backup en frio no quede bloqueado tras un backup fallido."""
-    gui_src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
+    gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
     gui_thread = gui_src.split("def run_wrapper_thread")[1]
     assert '"Backup finished" in line_str' in gui_thread
     assert "backup_in_progress = False" in gui_thread
@@ -1299,7 +1302,9 @@ def test_gui_players_online_bajo_manager_lock():
     list(players_online) (/api/status, update_status, init del WS): iterar un
     set mientras otro hilo lo muta puede lanzar RuntimeError 'set changed
     size during iteration' (500s intermitentes o desconexion del WS)."""
-    src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
+    # Refactor: las mutaciones viven en gui_backend/supervisor.py
+    # (run_wrapper_thread), unico sitio que toca players_online.
+    src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
     for needle in (
         "manager.players_online.add(name)",
         "manager.players_online.discard(name)",
@@ -1309,11 +1314,12 @@ def test_gui_players_online_bajo_manager_lock():
         assert "with manager.lock:" in src[i - 300:i], (
             "mutacion sin manager.lock cerca de %r" % needle
         )
-    assert "players = list(self.players_online)" in src, (
-        "update_status debe leer players_online bajo el lock"
-    )
-    assert "players = list(manager.players_online)" in src, (
-        "/api/status y el init del WS deben leer players_online bajo el lock"
+    # Refactor: la lectura bajo lock de /api/status, update_status y el init
+    # del WS ahora vive en gui_backend/state.py (build_public_status).
+    state_src = open(os.path.join(BASE_DIR, "gui_backend", "state.py"), encoding="utf-8").read()
+    i = state_src.index("players = list(manager.players_online)")
+    assert "with manager.lock:" in state_src[i - 300:i], (
+        "build_public_status debe leer players_online bajo manager.lock"
     )
 
 
@@ -1321,9 +1327,24 @@ def test_gui_stdin_bajo_stdin_lock():
     """CORREGIDO (R2-LOW): todas las escrituras a wrapper_process.stdin (API,
     WS y acciones) van bajo manager.stdin_lock. TextIOWrapper no es
     thread-safe: un comando del chat + un stop simultaneos podian
-    entremezclarse en el pipe y mandar una linea corrupta al servidor."""
-    src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
-    assert "self.stdin_lock = threading.Lock()" in src
+    entremezclarse en el pipe y mandar una linea corrupta al servidor.
+
+    Refactor: las escrituras ahora viven repartidas entre server_gui_server.py
+    y gui_backend/ (routers); la invariante se comprueba sobre TODOS los
+    archivos del backend (el total debe seguir siendo 6 writes == 6 locks).
+    """
+    # Refactor: el lock vive en gui_backend/state.py (ServerManager).
+    state_src = open(os.path.join(BASE_DIR, "gui_backend", "state.py"), encoding="utf-8").read()
+    assert "self.stdin_lock = threading.Lock()" in state_src
+
+    backend_files = [os.path.join(BASE_DIR, "server_gui_server.py")]
+    backend_root = os.path.join(BASE_DIR, "gui_backend")
+    for root, _dirs, names in os.walk(backend_root):
+        for n in names:
+            if n.endswith(".py"):
+                backend_files.append(os.path.join(root, n))
+
+    src = "\n".join(open(p, encoding="utf-8").read() for p in backend_files)
     writes = src.count("manager.wrapper_process.stdin.write")
     locks = src.count("with manager.stdin_lock:")
     assert writes == 6, "numero inesperado de sitios de escritura: %d" % writes

@@ -22,6 +22,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import server_gui_server as gui
+import gui_backend.config as config
+import gui_backend.services.bds_update as bds_update
+import gui_backend.services.setup as setup_service
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,9 +35,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _fake_install(monkeypatch, tmp_path, with_world=False):
     """BASE_DIR/SERVER_EXE/SETUP_MARKER falsos dentro de tmp_path."""
     base = str(tmp_path)
-    monkeypatch.setattr(gui, "BASE_DIR", base)
-    monkeypatch.setattr(gui, "SERVER_EXE", os.path.join(base, "bedrock_server.exe"))
-    monkeypatch.setattr(gui, "SETUP_MARKER", os.path.join(base, "data", "setup_done.json"))
+    monkeypatch.setattr(config, "BASE_DIR", base)
+    monkeypatch.setattr(config, "SERVER_EXE", os.path.join(base, "bedrock_server.exe"))
+    monkeypatch.setattr(config, "SETUP_MARKER", os.path.join(base, "data", "setup_done.json"))
     worlds = os.path.join(base, "worlds")
     os.makedirs(worlds, exist_ok=True)
     if with_world:
@@ -58,35 +61,35 @@ def _reset_manager_state():
 def test_setup_required_instalacion_nueva(monkeypatch, tmp_path):
     """Instalacion sin BDS, sin mundo y sin marcador: el wizard ES requerido."""
     _fake_install(monkeypatch, tmp_path, with_world=False)
-    assert gui._setup_required() is True
-    assert gui._is_install_used() is False
+    assert setup_service._setup_required() is True
+    assert setup_service._is_install_used() is False
 
 
 def test_setup_no_required_instalacion_ya_usada(monkeypatch, tmp_path):
     """BDS presente + mundo con level.dat (ya arranco una vez): sin wizard,
     aunque no exista marcador (caso Servidor de Guapo tras sync)."""
     _fake_install(monkeypatch, tmp_path, with_world=True)
-    with open(gui.SERVER_EXE, "wb") as f:
+    with open(config.SERVER_EXE, "wb") as f:
         f.write(b"x")
-    assert gui._is_install_used() is True
-    assert gui._setup_required() is False
+    assert setup_service._is_install_used() is True
+    assert setup_service._setup_required() is False
 
 
 def test_setup_no_required_con_marcador(monkeypatch, tmp_path):
     """Con marcador escrito, nunca se requiere el wizard (aunque no haya mundo)."""
     _fake_install(monkeypatch, tmp_path, with_world=False)
-    os.makedirs(os.path.dirname(gui.SETUP_MARKER), exist_ok=True)
-    with open(gui.SETUP_MARKER, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(config.SETUP_MARKER), exist_ok=True)
+    with open(config.SETUP_MARKER, "w", encoding="utf-8") as f:
         f.write("{}")
-    assert gui._setup_required() is False
+    assert setup_service._setup_required() is False
 
 
 def test_setup_required_bds_sin_mundo(monkeypatch, tmp_path):
     """BDS recien extraido (sin mundo): SÍ se requiere el wizard."""
     _fake_install(monkeypatch, tmp_path, with_world=False)
-    with open(gui.SERVER_EXE, "wb") as f:
+    with open(config.SERVER_EXE, "wb") as f:
         f.write(b"x")
-    assert gui._setup_required() is True
+    assert setup_service._setup_required() is True
 
 
 def test_setup_status_endpoint(monkeypatch, tmp_path):
@@ -149,7 +152,7 @@ def test_install_bds_despacha_y_reusa_pipeline(monkeypatch, tmp_path):
         time.sleep(0.2)
         return True, "1.0.0.0"
 
-    monkeypatch.setattr(gui, "_download_and_install_bds", fake_install)
+    monkeypatch.setattr(bds_update, "_download_and_install_bds", fake_install)
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
             r = c.post("/api/setup/install_bds")
@@ -193,15 +196,15 @@ def test_download_and_install_bds_exito(monkeypatch, tmp_path):
             for i in range(0, len(payload), chunk_size):
                 yield payload[i : i + chunk_size]
 
-    monkeypatch.setattr(gui, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.26.33.2"))
-    monkeypatch.setattr(gui.requests, "get", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.26.33.2"))
+    monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
 
     gui.manager.installed_version = None
-    ok, version = gui._download_and_install_bds(tag="[Setup]")
+    ok, version = bds_update._download_and_install_bds(tag="[Setup]")
     assert ok is True, gui.manager.log_history[-3:]
     assert version == "1.26.33.2"
     assert gui.manager.installed_version == "1.26.33.2"
-    assert os.path.exists(gui.SERVER_EXE), "bedrock_server.exe no se instalo"
+    assert os.path.exists(config.SERVER_EXE), "bedrock_server.exe no se instalo"
     assert not os.path.exists(os.path.join(base, "bds_update.zip")), "zip temporal no se limpio"
     assert not os.path.exists(os.path.join(base, "bds_update_staging")), "staging no se limpio"
 
@@ -209,10 +212,10 @@ def test_download_and_install_bds_exito(monkeypatch, tmp_path):
 def test_download_and_install_bds_sin_red_no_toca_instalacion(monkeypatch, tmp_path):
     """URL no disponible: devuelve (False, None), NO aplica y NO cuelga."""
     base = _fake_install(monkeypatch, tmp_path)
-    monkeypatch.setattr(gui, "_fetch_latest_bedrock_download", lambda: (None, None))
+    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: (None, None))
     applied = {"n": 0}
-    monkeypatch.setattr(gui, "_apply_staged_update", lambda *a, **k: applied.__setitem__("n", applied["n"] + 1))
-    ok, version = gui._download_and_install_bds(tag="[Setup]")
+    monkeypatch.setattr(bds_update, "_apply_staged_update", lambda *a, **k: applied.__setitem__("n", applied["n"] + 1))
+    ok, version = bds_update._download_and_install_bds(tag="[Setup]")
     assert ok is False and version is None
     assert applied["n"] == 0, "no debe aplicarse nada sin URL"
     assert not os.path.exists(os.path.join(base, "bds_update.zip"))
@@ -221,7 +224,7 @@ def test_download_and_install_bds_sin_red_no_toca_instalacion(monkeypatch, tmp_p
 def test_download_and_install_bds_excede_limite_aborta(monkeypatch, tmp_path):
     """Cuerpo mas grande que el tope de 400 MB: aborta sin escribir zip final."""
     base = _fake_install(monkeypatch, tmp_path)
-    monkeypatch.setattr(gui, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.0.0.0"))
+    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.0.0.0"))
 
     class HugeResp:
         headers = {}
@@ -231,8 +234,8 @@ def test_download_and_install_bds_excede_limite_aborta(monkeypatch, tmp_path):
             for _ in range(401 * 1024 * 1024 // chunk_size):
                 yield b"x" * chunk_size
 
-    monkeypatch.setattr(gui.requests, "get", lambda *a, **k: HugeResp())
-    ok, _v = gui._download_and_install_bds(tag="[Setup]")
+    monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: HugeResp())
+    ok, _v = bds_update._download_and_install_bds(tag="[Setup]")
     assert ok is False
     assert not os.path.exists(os.path.join(base, "bds_update.zip"))
 
@@ -252,14 +255,14 @@ def test_download_emite_progreso_en_tiempo_real(monkeypatch, tmp_path):
             for i in range(0, len(payload), chunk_size):
                 yield payload[i : i + chunk_size]
 
-    monkeypatch.setattr(gui, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.0.0.0"))
-    monkeypatch.setattr(gui.requests, "get", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.0.0.0"))
+    monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
 
     log_start = len(gui.manager.log_history)
     # el payload no es un zip valido: la descompresion aborta (BadZipFile) y
     # el finally limpia; el progreso ya quedo registrado antes.
     with pytest.raises(zipfile.BadZipFile):
-        gui._download_and_install_bds(tag="[Setup]")
+        bds_update._download_and_install_bds(tag="[Setup]")
     texts = [e["text"] for e in gui.manager.log_history[log_start:]]
     # L() usa el idioma activo (en tests: ingles); el patron comun es "10 MB (90%)"
     assert any("10 MB (90%)" in t for t in texts), texts
@@ -273,13 +276,13 @@ def test_complete_escribe_marcador_y_quita_required(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 
     base = _fake_install(monkeypatch, tmp_path, with_world=False)
-    with open(gui.SERVER_EXE, "wb") as f:
+    with open(config.SERVER_EXE, "wb") as f:
         f.write(b"x")
     with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
         r = c.post("/api/setup/complete")
         assert r.status_code == 200, r.text
-    assert os.path.exists(gui.SETUP_MARKER)
-    assert gui._setup_required() is False
+    assert os.path.exists(config.SETUP_MARKER)
+    assert setup_service._setup_required() is False
 
 
 def test_complete_sin_bds_instalado_da_409(monkeypatch, tmp_path):

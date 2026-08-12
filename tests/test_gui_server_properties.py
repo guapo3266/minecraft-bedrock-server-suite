@@ -6,6 +6,7 @@ el guard anti zip-slip (_is_safe_zip_entry) y el gate de conexiones locales
 (_ensure_local).
 """
 import sys, os, re
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -13,6 +14,7 @@ from hypothesis import given, strategies as st, settings, HealthCheck
 import pytest
 from fastapi import HTTPException
 import server_gui_server as sgs
+import gui_backend.services.bds_update as bds_update
 
 
 # ─────────────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ def ref_version_tuple(v):
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_version_no_exception(v):
     """Cualquier versión válida produce una tupla de 4 enteros."""
-    t = sgs._version_tuple(v)
+    t = bds_update._version_tuple(v)
     assert isinstance(t, tuple) and len(t) == 4
     assert all(isinstance(x, int) and x >= 0 for x in t)
 
@@ -70,7 +72,7 @@ def test_version_no_exception(v):
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_version_garbage_no_exception(v):
     """Ni siquiera texto basura rompe el comparador (segmentos inválidos -> 0)."""
-    t = sgs._version_tuple(v)
+    t = bds_update._version_tuple(v)
     assert isinstance(t, tuple) and len(t) == 4
     assert all(isinstance(x, int) for x in t)
 
@@ -79,15 +81,15 @@ def test_version_garbage_no_exception(v):
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_version_padding_invariance(v):
     """Añadir '.0' no cambia el valor: 1.21 == 1.21.0 == 1.21.0.0."""
-    assert sgs._version_tuple(v) == sgs._version_tuple(v + ".0")
-    assert sgs._version_tuple(v) == sgs._version_tuple(v + ".0.0")
+    assert bds_update._version_tuple(v) == bds_update._version_tuple(v + ".0")
+    assert bds_update._version_tuple(v) == bds_update._version_tuple(v + ".0.0")
 
 
 @given(version, version)
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_version_oracle_ordering(a, b):
     """El comparador coincide con una implementación de referencia independiente."""
-    got = sgs._version_tuple(a) > sgs._version_tuple(b)
+    got = bds_update._version_tuple(a) > bds_update._version_tuple(b)
     expected = ref_version_tuple(a) > ref_version_tuple(b)
     assert got == expected, f"discrepancia: {a!r} vs {b!r}"
 
@@ -96,7 +98,7 @@ def test_version_oracle_ordering(a, b):
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_version_transitivity(a, b, c):
     """Orden total transitivo: si a>b y b>c entonces a>c."""
-    ta, tb, tc = (sgs._version_tuple(x) for x in (a, b, c))
+    ta, tb, tc = (bds_update._version_tuple(x) for x in (a, b, c))
     if ta > tb and tb > tc:
         assert ta > tc, f"transitividad rota: {a!r} > {b!r} > {c!r}"
 
@@ -105,7 +107,7 @@ def test_version_transitivity(a, b, c):
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_version_append_segment_monotonic(v, k):
     """Añadir un segmento >= 0 nunca disminuye el valor."""
-    assert sgs._version_tuple(v) <= sgs._version_tuple(f"{v}.{k}"), f"{v} + .{k}"
+    assert bds_update._version_tuple(v) <= bds_update._version_tuple(f"{v}.{k}"), f"{v} + .{k}"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -221,7 +223,7 @@ def test_origin_consistency(origin):
         assert sgs._is_allowed_origin(origin) is True
         return
     try:
-        host = sgs.urlsplit(origin).hostname
+        host = urlsplit(origin).hostname
     except ValueError:
         host = None
     expected = host in ("127.0.0.1", "localhost")

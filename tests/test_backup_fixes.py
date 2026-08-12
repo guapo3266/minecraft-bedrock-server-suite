@@ -24,6 +24,11 @@ import pytest
 import auto_backup
 import server_wrapper as sw
 import server_gui_server as sgs
+import gui_backend.supervisor as supervisor
+import gui_backend.services.backups as backups_service
+import gui_backend.services.bds_update as bds_update
+import gui_backend.routers.backups as backups_router
+import gui_backend.routers.actions as actions_router
 
 
 def _setup_env():
@@ -166,7 +171,7 @@ def test_list_backup_files_excluye_corruptos():
             with open(os.path.join(tmp, name), "w") as f:
                 f.write("x")
 
-        listed = {os.path.basename(p) for p in sgs._list_backup_files(tmp)}
+            listed = {os.path.basename(p) for p in backups_service._list_backup_files(tmp)}
         assert "auto_backup_ok.zip" in listed
         assert "otro.zip" in listed  # contrato historico: *.zip sin prefijo
         assert not any("_CORRUPTO" in n or "_EXCEDIDO" in n for n in listed), listed
@@ -267,9 +272,9 @@ def test_check_update_no_miente_si_version_instalada_es_desconocida(monkeypatch)
 
     old_version = sgs.manager.installed_version
     monkeypatch.setattr(sgs.manager, "installed_version", None)
-    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: _api_resp())
+    monkeypatch.setattr(bds_update.requests, "get", lambda *args, **kwargs: _api_resp())
     try:
-        result = asyncio.run(sgs.check_update(Req()))
+        result = asyncio.run(actions_router.check_update(Req()))
         assert result["latest_version"] == "1.26.40.8"
         assert result["has_update"] is None
         assert result["unavailable"] is False
@@ -284,9 +289,9 @@ def test_check_update_detecta_version_nueva_por_api(monkeypatch):
 
     old_version = sgs.manager.installed_version
     monkeypatch.setattr(sgs.manager, "installed_version", "1.26.33.2")
-    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: _api_resp())
+    monkeypatch.setattr(bds_update.requests, "get", lambda *args, **kwargs: _api_resp())
     try:
-        result = asyncio.run(sgs.check_update(Req()))
+        result = asyncio.run(actions_router.check_update(Req()))
         assert result["latest_version"] == "1.26.40.8"
         assert result["download_url"].endswith("bedrock-server-1.26.40.8.zip")
         assert result["has_update"] is True
@@ -302,9 +307,9 @@ def test_check_update_sin_link_de_windows_marca_no_disponible(monkeypatch):
 
     old_version = sgs.manager.installed_version
     monkeypatch.setattr(sgs.manager, "installed_version", "1.26.33.2")
-    monkeypatch.setattr(sgs.requests, "get", lambda *args, **kwargs: _api_resp(url=""))
+    monkeypatch.setattr(bds_update.requests, "get", lambda *args, **kwargs: _api_resp(url=""))
     try:
-        result = asyncio.run(sgs.check_update(Req()))
+        result = asyncio.run(actions_router.check_update(Req()))
         assert result["unavailable"] is True
         assert result["latest_version"] is None
         assert result["has_update"] is None
@@ -317,11 +322,11 @@ def test_spawn_wrapper_limpia_evento_de_salida_antes_de_publicar_proceso(monkeyp
     class FakeProcess:
         pass
 
-    monkeypatch.setattr(sgs.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
     was_set = sgs.manager.wrapper_exit_event.is_set()
     sgs.manager.wrapper_exit_event.set()
     try:
-        process = sgs._spawn_wrapper_process()
+        process = supervisor._spawn_wrapper_process()
         assert isinstance(process, FakeProcess)
         assert not sgs.manager.wrapper_exit_event.is_set()
     finally:
@@ -353,7 +358,7 @@ def test_run_wrapper_actualiza_version_aunque_hubiera_version_anterior(monkeypat
     monkeypatch.setattr(sgs.manager, "add_log", lambda *args, **kwargs: None)
     sgs.manager.installed_version = "1.26.32.2"
     try:
-        sgs.run_wrapper_thread(FakeProcess())
+        supervisor.run_wrapper_thread(FakeProcess())
         assert sgs.manager.installed_version == "1.26.33.2"
     finally:
         sgs.manager.installed_version = old_version
@@ -369,13 +374,13 @@ def test_restore_guard_dentro_threadpool_devuelve_409(monkeypatch):
     pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
 
-    orig_run_in_threadpool = sgs.run_in_threadpool
+    orig_run_in_threadpool = backups_router.run_in_threadpool
 
     async def _hijack(fn, *args, **kwargs):
         sgs.manager.is_running = True  # TOCTOU: se encendio mientras esperaba
         return await orig_run_in_threadpool(fn, *args, **kwargs)
 
-    monkeypatch.setattr(sgs, "run_in_threadpool", _hijack)
+    monkeypatch.setattr(backups_router, "run_in_threadpool", _hijack)
     sgs.manager.is_running = False
     try:
         # client=("127.0.0.1", ...) para pasar _ensure_local del endpoint
@@ -500,7 +505,7 @@ def test_apply_staged_update_exito_con_preservados():
             with open(p, "w") as f:
                 f.write(content)
 
-        sgs._apply_staged_update(
+        bds_update._apply_staged_update(
             staging, base,
             {"server.properties"}, {"worlds"},
         )
@@ -544,7 +549,7 @@ def test_apply_staged_update_rollback_restaura_instalacion(monkeypatch):
         monkeypatch.setattr(os, "replace", flaky)
 
         with pytest.raises(OSError):
-            sgs._apply_staged_update(staging, base, set(), set())
+            bds_update._apply_staged_update(staging, base, set(), set())
 
         # Rollback: TODO vuelve al estado anterior, sin mezcla de versiones
         assert open(os.path.join(base, "a.dll")).read() == "old-a"
@@ -562,12 +567,12 @@ def test_recover_interrupted_update_restores_old_and_removes_new():
         _write(os.path.join(base, "new.dll"), b"new-file")
         _write(os.path.join(prev, "a.dll"), b"old-a")
         _write(
-            os.path.join(prev, sgs._UPDATE_MANIFEST_NAME),
+                os.path.join(prev, bds_update._UPDATE_MANIFEST_NAME),
             b'[{"path":"a.dll","had_previous":true},'
             b'{"path":"new.dll","had_previous":false}]',
         )
 
-        sgs.recover_interrupted_updates(base)
+        bds_update.recover_interrupted_updates(base)
 
         assert open(os.path.join(base, "a.dll"), "rb").read() == b"old-a"
         assert not os.path.exists(os.path.join(base, "new.dll"))
@@ -621,7 +626,7 @@ def test_doble_start_solo_lanza_un_wrapper(monkeypatch):
     def fake_run_wrapper(*args, **kwargs):
         calls["n"] += 1
 
-    monkeypatch.setattr(sgs, "run_wrapper_thread", fake_run_wrapper)
+    monkeypatch.setattr(supervisor, "run_wrapper_thread", fake_run_wrapper)
 
     class _DummyProc:
         stdin = type("S", (), {"write": lambda *a: None, "flush": lambda *a: None})()
@@ -634,7 +639,7 @@ def test_doble_start_solo_lanza_un_wrapper(monkeypatch):
             return None
 
     # FIX G1: el handler crea el subproceso bajo op_lock via _spawn_wrapper_process
-    monkeypatch.setattr(sgs, "_spawn_wrapper_process", lambda: _DummyProc())
+    monkeypatch.setattr(supervisor, "_spawn_wrapper_process", lambda: _DummyProc())
     sgs.manager.is_running = False
     try:
         with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
@@ -694,7 +699,7 @@ def test_update_toma_op_lock_durante_todo_el_ciclo(monkeypatch):
             return iter([])
 
     monkeypatch.setattr(sgs.auto_backup, "create_backup", fake_create_backup)
-    monkeypatch.setattr(sgs.requests, "get", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
 
     sgs.manager.is_running = False
     sgs.manager.update_in_progress = False
@@ -726,7 +731,7 @@ def test_restart_respeta_op_lock(monkeypatch):
     def fake_run_wrapper():
         calls["n"] += 1
 
-    monkeypatch.setattr(sgs, "run_wrapper_thread", fake_run_wrapper)
+    monkeypatch.setattr(supervisor, "run_wrapper_thread", fake_run_wrapper)
     sgs.manager.is_running = False
     try:
         sgs.manager.op_lock.acquire()  # actualizacion/restauracion en curso

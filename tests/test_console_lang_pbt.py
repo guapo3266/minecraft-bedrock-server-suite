@@ -13,10 +13,10 @@ Cubre tres contratos:
   3) i18n.jsx (frontend): las claves y los placeholders de cada mensaje son
      SIMETRICOS entre el bloque es: y el bloque en:.
 """
-import sys, os, re, ast, io
+import sys, os, re, ast, io, keyword
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from hypothesis import given, strategies as st, settings, example, HealthCheck
+from hypothesis import given, strategies as st, settings, example, HealthCheck, assume
 import console_lang as cl
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -136,6 +136,10 @@ def extract_placeholders(node):
 def test_extract_placeholders_roundtrip(names):
     """Roundtrip: un template construido con N placeholders expone exactamente
     ese conjunto (con repeticiones colapsadas al conjunto)."""
+    # Los placeholders de un f-string deben ser identificadores validos:
+    # las keywords de Python ('or', 'as', 'in'...) no lo son y romperian el
+    # ast.parse del template. La estrategia puede generarlas; se descartan.
+    assume(not any(keyword.iskeyword(n) for n in names))
     if not names:
         template = '"solo texto fijo"'
     else:
@@ -163,6 +167,13 @@ L_PY_FILES = [
     "server_gui_server.py",
     "auto_backup.py",
     "backup_worker.py",
+    "gui_backend/supervisor.py",
+    "gui_backend/services/bds_update.py",
+    "gui_backend/routers/actions.py",
+    "gui_backend/routers/backups.py",
+    "gui_backend/routers/setup.py",
+    "gui_backend/routers/system.py",
+    "gui_backend/routers/websocket.py",
 ]
 
 
