@@ -24,13 +24,21 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const [completeError, setCompleteError] = useState(null);
   const [attempt, setAttempt] = useState(0);
 
-  // Precarga de los valores actuales de server.properties (vacio en instalacion nueva)
+  // Precarga de los valores actuales de server.properties (vacio en instalacion nueva).
+  // Los selects sin valor toman su primera opcion: un valor vacio en gamemode/
+  // difficulty seria rechazado por la validacion del backend.
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch('/api/server_properties');
         const data = await res.json();
-        if (data.fields) setValues(data.fields);
+        if (data.fields) {
+          const vals = { ...data.fields };
+          FIELDS.filter((f) => f.type === 'select').forEach((f) => {
+            if (!vals[f.key]) vals[f.key] = f.options[0];
+          });
+          setValues(vals);
+        }
       } catch (e) {
         console.error(e);
       }

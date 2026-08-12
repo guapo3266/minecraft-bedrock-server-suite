@@ -631,10 +631,15 @@ def _write_props_values(values):
     """Actualiza las claves dadas preservando el resto del archivo.
 
     Reemplaza la primera linea activa 'clave=...'; si la clave no existe (o
-    solo esta comentada), la anade al final. Devuelve las claves escritas.
+    solo esta comentada), la anade al final. Si server.properties aun no
+    existe (instalacion nueva antes del primer boot), se crea con las claves
+    dadas. Devuelve las claves escritas.
     """
-    with open(PROPS_PATH, encoding="utf-8") as f:
-        lines = f.readlines()
+    if os.path.exists(PROPS_PATH):
+        with open(PROPS_PATH, encoding="utf-8") as f:
+            lines = f.readlines()
+    else:
+        lines = []
     written = []
     for key, val in values.items():
         replaced = False

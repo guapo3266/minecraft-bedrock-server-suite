@@ -102,6 +102,25 @@ def test_props_post_idempotente(props_client):
     assert props.read_text(encoding="utf-8").count("difficulty=hard") == 1
 
 
+def test_props_post_crea_archivo_si_no_existe(monkeypatch, tmp_path):
+    """Instalacion nueva: sin server.properties, guardar debe CREAR el archivo
+    (antes FileNotFoundError -> 500 en el wizard de setup inicial)."""
+    props = tmp_path / "server.properties"
+    assert not props.exists()
+    monkeypatch.setattr(sgs, "PROPS_PATH", str(props))
+    with TestClient(sgs.app, client=("127.0.0.1", 50000)) as c:
+        r = c.post(
+            "/api/server_properties",
+            json={"values": {"server-name": "Mi Servidor", "server-port": "19132"}},
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["written"] == ["server-name", "server-port"]
+    assert props.exists()
+    contenido = props.read_text(encoding="utf-8")
+    assert "server-name=Mi Servidor" in contenido
+    assert "server-port=19132" in contenido
+
+
 # ── verify ───────────────────────────────────────────────────────────
 @pytest.fixture
 def verify_client(monkeypatch, tmp_path):
