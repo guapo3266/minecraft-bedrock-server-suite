@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
-import { FolderArchive, RefreshCw, XCircle, Download, Trash2 } from 'lucide-react';
+import { FolderArchive, RefreshCw, XCircle, Download, Trash2, ShieldCheck } from 'lucide-react';
 import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon } from './hover/AnimatedStatusIcons';
 import { useI18n } from '../i18n.jsx';
 
@@ -15,6 +15,9 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
   const [deleteTarget, setDeleteTarget] = useState(null); // backup a eliminar (confirm)
   const [alertOpen, setAlertOpen] = useState(false); // alerta "apaga el servidor"
   const [result, setResult] = useState(null); // { ok: bool, message: string } tras el intento
+  const [verifyResult, setVerifyResult] = useState(null); // feedback transitorio de verificacion
+  const [verifying, setVerifying] = useState(null); // filename en verificacion
+  const verifyTimerRef = useRef(null);
 
   // Reproduce la animacion del check al confirmarse una restauracion exitosa
   useEffect(() => {
@@ -22,6 +25,13 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
       successIconRef.current.startAnimation();
     }
   }, [result]);
+
+  // Igual para el feedback de verificacion de integridad
+  useEffect(() => {
+    if (verifyResult?.ok && successIconRef.current) {
+      successIconRef.current.startAnimation();
+    }
+  }, [verifyResult]);
 
   // Pequena atencion al abrir la alerta de servidor encendido
   useEffect(() => {
@@ -86,6 +96,27 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
     }
   };
 
+  const handleVerify = async (backup) => {
+    setVerifying(backup.filename);
+    setVerifyResult(null);
+    try {
+      const res = await fetch(`/api/backups/${encodeURIComponent(backup.filename)}/verify`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.status === 'ok') {
+        setVerifyResult({ ok: true, message: t('verifyOk') });
+      } else {
+        const detail = data.detail || data.entry || res.statusText;
+        setVerifyResult({ ok: false, message: t('verifyCorrupt', { entry: detail }) });
+      }
+    } catch (e) {
+      setVerifyResult({ ok: false, message: t('verifyError', { err: String(e) }) });
+    } finally {
+      setVerifying(null);
+      if (verifyTimerRef.current) clearTimeout(verifyTimerRef.current);
+      verifyTimerRef.current = setTimeout(() => setVerifyResult(null), 8000);
+    }
+  };
+
   return (
     <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.15)">
       <div className="flex items-center justify-between">
@@ -128,6 +159,22 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.9 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                    onClick={() => handleVerify(b)}
+                    disabled={verifying === b.filename}
+                    title={t('verify')}
+                    aria-label={t('verify')}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/25 hover:border-sky-500/70 transition-all disabled:opacity-50"
+                  >
+                    {verifying === b.filename ? (
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : (
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    )}
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                     onClick={() => handleDeleteClick(b)}
                     title={t('delete')}
                     aria-label={t('delete')}
@@ -155,6 +202,24 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
           />
         )}
       </div>
+
+      {/* Feedback transitorio de verificacion (mismo patron que PlayersSidebar) */}
+      {verifyResult && (
+        <div
+          className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+            verifyResult.ok
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+              : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+          }`}
+        >
+          {verifyResult.ok ? (
+            <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" />
+          ) : (
+            <XCircle className="h-4 w-4 shrink-0" />
+          )}
+          <span className="break-all">{verifyResult.message}</span>
+        </div>
+      )}
 
       {/* Alerta: el servidor está encendido */}
       <AnimatePresence>

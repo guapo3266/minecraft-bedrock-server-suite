@@ -6,6 +6,7 @@ import ControlsBar from './components/ControlsBar';
 import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
 import UpdateModal from './components/UpdateModal';
+import PropsModal from './components/PropsModal';
 import { useI18n } from './i18n.jsx';
 
 export default function App() {
@@ -29,6 +30,9 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [backups, setBackups] = useState([]);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [isPropsModalOpen, setIsPropsModalOpen] = useState(false);
+  const [propsFields, setPropsFields] = useState({});
+  const [propsServerRunning, setPropsServerRunning] = useState(false);
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateStarted, setUpdateStarted] = useState(false);
@@ -133,6 +137,18 @@ export default function App() {
     }
   };
 
+  const handleOpenProps = async () => {
+    setIsPropsModalOpen(true);
+    try {
+      const res = await fetch('/api/server_properties');
+      const data = await res.json();
+      setPropsFields(data.fields || {});
+      setPropsServerRunning(!!data.server_running);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleConfirmUpdate = async () => {
     setIsUpdating(true);
     setUpdateStarted(true);
@@ -212,7 +228,7 @@ export default function App() {
 
       <div className="relative z-10 mx-auto max-w-7xl space-y-5">
         {/* Cabecera Principal */}
-        <Navbar status={status} onOpenUpdate={handleOpenUpdate} latency={latency} />
+        <Navbar status={status} onOpenUpdate={handleOpenUpdate} onOpenProps={handleOpenProps} latency={latency} />
 
         {/* Botonera de Control con ClickSpark & ConfirmButton */}
         <ControlsBar status={status} onAction={handleAction} />
@@ -250,6 +266,14 @@ export default function App() {
         updateInfo={updateInfo}
         onConfirmUpdate={handleConfirmUpdate}
         isUpdating={isUpdating}
+      />
+
+      {/* Modal de Configuración (server.properties) */}
+      <PropsModal
+        isOpen={isPropsModalOpen}
+        onClose={() => setIsPropsModalOpen(false)}
+        fields={propsFields}
+        serverRunning={propsServerRunning}
       />
     </div>
   );

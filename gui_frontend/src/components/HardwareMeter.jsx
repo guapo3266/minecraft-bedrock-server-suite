@@ -2,7 +2,7 @@ import React from 'react';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import CountUp from './reactbits/CountUp';
-import { CpuMotionIcon, RamMotionIcon } from './hover/HardwareMotionIcons';
+import { CpuMotionIcon, RamMotionIcon, DownloadMotionIcon } from './hover/HardwareMotionIcons';
 import { useI18n } from '../i18n.jsx';
 
 export default function HardwareMeter({ hardware, running }) {
@@ -12,6 +12,11 @@ export default function HardwareMeter({ hardware, running }) {
   const availGb = hardware?.system_available_gb || 0;
   // RAM disponible de la maquina: en GB si >= 1, en MB si es menos
   const availLabel = availGb >= 1 ? `${availGb} GB` : `${Math.round(availGb * 1024)} MB`;
+  // Disco: el volumen del servidor y los backups
+  const diskFreeGb = hardware?.disk_free_gb ?? 0;
+  const diskTotalGb = hardware?.disk_total_gb ?? 0;
+  const diskUsedPct = hardware?.disk_used_pct ?? 0;
+  const diskLow = diskFreeGb < 5; // menos de 5 GB libres: aviso
   const { t } = useI18n();
 
   // El estado "encendido" viene del backend (status.running): la RAM medida
@@ -75,6 +80,38 @@ export default function HardwareMeter({ hardware, running }) {
             <div
               className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-400 to-purple-400 transition-all duration-500 shadow-[0_0_10px_#06b6d4]"
               style={{ width: `${isServerRunning ? Math.max(Math.min(cpuPct, 100), 3) : 0}%` }}
+            />
+          </div>
+        </SpotlightCard>
+      </TiltCard>
+
+      {/* Disk Meter */}
+      <TiltCard>
+        <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.2)">
+          <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <div className="flex items-center gap-2">
+              <DownloadMotionIcon className="h-4 w-4 text-amber-400" />
+              <span>{t('disk')}</span>
+            </div>
+            <span className={`font-mono text-xs font-bold ${diskLow ? 'text-rose-400' : 'text-amber-400'}`}>
+              {diskLow ? t('diskLow') : `${diskFreeGb} GB`}
+            </span>
+          </div>
+
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className={`text-2xl font-extrabold ${diskLow ? 'text-rose-400' : 'text-white'}`}>
+              <CountUp to={diskFreeGb} decimals={1} />
+            </span>
+            <span className="text-xs font-medium text-slate-400">{t('diskFreeOf', { total: diskTotalGb })}</span>
+          </div>
+
+          {/* Barra de Nivel Minimalista */}
+          <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-950 border border-white/10">
+            <div
+              className={`h-full rounded-full bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-300 transition-all duration-500 shadow-[0_0_10px_#f59e0b] ${
+                diskLow ? 'from-rose-500 via-rose-400 to-rose-300 shadow-[0_0_10px_#f43f5e]' : ''
+              }`}
+              style={{ width: `${Math.max(Math.min(diskUsedPct, 100), 3)}%` }}
             />
           </div>
         </SpotlightCard>

@@ -4,9 +4,10 @@ import ShinyText from './reactbits/ShinyText';
 import PingIndicator from './hover/PingIndicator';
 import { ServerMotionIcon } from './hover/AnimatedIcons';
 import { DownloadMotionIcon } from './hover/HardwareMotionIcons';
+import { Settings } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
-export default function Navbar({ status, onOpenUpdate, latency = null }) {
+export default function Navbar({ status, onOpenUpdate, onOpenProps, latency = null }) {
   const { t, lang, setLang } = useI18n();
   const isOnline = status.running;
   const isBackup = status.backup_in_progress;
@@ -40,6 +41,15 @@ export default function Navbar({ status, onOpenUpdate, latency = null }) {
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+        <button
+          onClick={onOpenProps}
+          className="flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3.5 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20 transition-all shadow-lg"
+          title={t('propsTitle')}
+        >
+          <Settings className="h-4 w-4 text-cyan-400" />
+          <span>{t('settings')}</span>
+        </button>
+
         <button
           onClick={onOpenUpdate}
           className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20 transition-all shadow-lg"

@@ -213,6 +213,12 @@ def get_hardware_metrics():
     # lo normaliza a % de la capacidad total de la máquina.
     bds_cpu_pct = round(raw_cpu / num_cores, 1)
 
+    # Disco: el volumen donde viven el servidor y los backups (C:).
+    disk = psutil.disk_usage(BASE_DIR)
+    disk_total_gb = round(disk.total / (1024**3), 1)
+    disk_free_gb = round(disk.free / (1024**3), 1)
+    disk_used_pct = round(disk.percent, 1)
+
     return {
         "ram_mb": bds_ram_mb,
         "ram_pct": bds_ram_pct,
@@ -220,7 +226,10 @@ def get_hardware_metrics():
         "total_ram_gb": total_ram_gb,
         "system_used_gb": system_used_gb,
         "system_available_gb": system_available_gb,
-        "system_used_pct": system_used_pct
+        "system_used_pct": system_used_pct,
+        "disk_total_gb": disk_total_gb,
+        "disk_free_gb": disk_free_gb,
+        "disk_used_pct": disk_used_pct
     }
 
 # ═══════════════════════════════════════════════════════════════
@@ -539,6 +548,134 @@ async def send_command(req: CommandRequest, request: Request):
     except Exception as e:
         manager.add_log(L(f"[GUI Backend] Error enviando comando: {e}", f"[GUI Backend] Error sending command: {e}"), "error")
         return {"status": "error", "message": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Editor de server.properties (subconjunto seguro de campos)
+# ═══════════════════════════════════════════════════════════════
+PROPS_PATH = os.path.join(BASE_DIR, "server.properties")
+
+# Campos editables con su validacion. Los demas (comentarios, claves no
+# listadas) se preservan tal cual al escribir.
+PROPS_FIELDS = {
+    "server-name": {"type": "string", "max": 128},
+    "gamemode": {"type": "enum", "values": ["survival", "creative", "adventure"]},
+    "difficulty": {"type": "enum", "values": ["peaceful", "easy", "normal", "hard"]},
+    "allow-cheats": {"type": "bool"},
+    "max-players": {"type": "int", "min": 1, "max": 999},
+    "online-mode": {"type": "bool"},
+    "allow-list": {"type": "bool"},
+    "server-port": {"type": "int", "min": 1, "max": 65535},
+    "view-distance": {"type": "int", "min": 5, "max": 96},
+    "tick-distance": {"type": "int", "min": 4, "max": 12},
+    "player-idle-timeout": {"type": "int", "min": 0, "max": 10080},
+    "default-player-permission-level": {"type": "enum", "values": ["visitor", "member", "operator"]},
+}
+
+
+def _read_props_values():
+    """{clave: valor} de las lineas activas (no comentadas) de server.properties."""
+    values = {}
+    if os.path.exists(PROPS_PATH):
+        with open(PROPS_PATH, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                if key in PROPS_FIELDS:
+                    values[key] = val.strip()
+    return values
+
+
+def _validate_props(values):
+    """Valida {clave: valor} contra PROPS_FIELDS. Devuelve (ok, detalle)."""
+    for key, raw in values.items():
+        spec = PROPS_FIELDS.get(key)
+        if spec is None:
+            return False, f"campo desconocido: {key}"
+        if spec["type"] == "enum":
+            if raw not in spec["values"]:
+                return False, f"{key}: valores validos: {', '.join(spec['values'])}"
+        elif spec["type"] == "bool":
+            if raw not in ("true", "false"):
+                return False, f"{key}: debe ser true o false"
+        elif spec["type"] == "int":
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                return False, f"{key}: debe ser un entero"
+            if not (spec["min"] <= n <= spec["max"]):
+                return False, f"{key}: rango {spec['min']}-{spec['max']}"
+        elif spec["type"] == "string":
+            if len(raw) > spec["max"]:
+                return False, f"{key}: maximo {spec['max']} caracteres"
+    return True, ""
+
+
+def _write_props_values(values):
+    """Actualiza las claves dadas preservando el resto del archivo.
+
+    Reemplaza la primera linea activa 'clave=...'; si la clave no existe (o
+    solo esta comentada), la anade al final. Devuelve las claves escritas.
+    """
+    with open(PROPS_PATH, encoding="utf-8") as f:
+        lines = f.readlines()
+    written = []
+    for key, val in values.items():
+        replaced = False
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if stripped.startswith(key + "=") or stripped.startswith(key + " ="):
+                lines[i] = f"{key}={val}\n"
+                replaced = True
+                break
+        if not replaced:
+            lines.append(f"{key}={val}\n")
+        written.append(key)
+    with open(PROPS_PATH, "w", encoding="utf-8", newline="") as f:
+        f.writelines(lines)
+    return written
+
+
+@app.get("/api/server_properties")
+async def get_server_properties(request: Request):
+    """Devuelve los valores actuales de los campos editables."""
+    _ensure_local(request.client.host if request.client else "")
+    return {
+        "fields": _read_props_values(),
+        "server_running": manager.is_running,
+    }
+
+
+@app.post("/api/server_properties")
+async def set_server_properties(request: Request):
+    """Actualiza los campos editables de server.properties (los demas se preservan).
+
+    Los cambios se aplican al REINICIAR el servidor (BDS lee el archivo al
+    arrancar); se informa al frontend con 'restart_required'.
+    """
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cuerpo JSON invalido")
+    values = (body or {}).get("values")
+    if not isinstance(values, dict) or not values:
+        raise HTTPException(status_code=400, detail="No hay campos para guardar")
+    for v in values.values():
+        if not isinstance(v, str):
+            raise HTTPException(status_code=400, detail="Valores deben ser texto")
+    ok, detalle = _validate_props(values)
+    if not ok:
+        raise HTTPException(status_code=400, detail=detalle)
+    written = _write_props_values(values)
+    manager.add_log(f"[GUI] Configuracion actualizada: {', '.join(sorted(written))}", "system")
+    return {"status": "ok", "written": written, "restart_required": True}
 
 
 @app.post("/api/action/{action_name}")
@@ -1197,6 +1334,41 @@ async def delete_backup(filename: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
     manager.add_log(L(f"[GUI] Backup eliminado: {filename}", f"[GUI] Backup deleted: {filename}"), "backup")
     return {"status": "ok", "backup": filename}
+
+
+@app.post("/api/backups/{filename}/verify")
+async def verify_backup(filename: str, request: Request):
+    """Verifica la integridad de un backup ZIP (testzip: CRC de todas las
+    entradas). Lento en zips grandes: corre en el threadpool para no bloquear
+    el event loop de los WebSockets.
+    """
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+    if not filename or os.path.basename(filename) != filename:
+        raise HTTPException(status_code=400, detail="Nombre de backup invalido")
+    full = os.path.join(auto_backup.BACKUP_DIR, filename)
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail="Backup no encontrado")
+
+    def _verify():
+        with zipfile.ZipFile(full, "r") as zf:
+            bad = zf.testzip()
+        return bad
+
+    try:
+        bad = await run_in_threadpool(_verify)
+    except zipfile.BadZipFile as e:
+        # Archivo truncado/cabecera rota: es el resultado "corrupto", no un error
+        manager.add_log(L(f"[GUI] Backup corrupto: {filename} ({e})", f"[GUI] Corrupt backup: {filename} ({e})"), "error")
+        return {"status": "corrupt", "filename": filename, "entry": str(e)}
+    except Exception as e:
+        manager.add_log(L(f"[GUI] Error al verificar {filename}: {e}", f"[GUI] Error verifying {filename}: {e}"), "error")
+        raise HTTPException(status_code=500, detail=str(e))
+    if bad:
+        manager.add_log(L(f"[GUI] Backup corrupto: {filename} ({bad})", f"[GUI] Corrupt backup: {filename} ({bad})"), "error")
+        return {"status": "corrupt", "filename": filename, "entry": bad}
+    manager.add_log(L(f"[GUI] Backup verificado: {filename}", f"[GUI] Backup verified: {filename}"), "backup")
+    return {"status": "ok", "filename": filename}
 
 
 @app.websocket("/ws")

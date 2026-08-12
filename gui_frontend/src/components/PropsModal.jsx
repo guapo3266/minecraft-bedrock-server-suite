@@ -1,0 +1,232 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Save, TriangleAlert } from 'lucide-react';
+import { ServerMotionIcon } from './hover/AnimatedIcons';
+import { FilledCheckedIcon } from './hover/AnimatedStatusIcons';
+import SpotlightCard from './reactbits/SpotlightCard';
+import TiltCard from './hover/TiltCard';
+import ShinyText from './reactbits/ShinyText';
+import Magnet from './reactbits/Magnet';
+import { useI18n } from '../i18n.jsx';
+
+const FIELDS = [
+  { key: 'server-name', type: 'text', label: 'propsServerName' },
+  { key: 'gamemode', type: 'select', label: 'propsGamemode', options: ['survival', 'creative', 'adventure'] },
+  { key: 'difficulty', type: 'select', label: 'propsDifficulty', options: ['peaceful', 'easy', 'normal', 'hard'] },
+  { key: 'allow-cheats', type: 'bool', label: 'propsAllowCheats' },
+  { key: 'max-players', type: 'number', label: 'propsMaxPlayers', min: 1, max: 999 },
+  { key: 'online-mode', type: 'bool', label: 'propsOnlineMode' },
+  { key: 'allow-list', type: 'bool', label: 'propsAllowList' },
+  { key: 'server-port', type: 'number', label: 'propsServerPort', min: 1, max: 65535 },
+  { key: 'view-distance', type: 'number', label: 'propsViewDistance', min: 5, max: 96 },
+  { key: 'tick-distance', type: 'number', label: 'propsTickDistance', min: 4, max: 12 },
+  { key: 'player-idle-timeout', type: 'number', label: 'propsIdleTimeout', min: 0, max: 10080 },
+  { key: 'default-player-permission-level', type: 'select', label: 'propsPermLevel', options: ['visitor', 'member', 'operator'] }
+];
+
+const inputClass =
+  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition-all';
+
+export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
+  const { t } = useI18n();
+  const [values, setValues] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState(null); // { ok, message }
+  const successIconRef = useRef(null);
+
+  // Animacion del check al guardar correctamente (mismo patron que BackupsSidebar)
+  useEffect(() => {
+    if (result?.ok && successIconRef.current) {
+      successIconRef.current.startAnimation();
+    }
+  }, [result]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setValues(fields || {});
+      setResult(null);
+    }
+  }, [isOpen, fields]);
+
+  if (!isOpen) return null;
+
+  const setValue = (key, v) => setValues((prev) => ({ ...prev, [key]: v }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    setResult(null);
+    try {
+      const res = await fetch('/api/server_properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setResult({ ok: true, message: t('propsSaved') });
+      } else {
+        setResult({ ok: false, message: data.detail || res.statusText });
+      }
+    } catch (e) {
+      setResult({ ok: false, message: t('propsError') + ': ' + String(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        {/* Backdrop Blur Overlay */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-black/75 backdrop-blur-md"
+        />
+
+        {/* Spring Modal Card (mismo patron que UpdateModal) */}
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0, y: 20 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.8, opacity: 0, y: 20 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          className="relative z-10 flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl border border-cyan-500/40 bg-slate-950 p-6 shadow-2xl"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/20 border border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.3)]">
+                <ServerMotionIcon className="h-5 w-5 text-cyan-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">{t('propsTitle')}</h2>
+                <p className="text-xs text-slate-400">{t('propsSubtitle')}</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-white/10 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Body: campos dentro de SpotlightCard/TiltCard (idioma visual del proyecto) */}
+          <div className="my-4 flex-1 space-y-3 overflow-y-auto pr-1">
+            <TiltCard>
+              <SpotlightCard spotlightColor="rgba(6, 182, 212, 0.12)">
+                <div className="grid grid-cols-1 gap-3">
+                  {FIELDS.map((f) => (
+                    <div key={f.key} className="flex items-center justify-between gap-3">
+                      <label
+                        htmlFor={`props-${f.key}`}
+                        className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400"
+                      >
+                        {t(f.label)}
+                      </label>
+                      {f.type === 'bool' ? (
+                        <button
+                          type="button"
+                          id={`props-${f.key}`}
+                          onClick={() => setValue(f.key, values[f.key] === 'true' ? 'false' : 'true')}
+                          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-300 ${
+                            values[f.key] === 'true'
+                              ? 'bg-emerald-500/80 shadow-[0_0_10px_rgba(16,185,129,0.5)]'
+                              : 'bg-slate-700'
+                          }`}
+                        >
+                          <motion.span
+                            layout
+                            transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow ${
+                              values[f.key] === 'true' ? 'left-[22px]' : 'left-0.5'
+                            }`}
+                          />
+                        </button>
+                      ) : f.type === 'select' ? (
+                        <select
+                          id={`props-${f.key}`}
+                          value={values[f.key] || ''}
+                          onChange={(e) => setValue(f.key, e.target.value)}
+                          className={inputClass + ' w-1/2'}
+                        >
+                          {f.options.map((o) => (
+                            <option key={o} value={o} className="bg-slate-900">
+                              {o}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id={`props-${f.key}`}
+                          type={f.type === 'number' ? 'number' : 'text'}
+                          min={f.min}
+                          max={f.max}
+                          value={values[f.key] || ''}
+                          onChange={(e) => setValue(f.key, e.target.value)}
+                          className={inputClass + ' w-1/2'}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </SpotlightCard>
+            </TiltCard>
+
+            {/* Resultado del guardado */}
+            {result && (
+              <div
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  result.ok
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                }`}
+              >
+                {result.ok ? (
+                  <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" />
+                ) : (
+                  <TriangleAlert className="h-4 w-4 shrink-0" />
+                )}
+                <span className="break-all">{result.message}</span>
+              </div>
+            )}
+
+            {/* Aviso de reinicio (mismo patron que el aviso amber de UpdateModal) */}
+            {serverRunning && (
+              <TiltCard>
+                <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.18)">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                    <TriangleAlert className="h-4 w-4 shrink-0" />
+                    <span>{t('propsRestartNotice')}</span>
+                  </div>
+                </SpotlightCard>
+              </TiltCard>
+            )}
+          </div>
+
+          {/* Footer Actions (mismo patron que UpdateModal) */}
+          <div className="flex justify-end gap-3 border-t border-white/10 pt-4">
+            <button
+              onClick={onClose}
+              className="flex min-h-[44px] items-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition-all duration-200 hover:border-white/25 hover:bg-white/15 hover:text-white active:scale-95 active:bg-white/25"
+            >
+              {t('cancel')}
+            </button>
+            <Magnet>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-5 py-2 text-xs font-bold text-black shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:brightness-110 disabled:opacity-50"
+              >
+                <Save className="h-4 w-4 text-black" />
+                <ShinyText text={saving ? t('saving') : t('save')} />
+              </button>
+            </Magnet>
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+}
