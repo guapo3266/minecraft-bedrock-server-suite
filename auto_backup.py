@@ -32,6 +32,10 @@ BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecra
 # Politica de retencion
 MAX_RECENT_BACKUPS = 15
 DAYS_TO_KEEP_DAILY = 7
+# H1: ventana de retencion de backups marcados (_CORRUPTO/_EXCEDIDO): se
+# conservan como evidencia estos dias y luego se rotan (antes quedaban para
+# siempre: fuga de disco indefinida).
+CORRUPT_BACKUP_RETENTION_DAYS = 7
 
 # Limite de seguridad: tamaño maximo total del backup comprimido (10 GB default)
 MAX_BACKUP_BYTES = 10 * 1024**3  # 10,737,418,240 bytes
@@ -336,9 +340,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             raise RuntimeError("Backup cancelado antes de publicar ZIP.")
 
         os.replace(tmp_filepath, zip_filepath)
+        # H1: el ZIP ya esta publicado: success se marca ANTES de cualquier
+        # operacion que pueda fallar (getsize, print). Antes, si getsize/print
+        # lanzaba (p.ej. antivirus bloqueando el archivo recien escrito), el
+        # finally borraba un backup integro recien publicado (perdida de datos).
+        success = True
         size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
         print(f"[OK] Backup creado exitosamente: {zip_filename} ({size_mb:.2f} MB)")
-        success = True
         # Rotacion ejecutada dentro del lock para evitar concurrencia
         try:
             rotate_backups()
@@ -379,18 +387,19 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
 def rotate_backups(now=None):
     """Politica de retencion: 15 recientes + 1 por dia (ultimos 7 dias).
 
+    Los backups marcados (_CORRUPTO/_EXCEDIDO) no compiten por las capas
+    recientes/diarias: se conservan como evidencia CORRUPT_BACKUP_RETENTION_DAYS
+    dias y luego se rotan. (H1: antes quedaban para siempre, fuga de disco.)
+
     `now` es inyectable para tests deterministas; por defecto usa la hora real.
     """
     if now is None:
         now = datetime.datetime.now()
     excluded_markers = ("_CORRUPTO", "_EXCEDIDO")
-    backups = [
-        b for b in glob.glob(os.path.join(BACKUP_DIR, "auto_backup_*.zip"))
-        if not any(marker in os.path.basename(b) for marker in excluded_markers)
-    ]
+    backups = glob.glob(os.path.join(BACKUP_DIR, "auto_backup_*.zip"))
     if not backups:
         return
-        
+
     backup_data = []
     for b in backups:
         try:
@@ -399,20 +408,26 @@ def rotate_backups(now=None):
             backup_data.append({'path': b, 'mtime': mtime, 'dt': dt})
         except Exception:
             pass
-        
+
     backup_data.sort(key=lambda x: x['mtime'], reverse=True)
-    
+
     keepers = set()
-    
+
+    # Solo los backups NO marcados compiten por las capas 1 y 2.
+    unmarked = [
+        b for b in backup_data
+        if not any(marker in os.path.basename(b['path']) for marker in excluded_markers)
+    ]
+
     # Capa 1: Retener los N más recientes
-    recent_keepers = backup_data[:MAX_RECENT_BACKUPS]
+    recent_keepers = unmarked[:MAX_RECENT_BACKUPS]
     for b in recent_keepers:
         keepers.add(b['path'])
-        
+
     # Capa 2: Retener 1 por día para los últimos M días
     daily_keepers_found = set()
-    
-    for b in backup_data:
+
+    for b in unmarked:
         date_diff = (now.date() - b['dt'].date()).days
         # Solo retener backups del pasado (date_diff >= 0); ignorar fechas futuras
         if 0 <= date_diff <= DAYS_TO_KEEP_DAILY:
@@ -420,7 +435,17 @@ def rotate_backups(now=None):
             if date_str not in daily_keepers_found:
                 daily_keepers_found.add(date_str)
                 keepers.add(b['path'])
-                
+
+    # Capa 3 (H1): backups marcados (corruptos/excedidos) se conservan como
+    # evidencia dentro de la ventana de retencion; fuera de ella se rotan.
+    # Las fechas futuras (age negativo) tambien se conservan, igual que en
+    # la capa 2.
+    for b in backup_data:
+        if any(marker in os.path.basename(b['path']) for marker in excluded_markers):
+            age_days = (now.date() - b['dt'].date()).days
+            if age_days < CORRUPT_BACKUP_RETENTION_DAYS:
+                keepers.add(b['path'])
+
     deleted_count = 0
     for b in backup_data:
         if b['path'] not in keepers:
@@ -430,7 +455,7 @@ def rotate_backups(now=None):
                 print(f"    - Rotacion: Eliminado {os.path.basename(b['path'])}")
             except Exception as e:
                 print(f"    - Error al eliminar {os.path.basename(b['path'])}: {e}")
-                
+
     if deleted_count > 0:
         print(f"[*] Limpieza completada. Backups retenidos: {len(keepers)}.")
 

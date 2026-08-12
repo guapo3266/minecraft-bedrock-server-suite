@@ -44,6 +44,10 @@ WORKER_JOIN_ON_SHUTDOWN_SEC = 135       # Mayor que el timeout del worker para e
 RETRY_BACKOFF_BASE_SEC = 5              # Backoff inicial entre reintentos de snapshot
 RETRY_BACKOFF_MAX_SEC = 60              # Tope del backoff exponencial
 MAX_CONSECUTIVE_SNAPSHOT_RETRIES = 10   # Abandono del reintento hasta el proximo intervalo normal
+BDS_STOP_TIMEOUT_SEC = 60               # H1: max segundos que BDS tiene para cerrar tras 'stop'
+                                        # antes de forzar su terminacion. La GUI espera
+                                        # SERVER_STOP_TIMEOUT_SEC (75s) en su fase 1: el
+                                        # wrapper siempre actua primero y ella solo observa.
 
 # ═══════════════════════════════════════════════════════════════
 # PATRONES DE DETECCION DEL LOG DE BDS (D5)
@@ -72,6 +76,7 @@ backup_in_progress = False
 backup_dispatched = False
 watchdog_fired = False                  # True si el watchdog mandó resume antes que el worker
 shutting_down = False
+shutdown_requested_at = 0.0             # H1: timestamp del inicio del apagado (tope del stop)
 last_backup_completed_time = 0          # Cuándo terminó el último ciclo de backup
 save_hold_timestamp = 0                 # Cuándo se envió save hold (para el watchdog)
 backup_thread = None                    # Referencia al hilo worker actual
@@ -653,7 +658,7 @@ def initiate_shutdown(reason="shutdown"):
     2. Cancela cualquier backup caliente en curso y libera save hold (save resume).
     3. Envía el comando 'stop' al proceso del servidor si aún sigue vivo.
     """
-    global shutting_down, backup_in_progress, backup_dispatched, save_query_ready_seen, backup_cancel_event, watchdog_fired
+    global shutting_down, backup_in_progress, backup_dispatched, save_query_ready_seen, backup_cancel_event, watchdog_fired, shutdown_requested_at
 
     cancel_worker = None
     should_send_resume = False
@@ -662,6 +667,7 @@ def initiate_shutdown(reason="shutdown"):
     with state_lock:
         if not shutting_down:
             shutting_down = True
+            shutdown_requested_at = time.time()  # H1: arranca el reloj del tope de stop
             print(f"\n[Wrapper] Apagado iniciado ({reason}).")
             if backup_in_progress:
                 print("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...")
@@ -797,6 +803,17 @@ if __name__ == "__main__":
     # --- Loop principal de espera ---
     try:
         while server_process and server_process.poll() is None:
+            # H1: la ruta normal de 'stop' tambien tiene tope: si BDS cuelga en
+            # el apagado, el wrapper no se queda esperandolo para siempre
+            # (antes solo la ruta Ctrl+C forzaba la terminacion). El kill
+            # efectivo ocurre en el finally, antes del backup final.
+            with state_lock:
+                stop_timeout_exceeded = (
+                    shutting_down
+                    and (time.time() - shutdown_requested_at) > BDS_STOP_TIMEOUT_SEC
+                )
+            if stop_timeout_exceeded:
+                break
             time.sleep(0.5)
 
     except KeyboardInterrupt:
@@ -823,7 +840,24 @@ if __name__ == "__main__":
                 pass
 
     finally:
+        # H1: si BDS seguia vivo al salir del loop (tope de stop vencido o
+        # ruta Ctrl+C), forzarlo ANTES de la limpieza: el backup final de
+        # cierre debe correr sobre un mundo quieto. Idempotente: si BDS ya
+        # cerro, poll() no es None y no se toca nada.
+        if server_process is not None and server_process.poll() is None:
+            print("[Wrapper] [WARN] BDS no cerro tras el tope de apagado; forzando terminacion...")
+            try:
+                server_process.kill()
+                server_process.wait()
+            except Exception:
+                pass
+
         # Limpieza final (intenta completar aunque haya Ctrl+C)
+        # G8: marcador legible por la GUI que separa "BDS murió" de "wrapper
+        # terminó". La GUI (server_gui_server) espera esta linea para saber que
+        # el mundo quedo quieto; NO espera la salida del proceso (que tarda el
+        # backup final de cierre, hasta 240s).
+        print("[Wrapper] BDS detenido. Iniciando limpieza final de cierre...")
         try:
             with state_lock:
                 shutting_down = True

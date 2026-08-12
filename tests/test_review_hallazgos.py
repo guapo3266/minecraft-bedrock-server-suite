@@ -62,6 +62,7 @@ def _reset_manager_state():
     gui.manager.backup_in_progress = False
     gui.manager.players_online.clear()
     gui.manager.wrapper_exit_event.set()
+    gui.manager.server_stopped_event.set()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -919,3 +920,257 @@ def test_patrones_bds_centralizados_y_matchean_log_real():
         "from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT" in gui_src
     )
     assert "Player\\s+connected" not in gui_src
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# G8: restart/update separan "BDS murió" de "wrapper terminó"
+# ═══════════════════════════════════════════════════════════════════════
+# Antes: restart/update esperaban wrapper_exit_event con 30s, pero ese evento
+# solo llega tras el backup final de cierre del wrapper (tope interno 240s):
+# con un mundo grande el reinicio se abortaba siempre aunque BDS ya se hubiera
+# detenido. Ahora esperan DOS fases: server_stopped_event (BDS muerto) y luego
+# wrapper_exit_event (wrapper completo) con WRAPPER_EXIT_TIMEOUT_SEC escalado.
+def _fake_wrapper_proc():
+    """Wrapper falso minimo para do_restart/do_update: solo stdin."""
+    fake = _FakeStdin()
+    return type("FakeWrapperProc", (), {"stdin": fake})(), fake
+
+
+def _logs_since(log_history, start_idx):
+    return [e["text"] for e in log_history[start_idx:]]
+
+
+def test_restart_fase1_aborta_si_bds_no_se_detiene(monkeypatch):
+    """G8-Fase1: si BDS nunca muere (server_stopped_event sin marcar), el
+    restart aborta tras SERVER_STOP_TIMEOUT_SEC y NO lanza otro wrapper."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    _reset_manager_state()
+    spawned = {"n": 0}
+    monkeypatch.setattr(gui, "SERVER_STOP_TIMEOUT_SEC", 0.3)
+
+    def fake_spawn():
+        spawned["n"] += 1
+
+    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
+    proc, fake_stdin = _fake_wrapper_proc()
+    gui.manager.is_running = True
+    gui.manager.wrapper_process = proc
+    gui.manager.wrapper_exit_event.clear()
+    gui.manager.server_stopped_event.clear()
+    log_start = len(gui.manager.log_history)
+    try:
+        with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
+            r = c.post("/api/action/restart")
+            assert r.json()["status"] == "restarting", r.text
+            time.sleep(1.0)  # deja abortar al hilo do_restart
+        assert spawned["n"] == 0, "se lanzo un wrapper con BDS vivo"
+        assert "stop\n" in fake_stdin.lines, "el stop no se escribio al wrapper"
+        logs = "\n".join(_logs_since(gui.manager.log_history, log_start))
+        assert "no se detuvo" in logs and "Reinicio cancelado" in logs, logs
+    finally:
+        _reset_manager_state()
+
+
+def test_restart_fase2_espera_backup_final_y_arranca(monkeypatch):
+    """G8-Fase2: con BDS detenido (fase 1 ok) pero el wrapper aun haciendo el
+    backup final de cierre, el restart ESPERA a wrapper_exit_event y luego
+    lanza el wrapper nuevo (antes abortaba a los 30s con un mundo lento)."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    _reset_manager_state()
+    spawned = {"n": 0}
+    monkeypatch.setattr(gui, "SERVER_STOP_TIMEOUT_SEC", 2)
+    monkeypatch.setattr(gui, "WRAPPER_EXIT_TIMEOUT_SEC", 2)
+    proc, fake_stdin = _fake_wrapper_proc()
+
+    def fake_spawn():
+        spawned["n"] += 1
+        return proc
+
+    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
+    monkeypatch.setattr(gui, "run_wrapper_thread", lambda *a, **k: None)
+
+    gui.manager.is_running = True
+    gui.manager.wrapper_process = proc
+    gui.manager.wrapper_exit_event.clear()
+    gui.manager.server_stopped_event.clear()
+
+    # BDS muere a los 0.1s; el wrapper sigue vivo hasta los 0.35s (backup final).
+    def bds_muere():
+        time.sleep(0.1)
+        gui.manager.server_stopped_event.set()
+
+    def wrapper_termina():
+        time.sleep(0.35)
+        # is_running antes del evento: visibilidad garantizada por el set().
+        gui.manager.is_running = False
+        gui.manager.wrapper_exit_event.set()
+
+    threading.Thread(target=bds_muere, daemon=True).start()
+    threading.Thread(target=wrapper_termina, daemon=True).start()
+    try:
+        with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
+            r = c.post("/api/action/restart")
+            assert r.json()["status"] == "restarting", r.text
+            end = time.time() + 5
+            while spawned["n"] == 0 and time.time() < end:
+                time.sleep(0.05)
+        assert spawned["n"] == 1, "el restart no lanzo el wrapper tras el backup final"
+        assert "stop\n" in fake_stdin.lines
+    finally:
+        _reset_manager_state()
+
+
+def test_restart_fase2_aborta_si_wrapper_nunca_termina(monkeypatch):
+    """G8-Fase2: si el wrapper queda colgado (backup final que no termina),
+    el restart aborta tras WRAPPER_EXIT_TIMEOUT_SEC con mensaje honesto y no
+    lanza otro wrapper (dos wrappers pisando el mundo)."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    _reset_manager_state()
+    spawned = {"n": 0}
+    monkeypatch.setattr(gui, "WRAPPER_EXIT_TIMEOUT_SEC", 0.3)
+
+    def fake_spawn():
+        spawned["n"] += 1
+
+    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
+    proc, fake_stdin = _fake_wrapper_proc()
+    gui.manager.is_running = True
+    gui.manager.wrapper_process = proc
+    gui.manager.wrapper_exit_event.clear()
+    gui.manager.server_stopped_event.set()  # BDS ya murio
+    log_start = len(gui.manager.log_history)
+    try:
+        with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
+            r = c.post("/api/action/restart")
+            assert r.json()["status"] == "restarting", r.text
+            time.sleep(1.0)
+        assert spawned["n"] == 0, "se lanzo un wrapper con el anterior aun vivo"
+        logs = "\n".join(_logs_since(gui.manager.log_history, log_start))
+        assert "wrapper no termino" in logs and "Reinicio cancelado" in logs, logs
+    finally:
+        _reset_manager_state()
+
+
+def test_update_bds_espera_fase2_antes_de_tocar_instalacion(monkeypatch):
+    """G8-Fase2 (update): con BDS detenido pero el wrapper aun haciendo el
+    backup final, update_bds espera y si el wrapper no termina, ABORTA sin
+    hacer backup preventivo ni aplicar binarios (antes aplicaba con el
+    wrapper vivo o abortaba con un mensaje falso de "no se detuvo")."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    _reset_manager_state()
+    applied = {"backup": 0, "staged": 0}
+    monkeypatch.setattr(gui, "WRAPPER_EXIT_TIMEOUT_SEC", 0.3)
+    proc, fake_stdin = _fake_wrapper_proc()
+
+    def fake_backup(*a, **k):
+        applied["backup"] += 1
+        return "dummy.zip"
+
+    def fake_apply(*a, **k):
+        applied["staged"] += 1
+
+    monkeypatch.setattr(gui.auto_backup, "create_backup", fake_backup)
+    monkeypatch.setattr(gui, "_apply_staged_update", fake_apply)
+
+    gui.manager.is_running = True
+    gui.manager.wrapper_process = proc
+    gui.manager.wrapper_exit_event.clear()
+    gui.manager.server_stopped_event.set()  # BDS ya murio
+    log_start = len(gui.manager.log_history)
+    try:
+        with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
+            r = c.post("/api/action/update_bds")
+            assert r.json()["status"] == "update_dispatched", r.text
+            end = time.time() + 5
+            while gui.manager.update_in_progress and time.time() < end:
+                time.sleep(0.05)
+        assert applied["backup"] == 0, "el backup preventivo corrio con el wrapper vivo"
+        assert applied["staged"] == 0, "se aplicaron binarios con el wrapper vivo"
+        logs = "\n".join(_logs_since(gui.manager.log_history, log_start))
+        assert "wrapper no termino" in logs and "Actualización cancelada" in logs, logs
+    finally:
+        _reset_manager_state()
+        shutil.rmtree(os.path.join(BASE_DIR, "bds_update_staging"), ignore_errors=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# H1: rotacion de backups marcados, zip publicado no borrable y carreras
+# ═══════════════════════════════════════════════════════════════════════
+def test_backup_publicado_no_se_borra_si_falla_getsize(monkeypatch, tmp_path):
+    """H1: tras os.replace, un fallo de getsize/print (p.ej. antivirus
+    bloqueando el zip recien publicado) NO debe borrarlo. Antes success=True
+    iba despues de esas llamadas y el finally eliminaba el ZIP integro."""
+    fake_world, fake_bkp = _fake_env(monkeypatch, tmp_path)
+    _write(os.path.join(fake_world, "level.dat"), b"L" * 100)
+
+    orig_getsize = os.path.getsize
+
+    def flaky_getsize(path):
+        if path.endswith(".zip"):
+            raise OSError("bloqueado por antivirus (simulado)")
+        return orig_getsize(path)
+
+    monkeypatch.setattr(os.path, "getsize", flaky_getsize)
+
+    result = auto_backup.create_backup("h1_getsize")
+    assert result is False, "el backup debio reportar fallo (getsize lanzo)"
+    zips = [f for f in os.listdir(fake_bkp) if f.endswith(".zip")]
+    assert len(zips) == 1, f"el zip ya publicado fue borrado: {fake_bkp}"
+    assert not os.listdir(fake_bkp) or all(
+        not f.endswith(".tmp") for f in os.listdir(fake_bkp)
+    ), "quedo un .tmp huerfano"
+
+
+def test_restart_doble_simultaneo_no_lanza_dos_wrappers(monkeypatch):
+    """H1: dos restarts simultaneos con el servidor apagado lanzan UN solo
+    wrapper: do_restart marca is_running bajo op_lock en el spawn (igual que
+    start). Antes, la ventana entre spawn y arranque del hilo permitia un
+    doble wrapper pisando el mundo."""
+    pytest.importorskip("httpx")
+    import concurrent.futures as cf
+    from fastapi.testclient import TestClient
+
+    _reset_manager_state()
+    spawned = {"n": 0}
+    proc, _fake_stdin = _fake_wrapper_proc()
+
+    def fake_spawn():
+        spawned["n"] += 1
+        time.sleep(0.05)  # ensanchar la ventana de carrera
+        return proc
+
+    monkeypatch.setattr(gui, "_spawn_wrapper_process", fake_spawn)
+    monkeypatch.setattr(gui, "run_wrapper_thread", lambda *a, **k: None)
+
+    try:
+        with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
+            with cf.ThreadPoolExecutor(max_workers=2) as ex:
+                futs = [ex.submit(c.post, "/api/action/restart") for _ in range(2)]
+                results = [f.result().json() for f in futs]
+            time.sleep(0.5)  # deja terminar a los hilos do_restart
+        assert all(r["status"] == "restarting" for r in results), results
+        assert spawned["n"] == 1, f"se lanzaron {spawned['n']} wrappers"
+    finally:
+        _reset_manager_state()
+
+
+def test_stop_normal_tiene_tope_y_fuerza_terminacion():
+    """H1: la ruta normal de 'stop' esta acotada en el wrapper: si BDS no
+    cierra en BDS_STOP_TIMEOUT_SEC, el wrapper lo fuerza ANTES del backup
+    final (antes solo la ruta Ctrl+C forzaba; la normal colgaba para
+    siempre, dejando el mundo bloqueado)."""
+    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
+    assert "BDS_STOP_TIMEOUT_SEC" in src
+    assert "shutdown_requested_at" in src
+    assert "forzando terminacion" in src
+    assert "forzando terminacion" in src.split("finally:")[-1], (
+        "el kill forzado debe ocurrir en el finally, antes del backup final"
+    )

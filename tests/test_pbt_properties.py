@@ -283,8 +283,11 @@ def test_rotate_retention_limits(days_ago_list):
             ab.BACKUP_DIR = restore_backup_dir
 
 
-def test_rotate_corrupt_markers():
-    """Backups marcados _CORRUPTO no se eliminan ni cuentan."""
+def test_rotate_corrupt_markers_politica_retencion():
+    """H1: backups marcados _CORRUPTO/_EXCEDIDO: la evidencia reciente se
+    conserva (no compite por las capas recientes/diarias) pero pasados
+    CORRUPT_BACKUP_RETENTION_DAYS se rotan. (Contrato viejo: nunca se
+    eliminaban -> fuga de disco indefinida.)"""
     with tempfile.TemporaryDirectory() as tmp:
         backup_dir = os.path.join(tmp, "auto_backups")
         restore_backup_dir = ab.BACKUP_DIR
@@ -292,24 +295,40 @@ def test_rotate_corrupt_markers():
 
         try:
             os.makedirs(backup_dir, exist_ok=True)
-            old = datetime.datetime(2020, 1, 1, 0, 0, 0)
+            now = datetime.datetime(2026, 7, 30, 12, 0, 0)
+            recent = now - datetime.timedelta(days=2)
+            old = now - datetime.timedelta(days=ab.CORRUPT_BACKUP_RETENTION_DAYS + 10)
+
             _make_backup_files(backup_dir, [
                 (f"old_{i:02d}", old - datetime.timedelta(hours=i))
                 for i in range(20)
             ])
 
-            corrupt_path = os.path.join(
-                backup_dir, "auto_backup_corrupto_2020-01-01_00-00-00_CORRUPTO.zip"
-            )
-            with open(corrupt_path, "w") as f:
-                f.write("corrupt")
-            os.utime(corrupt_path, (old.timestamp(), old.timestamp()))
+            marked = [
+                ("auto_backup_reciente_2026-07-28_00-00-00_CORRUPTO.zip", recent),
+                ("auto_backup_viejo_2020-01-01_00-00-00_CORRUPTO.zip", old),
+                ("auto_backup_excedido_2020-01-01_00-00-00_EXCEDIDO.zip", old),
+            ]
+            for name, dt in marked:
+                path = os.path.join(backup_dir, name)
+                with open(path, "w") as f:
+                    f.write("corrupt")
+                os.utime(path, (dt.timestamp(), dt.timestamp()))
 
-            ab.rotate_backups()
+            ab.rotate_backups(now=now)
             after = set(os.listdir(backup_dir))
-            assert "auto_backup_corrupto_2020-01-01_00-00-00_CORRUPTO.zip" in after, (
-                "Rotación eliminó backup marcado como corrupto"
+            assert "auto_backup_reciente_2026-07-28_00-00-00_CORRUPTO.zip" in after, (
+                "Rotacion elimino evidencia de corrupcion reciente"
             )
+            assert "auto_backup_viejo_2020-01-01_00-00-00_CORRUPTO.zip" not in after, (
+                "corrupto fuera de la ventana de retencion no rotado"
+            )
+            assert "auto_backup_excedido_2020-01-01_00-00-00_EXCEDIDO.zip" not in after, (
+                "excedido fuera de la ventana de retencion no rotado"
+            )
+            # Idempotencia: segunda pasada no cambia nada
+            after2 = set(os.listdir(backup_dir))
+            assert after == after2
         finally:
             ab.BACKUP_DIR = restore_backup_dir
 

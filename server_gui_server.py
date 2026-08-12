@@ -39,6 +39,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
 SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 
+# ═══════════════════════════════════════════════════════════════
+# G8: tiempos de espera de apagado del wrapper (restart / update_bds).
+# La GUI espera en DOS fases: primero que BDS muera (server_stopped_event,
+# marcado por la linea "[Wrapper] BDS detenido..." del wrapper) y despues que
+# el wrapper termine del todo, incluido el backup final de cierre. Antes se
+# esperaba el evento de salida del wrapper con un unico timeout de 30s, pero
+# ese evento solo llega tras el backup final (tope interno del wrapper: 135s
+# de join del worker caliente + 240s del backup final): con un mundo grande
+# el reinicio/actualizacion se abortaban siempre aunque BDS ya se hubiera
+# detenido, y el mensaje de error era enganoso ("no se detuvo").
+SERVER_STOP_TIMEOUT_SEC = 75      # Fase 1: max segundos esperando que BDS muera
+                                  # (mayor que BDS_STOP_TIMEOUT_SEC=60 del wrapper:
+                                  # el wrapper fuerza el kill y la GUI solo observa)
+WRAPPER_EXIT_TIMEOUT_SEC = 450    # Fase 2: max segundos esperando al wrapper completo
+                                  # (75 BDS + 135 join worker + 240 backup final + margen)
+
 def _version_tuple(version: str):
     """Convierte '1.21.30.03' en (1, 21, 30, 3) para comparar versiones semánticamente."""
     parts = []
@@ -224,6 +240,12 @@ class ServerManager:
         self.installed_version = None  # FIX F1: version real capturada del log de BDS
         self.wrapper_exit_event = threading.Event()
         self.wrapper_exit_event.set()  # Sin wrapper en ejecución al inicio
+        # G8: "BDS murió" separado de "wrapper terminó". Se marca al ver la
+        # linea "[Wrapper] BDS detenido..." del wrapper (y como respaldo en el
+        # finally del hilo). restart/update lo usan para saber que el mundo
+        # quedo quieto sin esperar el backup final de cierre del wrapper.
+        self.server_stopped_event = threading.Event()
+        self.server_stopped_event.set()  # Sin wrapper: BDS tampoco corre
         self.active_websockets: Set[WebSocket] = set()
         self.loop = None
         # Exclusion mutua de operaciones que tocan servidor/mundo/instalacion:
@@ -305,6 +327,8 @@ def _spawn_wrapper_process():
     # update_bds puede ver un proceso nuevo pero un evento todavía marcado
     # como terminado y continuar sin esperar su cierre.
     manager.wrapper_exit_event.clear()
+    # G8: un wrapper nuevo significa BDS (potencialmente) vivo otra vez.
+    manager.server_stopped_event.clear()
     return process
 
 
@@ -319,6 +343,7 @@ def run_wrapper_thread(process=None):
     manager.installed_version = None
     manager.add_log("[GUI Backend] Iniciando wrapper de Minecraft Bedrock...", "system")
     manager.wrapper_exit_event.clear()
+    manager.server_stopped_event.clear()
     manager.is_running = True
     manager.start_time = time.time()
     manager.update_status()
@@ -342,6 +367,12 @@ def run_wrapper_thread(process=None):
             m_ver = re.search(r"Version:\s*(\d+\.\d+\.\d+\.\d+)", line_str)
             if m_ver:
                 manager.installed_version = m_ver.group(1)
+
+            # G8: BDS confirmado detenido. El wrapper lo anuncia al empezar su
+            # limpieza final; en ese momento el mundo ya está quieto, aunque el
+            # proceso del wrapper siga vivo haciendo el backup de cierre.
+            if "BDS detenido" in line_str:
+                manager.server_stopped_event.set()
 
             # Determinar tipo de log para coloreado en la GUI
             log_type = "info"
@@ -397,6 +428,8 @@ def run_wrapper_thread(process=None):
         manager.wrapper_process = None
         manager.players_online.clear()
         manager.wrapper_exit_event.set()
+        # G8: respaldo: si el hilo muere, BDS ya no corre.
+        manager.server_stopped_event.set()
         manager.add_log("[GUI Backend] Servidor de Minecraft detenido.", "system")
         manager.update_status()
 
@@ -551,10 +584,31 @@ async def handle_action(action_name: str, request: Request):
                 except Exception:
                     pass
                 manager.add_log("[GUI Backend] Reiniciando servidor...", "system")
-                # Espera real (con tope) a que el wrapper anterior termine
-                # antes de lanzar otro: evita dobles instancias y pisado de estado.
-                if not exit_event.wait(timeout=30):
-                    manager.add_log("[GUI Backend] El servidor no se detuvo en 30s. Reinicio cancelado.", "error")
+                # G8: espera en DOS fases antes de lanzar otro wrapper (evita
+                # dobles instancias y pisado de estado):
+                #  Fase 1: que BDS muera (evento propio, independiente del
+                #    cierre del wrapper). Antes se esperaba el evento de salida
+                #    del wrapper con solo 30s, pero ese evento solo llega tras
+                #    el backup final de cierre (tope interno de 240s): con un
+                #    mundo grande el reinicio se abortaba siempre aunque el
+                #    servidor ya se hubiera detenido.
+                if not manager.server_stopped_event.wait(timeout=SERVER_STOP_TIMEOUT_SEC):
+                    manager.add_log(
+                        f"[GUI Backend] El servidor no se detuvo en {SERVER_STOP_TIMEOUT_SEC}s. "
+                        "Reinicio cancelado.",
+                        "error",
+                    )
+                    return
+                #  Fase 2: que el wrapper termine del todo (backup final de
+                #    cierre incluido) antes de lanzar otro: dos wrappers
+                #    comprimiendo el mismo mundo pisarian sus copias.
+                if not exit_event.wait(timeout=WRAPPER_EXIT_TIMEOUT_SEC):
+                    manager.add_log(
+                        f"[GUI Backend] El wrapper no termino en {WRAPPER_EXIT_TIMEOUT_SEC}s "
+                        "(incluye el backup final de cierre). Reinicio cancelado; "
+                        "inicia el servidor manualmente.",
+                        "error",
+                    )
                     return
             # Chequeo + lanzamiento atomicos bajo op_lock: si hay una
             # actualizacion/restauracion/backup en curso, no se re-lanza BDS
@@ -572,6 +626,10 @@ async def handle_action(action_name: str, request: Request):
                 proc = _spawn_wrapper_process()
                 # FIX G2: wrapper_process asignado bajo el lock
                 manager.wrapper_process = proc
+                # H1: marcar en marcha bajo el lock (igual que start). Sin
+                # esto, dos restarts simultaneos podian ver is_running=False
+                # tras el spawn y lanzar dos wrappers que pisarian el mundo.
+                manager.is_running = True
                 threading.Thread(target=run_wrapper_thread, args=(proc,), daemon=True).start()
             except Exception as e:
                 manager.add_log(f"[GUI Backend] Error al iniciar el wrapper: {e}", "error")
@@ -664,12 +722,30 @@ async def handle_action(action_name: str, request: Request):
                         manager.wrapper_process.stdin.flush()
                     except Exception:
                         pass
-                    # Esperar a que el proceso termine de verdad antes de tocar archivos
-                    if not manager.wrapper_exit_event.wait(timeout=30):
+                    # G8: espera en DOS fases antes de tocar binarios:
+                    #  Fase 1: BDS muerto (evento propio; antes se esperaba la
+                    #    salida del wrapper con 30s, que no llega hasta terminar
+                    #    el backup final de cierre y abortaba la actualizacion
+                    #    con un mensaje enganoso).
+                    if not manager.server_stopped_event.wait(timeout=SERVER_STOP_TIMEOUT_SEC):
                         # D6: comportamiento intencional (nunca actualizar con el
                         # servidor vivo); el mensaje deja claro el estado y como seguir.
+                        # H1: si vencio la fase 1, BDS puede seguir deteniendose:
+                        # el mensaje no da por hecho que quedo detenido.
                         manager.add_log(
-                            "[Actualizador BDS] El servidor no se detuvo en 30s. Actualización cancelada; "
+                            f"[Actualizador BDS] El servidor no se detuvo en {SERVER_STOP_TIMEOUT_SEC}s. "
+                            "Actualización cancelada; "
+                            "si el servidor quedó detenido, reinícialo con ▶ Iniciar.",
+                            "error",
+                        )
+                        return
+                    #  Fase 2: wrapper completamente terminado (backup final de
+                    #    cierre incluido) antes de reemplazar binarios o lanzar
+                    #    el backup preventivo.
+                    if not manager.wrapper_exit_event.wait(timeout=WRAPPER_EXIT_TIMEOUT_SEC):
+                        manager.add_log(
+                            f"[Actualizador BDS] El wrapper no termino en {WRAPPER_EXIT_TIMEOUT_SEC}s "
+                            "(incluye el backup final de cierre). Actualización cancelada; "
                             "el servidor quedó detenido. Reinícialo con ▶ Iniciar.",
                             "error",
                         )
