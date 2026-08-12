@@ -1289,6 +1289,15 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
         except (TypeError, ValueError):
             pass
         total_bytes = 0
+        total_known = None
+        try:
+            if content_length:
+                total_known = int(content_length)
+        except (TypeError, ValueError):
+            total_known = None
+        # R3: progreso real de descarga cada 10 MB (la fase mas larga: sin
+        # estas lineas la GUI parece congelada durante la descarga).
+        next_progress_mb = 10
         with open(temp_zip, "wb") as f:
             for chunk in dl.iter_content(chunk_size=8192):
                 total_bytes += len(chunk)
@@ -1296,6 +1305,14 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
                     manager.add_log(L(f"{tag} Descarga excede el límite de 400 MB. Abortando.", f"{tag} Download exceeds the 400 MB limit. Aborting."), "error")
                     return False, None
                 f.write(chunk)
+                if total_bytes >= next_progress_mb * 1024 * 1024:
+                    next_progress_mb += 10
+                    mb = total_bytes // (1024 * 1024)
+                    if total_known and total_known > 0:
+                        pct = total_bytes * 100 // total_known
+                        manager.add_log(L(f"{tag} Descargando... {mb} MB ({pct}%)", f"{tag} Downloading... {mb} MB ({pct}%)"), "system")
+                    else:
+                        manager.add_log(L(f"{tag} Descargando... {mb} MB", f"{tag} Downloading... {mb} MB"), "system")
 
         manager.add_log(L(f"{tag} Descomprimiendo y actualizando ejecutable...", f"{tag} Extracting and updating executable..."), "system")
         preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
@@ -1305,6 +1322,7 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
         staging_dir = os.path.join(BASE_DIR, "bds_update_staging")
         shutil.rmtree(staging_dir, ignore_errors=True)
         os.makedirs(staging_dir, exist_ok=True)
+        extracted = 0
         with zipfile.ZipFile(temp_zip, "r") as z:
             for item in z.infolist():
                 name = item.filename
@@ -1313,6 +1331,10 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
                     manager.add_log(L(f"{tag} Entrada insegura en el zip ignorada: {name}", f"{tag} Unsafe zip entry ignored: {name}"), "error")
                     continue
                 z.extract(item, staging_dir)
+                extracted += 1
+                # Progreso de extraccion (el zip oficial tiene ~9700 entradas)
+                if extracted % 1000 == 0:
+                    manager.add_log(L(f"{tag} Descomprimiendo... {extracted} archivos", f"{tag} Extracting... {extracted} files"), "system")
 
         # D3: raiz efectiva del staging (zip plano actual o una unica
         # carpeta raiz historica); falla cerrada ante estructuras ambiguas.

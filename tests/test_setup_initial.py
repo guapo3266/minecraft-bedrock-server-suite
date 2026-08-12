@@ -237,6 +237,34 @@ def test_download_and_install_bds_excede_limite_aborta(monkeypatch, tmp_path):
     assert not os.path.exists(os.path.join(base, "bds_update.zip"))
 
 
+def test_download_emite_progreso_en_tiempo_real(monkeypatch, tmp_path):
+    """La descarga emite lineas de progreso cada 10 MB (con % si se conoce el
+    tamano): sin ellas la mini-consola del wizard parece congelada durante la
+    fase mas larga (la descarga)."""
+    _fake_install(monkeypatch, tmp_path)
+    payload = b"x" * (11 * 1024 * 1024)  # > 10 MB: dispara la primera linea
+
+    class FakeResp:
+        status_code = 200
+        headers = {"Content-Length": str(len(payload))}
+
+        def iter_content(self, chunk_size=8192):
+            for i in range(0, len(payload), chunk_size):
+                yield payload[i : i + chunk_size]
+
+    monkeypatch.setattr(gui, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.0.0.0"))
+    monkeypatch.setattr(gui.requests, "get", lambda *a, **k: FakeResp())
+
+    log_start = len(gui.manager.log_history)
+    # el payload no es un zip valido: la descompresion aborta (BadZipFile) y
+    # el finally limpia; el progreso ya quedo registrado antes.
+    with pytest.raises(zipfile.BadZipFile):
+        gui._download_and_install_bds(tag="[Setup]")
+    texts = [e["text"] for e in gui.manager.log_history[log_start:]]
+    # L() usa el idioma activo (en tests: ingles); el patron comun es "10 MB (90%)"
+    assert any("10 MB (90%)" in t for t in texts), texts
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # /api/setup/complete
 # ═══════════════════════════════════════════════════════════════════════
