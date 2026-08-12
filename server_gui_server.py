@@ -413,6 +413,13 @@ def run_wrapper_thread(process=None):
                     manager.backup_in_progress = False
                     manager.last_backup_time = time.strftime("%H:%M:%S")
                     manager.update_status()
+                elif "Backup finalizado" in line_str:
+                    # H3: fin incondicional del ciclo de compresion (exito,
+                    # fallo, timeout, watchdog o excepcion). Sin este reset el
+                    # flag quedaba en True tras un backup fallido y el boton de
+                    # backup en frio quedaba bloqueado hasta reiniciar la GUI.
+                    manager.backup_in_progress = False
+                    manager.update_status()
             elif "ERROR" in line_str or "WARN" in line_str or "Excepcion" in line_str:
                 log_type = "error"
 

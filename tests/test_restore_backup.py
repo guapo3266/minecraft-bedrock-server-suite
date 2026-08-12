@@ -8,6 +8,8 @@ import zipfile
 import shutil
 import tempfile
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auto_backup
 
@@ -117,3 +119,34 @@ def test_restore_inexistente_lanza_filenotfound():
             pass
     finally:
         _teardown(tmp, old)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# H3: restore CLI — guard de servidor corriendo
+# ═══════════════════════════════════════════════════════════════════════
+def test_cli_detecta_servidor_corriendo(monkeypatch):
+    """H3: restore_backup._server_is_running detecta bedrock_server.exe en
+    ejecucion (el CLI no debe tocar el mundo con BDS vivo)."""
+    import restore_backup
+
+    if restore_backup.psutil is None:
+        pytest.skip("psutil no disponible")
+
+    class FakeProc:
+        def __init__(self, name):
+            self.info = {"name": name}
+
+    monkeypatch.setattr(
+        restore_backup.psutil, "process_iter", lambda attrs: [FakeProc("bedrock_server.exe")]
+    )
+    assert restore_backup._server_is_running() is True
+
+    monkeypatch.setattr(
+        restore_backup.psutil,
+        "process_iter",
+        lambda attrs: [FakeProc("explorer.exe"), FakeProc("java.exe")],
+    )
+    assert restore_backup._server_is_running() is False
+
+    monkeypatch.setattr(restore_backup.psutil, "process_iter", lambda attrs: [])
+    assert restore_backup._server_is_running() is False

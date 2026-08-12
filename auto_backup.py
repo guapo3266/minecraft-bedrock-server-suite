@@ -11,6 +11,13 @@ _backup_lock = multiprocessing.Lock()
 
 # Configuracion (resuelta dinamicamente)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# H3: nombre de la instalacion (carpeta del servidor). Cada servidor escribe
+# sus backups en su propia subcarpeta de Backups_Minecraft; sin esto todos
+# compartian una sola carpeta y un restore cruzado pisaba el mundo de otro
+# servidor (mismo level-name por defecto).
+SERVER_NAME = os.path.basename(os.path.normpath(BASE_DIR))
+
 def get_world_name():
     props_path = os.path.join(BASE_DIR, "server.properties")
     if os.path.exists(props_path):
@@ -27,7 +34,17 @@ def get_world_name():
 WORLD_NAME = get_world_name()
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", WORLD_NAME)
 WORLD_PARENT_DIR = os.path.join(BASE_DIR, "worlds")
-BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups"))
+
+
+def _resolve_backup_dir(base_dir):
+    """Backups por instalacion: Backups_Minecraft\\auto_backups\\<servidor> (H3)."""
+    return os.path.abspath(os.path.join(
+        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
+        os.path.basename(os.path.normpath(base_dir)),
+    ))
+
+
+BACKUP_DIR = _resolve_backup_dir(BASE_DIR)
 
 # Politica de retencion
 MAX_RECENT_BACKUPS = 15
@@ -178,7 +195,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         # mismo segundo ya no comparten nombre (antes el segundo os.replace
         # pisaba silenciosamente al primero).
         nonce = os.urandom(3).hex()
-        zip_filename = f"auto_backup_{safe_trigger}_{timestamp}_{nonce}.zip"
+        zip_filename = f"auto_backup_{SERVER_NAME}_{safe_trigger}_{timestamp}_{nonce}.zip"
         zip_filepath = os.path.join(BACKUP_DIR, zip_filename)
         if os.path.abspath(zip_filepath) != os.path.join(
             os.path.abspath(BACKUP_DIR), os.path.basename(zip_filepath)
@@ -492,9 +509,14 @@ def _pack_dest(entry_filename):
             if rest.endswith("/") or not rest:
                 return None  # entrada de directorio: no se restaura
             parts = rest.split("/")
-            if len(parts) >= 2 and parts[0]:
+            if not parts[0]:
+                return None
+            if len(parts) >= 2:
                 return kind, parts[0], "/".join(parts[1:])
-            return None
+            # H3: archivo suelto en la raiz del pack dir (p.ej.
+            # server_resource_packs/foo.txt): se restaura a BASE_DIR/<kind>,
+            # no al mundo.
+            return kind, "", parts[0]
     return None
 
 

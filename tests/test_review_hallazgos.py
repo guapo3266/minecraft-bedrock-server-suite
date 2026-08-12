@@ -73,6 +73,10 @@ def test_release_notes_actual_no_contiene_version():
     BDS (FIX F1), la version instalada quedaria desconocida (None), nunca un
     fallback fijo 1.21.0.0."""
     p = os.path.join(BASE_DIR, "release-notes.txt")
+    if not os.path.exists(p) or not os.path.exists(os.path.join(BASE_DIR, "bedrock_server.exe")):
+        # H3: el repo desnudo (sin instalacion de servidor) no tiene estos
+        # artefactos; el test aplica solo donde BDS esta instalado.
+        pytest.skip("requiere instalacion de servidor (release-notes.txt y bedrock_server.exe)")
     content = open(p, encoding="utf-8", errors="replace").read()
     assert not __import__("re").search(r"\d+\.\d+\.\d+\.\d+", content), (
         "si release-notes.txt tuviera version, el fallback cambiaria"
@@ -224,6 +228,9 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
     gui_proc = None
     ws = None
     logs = []
+    # H3: BACKUP_DIR es por servidor y la subcarpeta nace con el primer backup;
+    # el baseline del E2E la crea si aun no existe.
+    os.makedirs(BACKUP_DIR_REAL, exist_ok=True)
     baseline = set(os.listdir(BACKUP_DIR_REAL))
 
     def api(method, path, timeout=10):
@@ -337,7 +344,7 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
                 new_zips = [
                     f
                     for f in os.listdir(BACKUP_DIR_REAL)
-                    if f not in baseline and f.startswith("auto_backup_periodico_")
+                    if f not in baseline and f.startswith("auto_backup_") and "periodico" in f
                 ]
                 if new_zips:
                     saw_zip = new_zips[0]
@@ -1174,3 +1181,40 @@ def test_stop_normal_tiene_tope_y_fuerza_terminacion():
     assert "forzando terminacion" in src.split("finally:")[-1], (
         "el kill forzado debe ocurrir en el finally, antes del backup final"
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# H3: backup_in_progress no debe quedar atascado tras un backup fallido
+# ═══════════════════════════════════════════════════════════════════════
+def test_wrapper_marca_fin_de_ciclo_en_finally():
+    """CORREGIDO (H3): execute_backup_worker imprime '[Worker] Backup
+    finalizado' en un finally, asi TODOS los caminos (exito, fallo, timeout,
+    watchdog y excepcion) emiten el marcador, incluidos los `return`
+    tempranos del watchdog y del timeout."""
+    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
+    worker = src.split("def execute_backup_worker")[1].split("def read_stdout")[0]
+    assert "finally:" in worker
+    assert 'print("[Worker] Backup finalizado")' in worker
+    # el finally va despues del except: cubre tambien los returns tempranos
+    assert worker.index("finally:") > worker.index("except Exception as e:")
+
+
+def test_gui_resetea_flag_con_backup_finalizado():
+    """CORREGIDO (H3): la GUI resetea backup_in_progress con el marcador de
+    fin del wrapper (ademas de las cadenas de exito existentes), para que el
+    boton de backup en frio no quede bloqueado tras un backup fallido."""
+    gui_src = open(os.path.join(BASE_DIR, "server_gui_server.py"), encoding="utf-8").read()
+    gui_thread = gui_src.split("def run_wrapper_thread")[1]
+    assert '"Backup finalizado" in line_str' in gui_thread
+    assert "backup_in_progress = False" in gui_thread
+
+
+def test_lines_waited_for_list_se_reinicia_tras_parseo_exitoso():
+    """CORREGIDO (H3): lines_waited_for_list se reinicia cuando una lista de
+    jugadores se parsea con exito (antes quedaba con el valor viejo; sin
+    efecto practico porque la rama exige expecting_list_names, pero dejaba el
+    contador inconsistente)."""
+    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
+    read_stdout_src = src.split("def read_stdout")[1].split("def backup_scheduler")[0]
+    # resets: lista vacia (original) + parseo de nombres + continuacion parseada
+    assert read_stdout_src.count("lines_waited_for_list = 0") >= 3

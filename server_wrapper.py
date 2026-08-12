@@ -421,6 +421,13 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
         with state_lock:
             active_compress_process = None
+    finally:
+        # H3: marcador de FIN incondicional del ciclo de compresion (exito,
+        # fallo, timeout, watchdog o excepcion). La GUI resetea su flag
+        # backup_in_progress con esta linea; sin el, un backup fallido dejaba
+        # el boton de backup en frio bloqueado ("Ya hay un backup en curso")
+        # hasta reiniciar la GUI.
+        print("[Worker] Backup finalizado")
 # ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdout del servidor
 # ═══════════════════════════════════════════════════════════════
@@ -478,6 +485,7 @@ def read_stdout():
                         if parsed_names:
                             players_online.clear()
                             players_online.update(parsed_names)
+                            lines_waited_for_list = 0  # H3: parseo exitoso, contador consistente
                         expecting_list_names = False
                     else:
                         expecting_list_names = True
@@ -505,6 +513,7 @@ def read_stdout():
                                     players_online.clear()
                                     players_online.update(parsed_names)
                                     expecting_list_names = False
+                                lines_waited_for_list = 0  # H3: parseo exitoso, contador consistente
 
             # --- Detectar respuesta exitosa de save query ---
             save_ready_in_line = BDS_SAVE_READY in line

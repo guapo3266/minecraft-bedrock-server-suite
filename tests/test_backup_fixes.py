@@ -659,7 +659,11 @@ def test_restore_backup_rutas_relativas():
     )
     assert os.path.isabs(rb.WORLD_DIR)
     assert "Servidor de Guapo" not in rb.WORLD_DIR
-    assert rb.BACKUP_DIR.endswith(os.path.join("Backups_Minecraft", "auto_backups"))
+    # H3: los backups son por instalacion (subcarpeta con el nombre del servidor)
+    assert rb.BACKUP_DIR.endswith(
+        os.path.join("Backups_Minecraft", "auto_backups", rb.SERVER_NAME)
+    ), f"BACKUP_DIR={rb.BACKUP_DIR} no es la subcarpeta por servidor"
+    assert "Servidor de Guapo" not in rb.BACKUP_DIR
 
 
 # ── 13) op_lock cubre TODO el ciclo de operaciones que tocan el servidor ─────

@@ -4,6 +4,11 @@ import zipfile
 import shutil
 import datetime
 
+try:
+    import psutil
+except ImportError:
+    psutil = None  # H3: sin psutil el guard de servidor corriendo se omite
+
 # Rutas RESUELTAS desde la propia ubicacion del script: cada instalacion
 # restaura SU mundo. (Antes estaban hardcodeadas a "Servidor de Guapo", de
 # modo que ejecutar este script desde otra instalacion sobrescribia el mundo
@@ -27,7 +32,8 @@ def _world_name():
 
 
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())
-BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups"))
+SERVER_NAME = os.path.basename(os.path.normpath(BASE_DIR))
+BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups", SERVER_NAME))
 _CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
 
 
@@ -86,9 +92,14 @@ def _pack_dest(entry_filename):
             if rest.endswith("/") or not rest:
                 return None  # entrada de directorio: no se restaura
             parts = rest.split("/")
-            if len(parts) >= 2 and parts[0]:
+            if not parts[0]:
+                return None
+            if len(parts) >= 2:
                 return kind, parts[0], "/".join(parts[1:])
-            return None
+            # H3: archivo suelto en la raiz del pack dir (p.ej.
+            # server_resource_packs/foo.txt): se restaura a BASE_DIR/<kind>,
+            # no al mundo.
+            return kind, "", parts[0]
     return None
 
 
@@ -103,12 +114,39 @@ def _extract_pack_entry(zipf, entry, base_dir, rel_path):
         shutil.copyfileobj(src, out)
 
 
+def _server_is_running():
+    """H3: True si bedrock_server.exe esta en ejecucion.
+
+    Sin psutil se omite el chequeo (el os.rename de WORLD_DIR seguira
+    fallando en Windows como red de seguridad).
+    """
+    if psutil is None:
+        return False
+    try:
+        for p in psutil.process_iter(["name"]):
+            try:
+                if p.info.get("name") and p.info["name"].lower() == "bedrock_server.exe":
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        return False
+    return False
+
+
 def list_and_restore():
     os.system("cls" if os.name == "nt" else "clear")
     print("=" * 60)
     print("      RESTAURAR BACKUP AUTOMATICO (ESTILO REALMS)")
     print("=" * 60)
     print()
+
+    # H3: guard anticipado: restaurar con BDS vivo pisaria un mundo en uso.
+    if _server_is_running():
+        print("[ERROR] El servidor de Minecraft parece estar corriendo (bedrock_server.exe).")
+        print("        Apaga el servidor antes de restaurar un backup.")
+        input("\nPresiona Enter para salir...")
+        return
 
     if not os.path.exists(BACKUP_DIR):
         print(f"[ERROR] No se encontro la carpeta de backups: {BACKUP_DIR}")

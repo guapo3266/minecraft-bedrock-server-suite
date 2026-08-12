@@ -139,6 +139,13 @@ _safe_subdir = st.text(alphabet=_safe_chars, min_size=1, max_size=12)
 # Nombres reservados de Windows que os.path.abspath trata como dispositivos
 _WIN_RESERVED = {"nul", "con", "prn", "aux"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 
+# Fallback filtrado: el redraw sin filtro podia devolver 'NUL' (os.path.abspath
+# lo normaliza a la ruta de dispositivo relativa '\\.\NUL' y commonpath falla)
+# o '..', rompiendo el test con rutas que un save query real jamas genera.
+_safe_fallback = st.text(alphabet=_safe_chars, min_size=1, max_size=12).filter(
+    lambda s: s.lower() not in _WIN_RESERVED and s not in (".", "..", "/", "\\", "")
+)
+
 @st.composite
 def valid_world_relative_path(draw):
     """Ruta relativa dentro de WORLD_DIR: db/file, level.dat, etc."""
@@ -146,9 +153,9 @@ def valid_world_relative_path(draw):
     path = "/".join(segs)
     # Filtrar casos degenerados: path vacío, .., solo separadores, nombres reservados Windows
     if ".." in path.replace("//", "/") or path in ("/", "\\", ""):
-        return draw(st.text(alphabet=_safe_chars, min_size=1, max_size=12))
+        return draw(_safe_fallback)
     if any(seg.lower() in _WIN_RESERVED for seg in path.split("/")):
-        return draw(st.text(alphabet=_safe_chars, min_size=1, max_size=12))
+        return draw(_safe_fallback)
     return path
 
 

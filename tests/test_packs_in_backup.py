@@ -153,3 +153,51 @@ def test_restore_rollback_recupera_packs_y_mundo():
         assert not os.path.exists(rp + ".bak")
     finally:
         _teardown(tmp, old)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# H3: clasificacion de archivos sueltos en la raiz del pack dir
+# ═══════════════════════════════════════════════════════════════════════
+def test_pack_dest_clasifica_archivo_suelto_como_pack():
+    """H3: un archivo en la raiz del pack dir (sin subcarpeta) se clasifica
+    como pack con folder raiz, no como mundo."""
+    assert auto_backup._pack_dest("server_resource_packs/notas.txt") == ("resource_packs", "", "notas.txt")
+    assert auto_backup._pack_dest("server_behavior_packs/manifest.json") == ("behavior_packs", "", "manifest.json")
+    # casos que no cambian
+    assert auto_backup._pack_dest("server_resource_packs/MiPack/manifest.json") == ("resource_packs", "MiPack", "manifest.json")
+    assert auto_backup._pack_dest("level.dat") is None
+    assert auto_backup._pack_dest("server_resource_packs/") is None
+    assert auto_backup._pack_dest("worlds/Bedrock level/db/foo") is None
+
+
+def test_restore_devuelve_archivo_suelto_de_pack_a_carpeta_de_servidor():
+    """H3: server_resource_packs/foo.txt se restaura a
+    BASE_DIR/resource_packs/foo.txt, no adentro del mundo."""
+    tmp, fake_bkp, fake_world, fake_base, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"CURRENT-WORLD")
+        zip_path = os.path.join(fake_bkp, "auto_backup_test_root_file.zip")
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("level.dat", b"WORLD-BACKUP")
+            zf.writestr("server_resource_packs/notas.txt", b"LEEME")
+
+        auto_backup.restore_backup("auto_backup_test_root_file.zip")
+        assert open(os.path.join(fake_base, "resource_packs", "notas.txt"), "rb").read() == b"LEEME"
+        assert not os.path.exists(os.path.join(fake_world, "server_resource_packs"))
+        assert open(os.path.join(fake_world, "level.dat"), "rb").read() == b"WORLD-BACKUP"
+    finally:
+        _teardown(tmp, old)
+
+
+def test_resolve_backup_dir_incluye_nombre_del_servidor():
+    """H3: BACKUP_DIR se resuelve por instalacion:
+    Backups_Minecraft/auto_backups/<carpeta del servidor>."""
+    fake_base = os.path.join("C:", os.sep, "Servidores_Minecraft", "Servidor de Guapo")
+    resolved = auto_backup._resolve_backup_dir(fake_base)
+    expected = os.path.abspath(os.path.join(
+        fake_base, "..", "..", "Backups_Minecraft", "auto_backups", "Servidor de Guapo"
+    ))
+    assert resolved == expected
+    # dos servidores distintos => carpetas de backups distintas
+    other = auto_backup._resolve_backup_dir(os.path.join("C:", os.sep, "Servidores_Minecraft", "TESTTEST"))
+    assert other != resolved
