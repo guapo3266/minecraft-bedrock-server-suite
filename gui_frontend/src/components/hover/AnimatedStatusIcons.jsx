@@ -242,3 +242,78 @@ export const HistoryCircleIcon = forwardRef(function HistoryCircleIcon(
   );
 });
 HistoryCircleIcon.displayName = 'HistoryCircleIcon';
+
+export const DotsVerticalIcon = forwardRef(function DotsVerticalIcon(
+  { size = 24, color = 'currentColor', className = '' },
+  ref
+) {
+  const [scope, animate] = useAnimate();
+
+  const start = useCallback(async () => {
+    animate(
+      '.dot-top',
+      { y: [-1.5, 0], scale: [1, 1.35, 1] },
+      { duration: 0.3, ease: 'easeOut' }
+    );
+    animate(
+      '.dot-middle',
+      { scale: [1, 1.5, 1] },
+      { duration: 0.3, ease: 'easeOut' }
+    );
+    animate(
+      '.dot-bottom',
+      { y: [1.5, 0], scale: [1, 1.35, 1] },
+      { duration: 0.3, ease: 'easeOut' }
+    );
+  }, [animate]);
+
+  const stop = useCallback(() => {
+    animate(
+      '.dot-top, .dot-middle, .dot-bottom',
+      { y: 0, scale: 1 },
+      { duration: 0.2, ease: 'easeInOut' }
+    );
+  }, [animate]);
+
+  useImperativeHandle(ref, () => ({
+    startAnimation: start,
+    stopAnimation: stop
+  }));
+
+  return (
+    <motion.svg
+      ref={scope}
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={color || 'currentColor'}
+      className={`cursor-pointer ${className}`}
+      onHoverStart={start}
+      onHoverEnd={stop}
+    >
+      <motion.circle
+        className="dot-top"
+        cx="12"
+        cy="5"
+        r="1.6"
+        style={{ transformOrigin: '12px 5px' }}
+      />
+      <motion.circle
+        className="dot-middle"
+        cx="12"
+        cy="12"
+        r="1.6"
+        style={{ transformOrigin: '12px 12px' }}
+      />
+      <motion.circle
+        className="dot-bottom"
+        cx="12"
+        cy="19"
+        r="1.6"
+        style={{ transformOrigin: '12px 19px' }}
+      />
+    </motion.svg>
+  );
+});
+DotsVerticalIcon.displayName = 'DotsVerticalIcon';

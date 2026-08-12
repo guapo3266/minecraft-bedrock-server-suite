@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
 import { FolderArchive, RefreshCw, XCircle, Download, Trash2, ShieldCheck } from 'lucide-react';
-import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon } from './hover/AnimatedStatusIcons';
+import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon, DotsVerticalIcon } from './hover/AnimatedStatusIcons';
 import { useI18n } from '../i18n.jsx';
 
 export default function BackupsSidebar({ backups = [], onRefresh, isRunning = false }) {
   const { t } = useI18n();
   const successIconRef = useRef(null);
   const alertIconRef = useRef(null);
+  const menuRef = useRef(null);
   const [restoreTarget, setRestoreTarget] = useState(null); // backup a restaurar (confirm)
   const [deleteTarget, setDeleteTarget] = useState(null); // backup a eliminar (confirm)
   const [alertOpen, setAlertOpen] = useState(false); // alerta "apaga el servidor"
@@ -18,6 +20,50 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
   const [verifyResult, setVerifyResult] = useState(null); // feedback transitorio de verificacion
   const [verifying, setVerifying] = useState(null); // filename en verificacion
   const verifyTimerRef = useRef(null);
+  // Menu de acciones por backup: fixed (el scroll de AnimatedList recortaria
+  // un dropdown absoluto). menuRect = posicion calculada del boton "mas".
+  const [menuFor, setMenuFor] = useState(null);
+  const [menuRect, setMenuRect] = useState(null);
+
+  const closeMenu = () => {
+    setMenuFor(null);
+    setMenuRect(null);
+  };
+
+  const openMenu = (backup, e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const w = 176;
+    const h = 184;
+    setMenuRect({
+      top: Math.min(rect.bottom + 4, window.innerHeight - h - 8),
+      left: Math.max(8, Math.min(rect.right - w, window.innerWidth - w - 8))
+    });
+    setMenuFor(backup.filename);
+  };
+
+  // Cierra el menu con clic fuera (sin contar el boton que lo abre: evita la
+  // carrera mousedown->click del toggle), Escape, scroll o resize
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDown = (ev) => {
+      if (menuRef.current && menuRef.current.contains(ev.target)) return;
+      if (ev.target && ev.target.closest && ev.target.closest('[data-menu-trigger]')) return;
+      closeMenu();
+    };
+    const onKey = (ev) => {
+      if (ev.key === 'Escape') closeMenu();
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('resize', closeMenu);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', closeMenu, true);
+      window.removeEventListener('resize', closeMenu);
+    };
+  }, [menuFor]);
 
   // Reproduce la animacion del check al confirmarse una restauracion exitosa
   useEffect(() => {
@@ -138,62 +184,28 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
         ) : (
           <AnimatedList
             items={backups.map((b) => (
-              <div key={b.filename} className="flex items-center justify-between gap-2">
-                <div className="truncate mr-1">
-                  <p className="font-bold text-white truncate">{b.filename}</p>
-                  <p className="text-[11px] text-slate-400">{b.date}</p>
+              <div key={b.filename} className="flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 transition-colors hover:border-white/10 hover:bg-white/5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-bold text-white text-xs" title={b.filename}>
+                    {b.filename}
+                  </p>
+                  <p className="truncate font-mono text-[10px] text-slate-400 whitespace-nowrap">
+                    {b.date} · {b.size_mb} MB
+                  </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <span className="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-300">
-                    {b.size_mb} MB
-                  </span>
-                  <a
-                    href={`/api/backups/${encodeURIComponent(b.filename)}/download`}
-                    title={t('download')}
-                    aria-label={t('download')}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/25 hover:border-cyan-500/70 transition-all"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </a>
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                    onClick={() => handleVerify(b)}
-                    disabled={verifying === b.filename}
-                    title={t('verify')}
-                    aria-label={t('verify')}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/25 hover:border-sky-500/70 transition-all disabled:opacity-50"
-                  >
-                    {verifying === b.filename ? (
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    ) : (
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                    )}
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                    onClick={() => handleDeleteClick(b)}
-                    title={t('delete')}
-                    aria-label={t('delete')}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/25 hover:border-rose-500/70"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                    onClick={() => handleRestoreClick(b)}
-                    title={t('restore')}
-                    aria-label={t('restore')}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/25 hover:border-amber-500/70"
-                  >
-                    <HistoryCircleIcon size={15} className="text-amber-300" />
-                  </motion.button>
-                </div>
+                <button
+                  data-menu-trigger
+                  onClick={(e) => (menuFor === b.filename ? closeMenu() : openMenu(b, e))}
+                  title={t('actions')}
+                  aria-label={t('actions')}
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all ${
+                    menuFor === b.filename
+                      ? 'border-amber-500/70 bg-amber-500/25 text-amber-300'
+                      : 'border-white/10 bg-white/5 text-slate-400 hover:border-amber-500/50 hover:text-white'
+                  }`}
+                >
+                  <DotsVerticalIcon size={16} className="text-current" />
+                </button>
               </div>
             ))}
             showGradients
@@ -202,6 +214,72 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
           />
         )}
       </div>
+
+      {/* Menu de acciones: PORTAL a document.body para que position:fixed sea
+          relativo al viewport (un ancestro con transform lo desviaria). */}
+      {createPortal(
+        <AnimatePresence>
+          {menuFor && menuRect && (
+            <motion.div
+              ref={menuRef}
+              initial={{ opacity: 0, scale: 0.92, y: -4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: -4 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 26 }}
+              style={{ top: menuRect.top, left: menuRect.left }}
+              className="fixed z-50 w-44 rounded-xl border border-white/10 bg-slate-950 p-1 shadow-2xl"
+            >
+            <a
+              href={`/api/backups/${encodeURIComponent(menuFor)}/download`}
+              onClick={closeMenu}
+              className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/15"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {t('download')}
+            </a>
+            <button
+              onClick={() => {
+                const b = backups.find((x) => x.filename === menuFor);
+                closeMenu();
+                if (b) handleVerify(b);
+              }}
+              disabled={verifying === menuFor}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-sky-300 transition-colors hover:bg-sky-500/15 disabled:opacity-50"
+            >
+              {verifying === menuFor ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <ShieldCheck className="h-3.5 w-3.5" />
+              )}
+              {t('verify')}
+            </button>
+            <button
+              onClick={() => {
+                const b = backups.find((x) => x.filename === menuFor);
+                closeMenu();
+                if (b) handleRestoreClick(b);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/15"
+            >
+              <HistoryCircleIcon size={15} className="text-amber-300" />
+              {t('restore')}
+            </button>
+            <button
+              onClick={() => {
+                const b = backups.find((x) => x.filename === menuFor);
+                closeMenu();
+                if (b) handleDeleteClick(b);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/15"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t('delete')}
+            </button>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* Feedback transitorio de verificacion (mismo patron que PlayersSidebar) */}
       {verifyResult && (

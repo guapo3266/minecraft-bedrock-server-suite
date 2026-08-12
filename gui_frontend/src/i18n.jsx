@@ -108,7 +108,8 @@ const STRINGS = {
     verify: 'Verificar integridad',
     verifyOk: 'Backup íntegro (CRC correcto)',
     verifyCorrupt: 'Backup corrupto: {entry}',
-    verifyError: 'Error al verificar: {err}'
+    verifyError: 'Error al verificar: {err}',
+    actions: 'Acciones'
   },
   en: {
     start: 'Start Server',
@@ -213,7 +214,8 @@ const STRINGS = {
     verify: 'Verify integrity',
     verifyOk: 'Backup OK (CRC valid)',
     verifyCorrupt: 'Corrupt backup: {entry}',
-    verifyError: 'Error verifying: {err}'
+    verifyError: 'Error verifying: {err}',
+    actions: 'Actions'
   }
 };
 
