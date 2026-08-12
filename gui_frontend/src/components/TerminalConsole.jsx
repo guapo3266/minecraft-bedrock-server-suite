@@ -219,8 +219,8 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
         ) : filteredLogs.length === 0 ? (
           <div className="text-slate-400 italic">{t('searchNoMatch')}</div>
         ) : (
-          filteredLogs.map((log, index) => (
-            <div key={index} className={`break-all ${getLogClass(log.type)}`}>
+          filteredLogs.map((log) => (
+            <div key={log.id} className={`break-all ${getLogClass(log.type)}`}>
               <span className="text-slate-400 mr-2">[{log.time}]</span>
               {log.text}
             </div>

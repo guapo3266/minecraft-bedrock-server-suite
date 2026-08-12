@@ -243,6 +243,7 @@ class ServerManager:
         self.players_online = set()
         self.log_history = []
         self.max_log_history = 500
+        self._log_seq = 0  # id secuencial estable para React keys (filtros/streaming)
         self.start_time = None
         self.last_backup_time = "Ninguno"
         self.backup_in_progress = False
@@ -272,8 +273,9 @@ class ServerManager:
 
     def add_log(self, text: str, log_type: str = "info"):
         timestamp = time.strftime("%H:%M:%S")
-        entry = {"time": timestamp, "text": text.strip(), "type": log_type}
         with self.lock:
+            self._log_seq += 1
+            entry = {"id": self._log_seq, "time": timestamp, "text": text.strip(), "type": log_type}
             self.log_history.append(entry)
             if len(self.log_history) > self.max_log_history:
                 self.log_history.pop(0)

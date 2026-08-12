@@ -281,7 +281,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                     {setupLogs.length === 0 ? (
                       <span className="text-slate-600">{installing ? t('setupInstalling') : '—'}</span>
                     ) : (
-                      setupLogs.map((l, i) => <div key={i}>{l.time} {l.text}</div>)
+                      setupLogs.map((l) => <div key={l.id ?? `${l.time}-${l.text}`}>{l.time} {l.text}</div>)
                     )}
                   </div>
                 </div>

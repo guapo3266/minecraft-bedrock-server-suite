@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import ClickSpark from '../reactbits/ClickSpark';
+import { useI18n } from '../../i18n.jsx';
 
 export default function ConfirmButton({
   children,
@@ -13,6 +14,7 @@ export default function ConfirmButton({
   ...props
 }) {
   const [isCoolingDown, setIsCoolingDown] = useState(false);
+  const { t } = useI18n();
 
   const variantStyles = {
     emerald: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.25)]',
@@ -73,7 +75,7 @@ export default function ConfirmButton({
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               />
             </svg>
-            <span>Enviando...</span>
+            <span>{t('sending')}</span>
           </span>
         ) : (
           children

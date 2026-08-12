@@ -20,6 +20,7 @@ const STRINGS = {
     terminalTitle: 'TERMINAL DE CONSOLA (LOGS EN VIVO)',
     clear: 'Limpiar',
     send: 'Enviar',
+    sending: 'Enviando...',
     waitingLogs: '[SISTEMA] Esperando logs del servidor...',
     placeholderRunning: 'Escribe un comando (ej: op player, say Hola, list)...',
     placeholderStopped: 'Servidor APAGADO — Presiona Iniciar Servidor...',
@@ -131,7 +132,15 @@ const STRINGS = {
     setupNeedInstall: 'Primero instala el BDS en el paso 2 para poder finalizar.',
     setupNetError: 'Error de conexión con el backend. Verifica que la GUI siga abierta y reintenta.',
     setupBack: 'Atrás',
-    setupNext: 'Continuar'
+    setupNext: 'Continuar',
+    confirm: 'Confirmar',
+    confirmStopTitle: '¿Detener el servidor?',
+    confirmStopMsg: 'Los jugadores se desconectarán. ¿Estás seguro?',
+    confirmRestartTitle: '¿Reiniciar el servidor?',
+    confirmRestartMsg: 'El servidor se reiniciará. ¿Estás seguro?',
+    titleRunning: '{count} jugadores • Servidor',
+    titleStopped: 'Servidor • Apagado',
+    loading: 'Cargando...'
   },
   en: {
     start: 'Start Server',
@@ -148,6 +157,7 @@ const STRINGS = {
     terminalTitle: 'LIVE CONSOLE TERMINAL',
     clear: 'Clear',
     send: 'Send',
+    sending: 'Sending...',
     waitingLogs: '[SYSTEM] Waiting for server logs...',
     placeholderRunning: 'Type a command (e.g. op player, say Hello, list)...',
     placeholderStopped: 'Server OFF — Press Start Server...',
@@ -259,7 +269,15 @@ const STRINGS = {
     setupNeedInstall: 'Install BDS in step 2 first to finish.',
     setupNetError: 'Connection error with the backend. Make sure the GUI is still running and retry.',
     setupBack: 'Back',
-    setupNext: 'Continue'
+    setupNext: 'Continue',
+    confirm: 'Confirm',
+    confirmStopTitle: 'Stop the server?',
+    confirmStopMsg: 'Players will be disconnected. Are you sure?',
+    confirmRestartTitle: 'Restart the server?',
+    confirmRestartMsg: 'The server will restart. Are you sure?',
+    titleRunning: '{count} players • Server',
+    titleStopped: 'Server • Stopped',
+    loading: 'Loading...'
   }
 };
 

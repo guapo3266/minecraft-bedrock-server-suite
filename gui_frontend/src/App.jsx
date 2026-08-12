@@ -40,8 +40,14 @@ export default function App() {
   const [latency, setLatency] = useState(null);
   const wsRef = useRef(null);
   const updateStartedRef = useRef(false);
+  const logSeqRef = useRef(0);
   const [setupInfo, setSetupInfo] = useState(null);
   const [setupAttempt, setSetupAttempt] = useState(0);
+
+  const makeLog = (text, type) => {
+    logSeqRef.current += 1;
+    return { id: `client-${logSeqRef.current}`, time: new Date().toLocaleTimeString(), text, type };
+  };
 
   // Estado del setup inicial (first-run): el wizard se muestra en
   // instalaciones nuevas; las ya usadas (mundo existente) no lo ven.
@@ -79,7 +85,7 @@ export default function App() {
       };
 
       ws.onopen = () => {
-        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('wsConnected'), type: 'system' }]);
+        setLogs((prev) => [...prev, makeLog(tRef.current('wsConnected'), 'system')]);
         fetchBackups();
         sendPing();
         ws.send(JSON.stringify({ type: 'set_lang', lang: langRef.current }));
@@ -106,7 +112,7 @@ export default function App() {
 
       ws.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
-        setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('wsDisconnected'), type: 'error' }]);
+        setLogs((prev) => [...prev, makeLog(tRef.current('wsDisconnected'), 'error')]);
         setTimeout(connect, 3000);
       };
     };
@@ -135,6 +141,13 @@ export default function App() {
       wsRef.current.send(JSON.stringify({ type: 'set_lang', lang }));
     }
   }, [lang]);
+
+  // Título dinámico de la pestaña del navegador (estado visible en background)
+  useEffect(() => {
+    document.title = status.running
+      ? tRef.current('titleRunning', { count: status.player_count })
+      : tRef.current('titleStopped');
+  }, [status.running, status.player_count, lang]);
 
   const fetchBackups = async () => {
     try {
@@ -187,10 +200,10 @@ export default function App() {
     try {
       const res = await fetch(`/api/action/${actionName}`, { method: 'POST' });
       const data = await res.json();
-      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('actionExecuted', { action: actionName, status: data.status }), type: 'system' }]);
+      setLogs((prev) => [...prev, makeLog(tRef.current('actionExecuted', { action: actionName, status: data.status }), 'system')]);
       fetchBackups();
     } catch (e) {
-      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('actionError', { action: actionName, err: e }), type: 'error' }]);
+      setLogs((prev) => [...prev, makeLog(tRef.current('actionError', { action: actionName, err: e }), 'error')]);
     }
   };
 
@@ -198,8 +211,8 @@ export default function App() {
     if (!status.running) {
       setLogs((prev) => [
         ...prev,
-        { time: new Date().toLocaleTimeString(), text: `> ${command}`, type: 'command' },
-        { time: new Date().toLocaleTimeString(), text: tRef.current('serverOff'), type: 'error' }
+        makeLog(`> ${command}`, 'command'),
+        makeLog(tRef.current('serverOff'), 'error')
       ]);
       return;
     }
@@ -211,9 +224,24 @@ export default function App() {
         body: JSON.stringify({ command })
       });
     } catch (e) {
-      setLogs((prev) => [...prev, { time: new Date().toLocaleTimeString(), text: tRef.current('commandError', { err: e }), type: 'error' }]);
+      setLogs((prev) => [...prev, makeLog(tRef.current('commandError', { err: e }), 'error')]);
     }
   };
+
+  // Loader mientras se determina si hay setup inicial pendiente
+  if (setupInfo === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 font-sans text-slate-100">
+        <div className="flex items-center gap-3">
+          <svg className="h-5 w-5 animate-spin text-emerald-400" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="animate-pulse text-sm font-bold text-slate-300">{t('loading')}</span>
+        </div>
+      </div>
+    );
+  }
 
   // Setup inicial: reemplaza el dashboard hasta completarlo (instalaciones nuevas)
   if (setupInfo && setupInfo.required) {
