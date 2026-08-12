@@ -128,6 +128,8 @@ const STRINGS = {
     setupCompleteButton: 'Finalizar',
     setupCompleting: 'Completando configuración...',
     setupCompleteError: 'No se pudo finalizar el setup; reintenta',
+    setupNeedInstall: 'Primero instala el BDS en el paso 2 para poder finalizar.',
+    setupNetError: 'Error de conexión con el backend. Verifica que la GUI siga abierta y reintenta.',
     setupBack: 'Atrás',
     setupNext: 'Continuar'
   },
@@ -254,6 +256,8 @@ const STRINGS = {
     setupCompleteButton: 'Finish',
     setupCompleting: 'Completing setup...',
     setupCompleteError: 'Could not finish setup; try again',
+    setupNeedInstall: 'Install BDS in step 2 first to finish.',
+    setupNetError: 'Connection error with the backend. Make sure the GUI is still running and retry.',
     setupBack: 'Back',
     setupNext: 'Continue'
   }

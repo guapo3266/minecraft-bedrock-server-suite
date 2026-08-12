@@ -33,6 +33,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState(null);
   const [attempt, setAttempt] = useState(0);
+  const [resetStep, setResetStep] = useState(1);
 
   // Precarga de los valores actuales de server.properties (vacio en instalacion nueva).
   // Los campos sin valor toman el default de BDS (WIZARD_DEFAULTS): un valor
@@ -117,6 +118,15 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   };
 
   const handleComplete = async () => {
+    // Pre-chequeo local: sin BDS instalado no hay nada que finalizar. Evita
+    // una llamada inutil a la API (409) y el salto de pasos por los
+    // indicadores: vuelve al paso 2 (instalacion) con mensaje claro.
+    if (!installed) {
+      setCompleteError(t('setupNeedInstall'));
+      setResetStep(2);
+      setAttempt((a) => a + 1);
+      return;
+    }
     setCompleting(true);
     setCompleteError(null);
     try {
@@ -126,10 +136,12 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
         onDone();
       } else {
         setCompleteError(data.detail || t('setupCompleteError'));
-        setAttempt((a) => a + 1); // reset del Stepper al paso 1
+        setResetStep(1);
+        setAttempt((a) => a + 1);
       }
-    } catch (e) {
-      setCompleteError(String(e));
+    } catch {
+      setCompleteError(t('setupNetError'));
+      setResetStep(1);
       setAttempt((a) => a + 1);
     } finally {
       setCompleting(false);
@@ -145,7 +157,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
       <div className="mx-auto mt-8 w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
         <Stepper
           key={attempt}
-          initialStep={1}
+          initialStep={resetStep}
           onStepChange={(s) => setStep(s)}
           onFinalStepCompleted={handleComplete}
           backButtonText={t('setupBack')}
