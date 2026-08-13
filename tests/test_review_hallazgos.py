@@ -198,10 +198,13 @@ def test_gui_busca_la_cadena_exacta_del_wrapper():
         '"Starting compression in a separate process" in line_str' in gui_thread
     )
     assert "Iniciando compresión" not in gui_thread
-    # condicion externa de la rama: debe incluir "compres" (prefijo comun
-    # de "compresion"/"compresión"), porque la linea real del worker no
-    # contiene "backup" ni "compresión" acentuada
-    assert '"compres"' in gui_thread
+    # condicion de la rama de clasificacion: debe incluir "compres" (prefijo
+    # comun de "compresion"/"compresión"), porque la linea real del worker no
+    # contiene "backup" ni "compresión" acentuada. La clasificacion vive en
+    # classify_log_line (unica fuente de verdad) y el hilo la consume.
+    gui_classify = gui_src.split("def classify_log_line")[1].split("def run_wrapper_thread")[0]
+    assert '"compres"' in gui_classify
+    assert "classify_log_line(line_str)" in gui_thread
     linea_real = (
         "[Worker] Starting compression in a separate process (subprocess)..."
     )

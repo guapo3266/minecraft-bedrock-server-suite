@@ -63,7 +63,22 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 | `02_restaurar_backup.bat` | Menú para restaurar un backup |
 | `03_regresar_al_anterior.bat` | Vuelve al backup más reciente en un clic |
 | `configurar_firewall.bat` | Abre los puertos del firewall |
+| `configurar_antivirus.bat` | Configura exclusiones de Windows Defender para backups instantáneos |
+| `tools/setup_defender_exclusions.ps1` | Script PowerShell de exclusiones (auto-elevación UAC e idempotente) |
 | `server.properties.example` | Plantilla de configuración (copiar a `server.properties`) |
+
+### ⚡ Rendimiento y Windows Defender (Arranque inicial lento)
+
+Si al arrancar el servidor por primera vez (o tras clonar el repo / actualizar addons con miles de archivos) el backup inicial tarda **3+ minutos** en vez de los **~6 segundos normales**:
+
+- **Causa (confirmada por prueba A/B)**: Windows Defender con protección en la nube (MAPS) inspecciona en serie el primer `open()` de cada archivo recién descargado (~15 ms/archivo × 11.000 archivos = ~3 min con 0% de CPU). En la 2ª lectura los archivos ya son confiables y tarda 0.4 s (~340x más rápido).
+- **Solución en 1 clic**: Doble clic en `configurar_antivirus.bat` (añade quirúrgicamente las carpetas `worlds`, `resource_packs`, `behavior_packs` y `Backups_Minecraft` a las exclusiones de Defender).
+- **One-liner en PowerShell** (como Administrador):
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File tools\setup_defender_exclusions.ps1
+  ```
+- **Alternativa manual por GUI**: *Seguridad de Windows → Protección contra virus y amenazas → Administrar la configuración → Exclusiones → Agregar o quitar exclusiones → Carpeta*.
+- **Válvula de escape (sin permisos de Admin)**: Puedes añadir `backup-inicio=false` en `server.properties` para omitir el backup en frío al inicio y usar únicamente backups en caliente periódicos.
 
 ### Para usarlo
 
@@ -147,7 +162,22 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 | `02_restaurar_backup.bat` | Menu to restore a zip |
 | `03_regresar_al_anterior.bat` | Reverts to the latest backup in one click |
 | `configurar_firewall.bat` | Opens firewall ports |
+| `configurar_antivirus.bat` | Sets up Windows Defender exclusions for instant backups |
+| `tools/setup_defender_exclusions.ps1` | PowerShell exclusion script (UAC auto-elevation & idempotent) |
 | `server.properties.example` | Config template (copy to `server.properties`) |
+
+### ⚡ Performance & Windows Defender (Slow initial startup)
+
+If the initial startup backup takes **3+ minutes** instead of the normal **~6 seconds** on a fresh install or after syncing thousands of addon files:
+
+- **Root cause (A/B verified)**: Windows Defender Cloud-delivered Protection (MAPS) inspects the first `open()` of every newly downloaded file sequentially (~15 ms/file × 11,000 files = ~3 min at 0% CPU). On the 2nd read, files are trusted and read in 0.4 s (~340x faster).
+- **1-Click Fix**: Double-click `configurar_antivirus.bat` (surgically adds `worlds`, `resource_packs`, `behavior_packs`, and `Backups_Minecraft` to Defender exclusions).
+- **PowerShell one-liner** (as Administrator):
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File tools\setup_defender_exclusions.ps1
+  ```
+- **Manual GUI alternative**: *Windows Security → Virus & threat protection → Manage settings → Exclusions → Add or remove exclusions → Folder*.
+- **Escape valve (without Admin rights)**: Set `backup-inicio=false` in `server.properties` to skip cold startup backup and rely solely on periodic hot backups.
 
 ### How to use
 

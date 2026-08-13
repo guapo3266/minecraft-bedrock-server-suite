@@ -50,6 +50,23 @@ def _spawn_wrapper_process():
     return process
 
 
+def classify_log_line(line_str: str) -> str:
+    """Determina el tipo de log ('join', 'leave', 'backup', 'error', 'info') para coloreado en la GUI."""
+    if _RE_PLAYER_CONNECT.search(line_str):
+        return "join"
+    if _RE_PLAYER_DISCONNECT.search(line_str):
+        return "leave"
+    if any(k in line_str.lower() for k in ("backup", "compres", "save query")):
+        # FIX F2: "compres" es el prefijo comun de "compression"/"compresion":
+        # no debe excluir la linea del worker ("Starting compression in a
+        # separate process...", sin la palabra "backup").
+        return "backup"
+    if ("ERROR" in line_str or "WARN" in line_str
+            or "Exception" in line_str or "Excepcion" in line_str or "Excepción" in line_str):
+        return "error"
+    return "info"
+
+
 def run_wrapper_thread(process=None):
     """Hilo que consume el stdout del wrapper y mantiene el estado de la GUI.
 
@@ -94,11 +111,10 @@ def run_wrapper_thread(process=None):
                 manager.server_stopped_event.set()
 
             # Determinar tipo de log para coloreado en la GUI
-            log_type = "info"
+            log_type = classify_log_line(line_str)
             m_conn = _RE_PLAYER_CONNECT.search(line_str)
             m_disc = _RE_PLAYER_DISCONNECT.search(line_str)
             if m_conn:
-                log_type = "join"
                 try:
                     name = m_conn.group(1).strip()
                     if not name:
@@ -109,7 +125,6 @@ def run_wrapper_thread(process=None):
                 except Exception:
                     pass
             elif m_disc:
-                log_type = "leave"
                 try:
                     name = m_disc.group(1).strip()
                     if not name:
@@ -119,12 +134,10 @@ def run_wrapper_thread(process=None):
                     manager.update_status()
                 except Exception:
                     pass
-            elif any(k in line_str.lower() for k in ("backup", "compres", "save query")):
-                # FIX F2: "compres" es el prefijo comun de "compression"/"compresion":
-                # la condicion externa NO debe excluir la linea del worker
-                # ("Starting compression in a separate process...", sin la palabra
-                # "backup").
-                log_type = "backup"
+
+            # La clasificacion vive en classify_log_line (unica fuente de
+            # verdad); aqui solo se maneja la maquina de estados de backups.
+            if log_type == "backup":
                 # la cadena debe coincidir EXACTA con la del wrapper (bilingue)
                 if ("Starting compression in a separate process" in line_str
                         or "Iniciando compresion de archivos en proceso separado" in line_str):
@@ -142,9 +155,6 @@ def run_wrapper_thread(process=None):
                     # backup en frio quedaba bloqueado hasta reiniciar la GUI.
                     manager.backup_in_progress = False
                     manager.update_status()
-            elif ("ERROR" in line_str or "WARN" in line_str
-                  or "Exception" in line_str or "Excepcion" in line_str or "Excepción" in line_str):
-                log_type = "error"
 
             manager.add_log(line_str, log_type)
 

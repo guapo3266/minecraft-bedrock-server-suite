@@ -785,6 +785,25 @@ def execute_final_backup():
     except Exception as e:
         print(L(f"[Wrapper] Falló el backup final: {e}", f"[Wrapper] Final backup failed: {e}"))
 
+def should_run_initial_backup():
+    """Lee backup-inicio de server.properties (default: True).
+
+    Permite desactivar el backup inicial en entornos con políticas restrictivas
+    donde no sea posible aplicar exclusiones de antivirus.
+    """
+    props_path = os.path.join(BASE_DIR, "server.properties")
+    if os.path.exists(props_path):
+        try:
+            with open(props_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("backup-inicio="):
+                        val = line.split("=", 1)[1].strip().lower()
+                        return val not in ("false", "0", "no", "off")
+        except Exception:
+            pass
+    return True
+
 # ═══════════════════════════════════════════════════════════════
 # PUNTO DE ENTRADA PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
@@ -794,10 +813,28 @@ if __name__ == "__main__":
     print("=========================================================")
 
     # Backup inicial (antes de arrancar el proceso de Bedrock)
-    try:
-        auto_backup.create_backup("inicio", file_snapshot=None, external_lock=backup_ipc_lock)
-    except Exception as e:
-        print(L(f"[Wrapper] Error en backup inicial: {e}", f"[Wrapper] Error in initial backup: {e}"))
+    if should_run_initial_backup():
+        t_start_initial_backup = time.time()
+        try:
+            auto_backup.create_backup("inicio", file_snapshot=None, external_lock=backup_ipc_lock)
+        except Exception as e:
+            print(L(f"[Wrapper] Error en backup inicial: {e}", f"[Wrapper] Error in initial backup: {e}"))
+        initial_backup_duration = time.time() - t_start_initial_backup
+        if initial_backup_duration > 30.0:
+            print(L(
+                f"[Wrapper] [AVISO] El backup inicial tardó {initial_backup_duration:.1f} s (lo normal son ~6 s).\n"
+                "          Posible firma de antivirus (Defender MAPS) en el primer acceso tras descargar o sincronizar archivos.\n"
+                "          Para optimizarlo, ejecuta como Administrador:\n"
+                "          powershell -ExecutionPolicy Bypass -File tools\\setup_defender_exclusions.ps1\n"
+                "          (o ejecuta configurar_antivirus.bat / configura backup-inicio=false en server.properties)",
+                f"[Wrapper] [ADVISORY] Initial backup took {initial_backup_duration:.1f} s (~6 s is normal).\n"
+                "          Possible antivirus real-time scan overhead (Defender MAPS) on first access after sync/download.\n"
+                "          To optimize, run as Administrator:\n"
+                "          powershell -ExecutionPolicy Bypass -File tools\\setup_defender_exclusions.ps1\n"
+                "          (or run configurar_antivirus.bat / set backup-inicio=false in server.properties)",
+            ))
+    else:
+        print(L("[Wrapper] Backup inicial omitido por configuración (backup-inicio=false).", "[Wrapper] Initial backup skipped by configuration (backup-inicio=false)."))
 
     with state_lock:
         last_backup_completed_time = time.time()

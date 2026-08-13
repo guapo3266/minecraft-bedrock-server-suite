@@ -19,3 +19,4 @@ default-player-permission-level=member
 texturepack-required=false
 content-log-file-size-max=2097152
 client-inactivity-threshold=600
+# backup-inicio=true (cambiar a false solo si no es posible añadir exclusiones de antivirus)
