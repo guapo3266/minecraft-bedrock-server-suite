@@ -227,6 +227,7 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
     props_path = os.path.join(BASE_DIR, "server.properties")
     orig_props = open(props_path, "rb").read()
     world_dir = os.path.join(BASE_DIR, "worlds", "TestWorld")
+    world_existed = os.path.exists(world_dir)  # nunca borrar un mundo preexistente
     created_zips = []
     gui_proc = None
     ws = None
@@ -451,18 +452,19 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
                 gui_proc.wait(timeout=10)
             except Exception:
                 pass
-        # restaurar props y mundo
-        try:
-            open(props_path, "wb").write(orig_props)
-        except Exception:
-            pass
-        for _ in range(10):
-            try:
-                shutil.rmtree(world_dir, ignore_errors=True)
-                if not os.path.exists(world_dir):
-                    break
-            except Exception:
-                time.sleep(1)
+        # restaurar props (flush+close explícito: si la config del servidor no
+        # puede restaurarse, el test debe FALLAR visible, nunca dejarla tocada)
+        with open(props_path, "wb") as f:
+            f.write(orig_props)
+        # borrar el mundo SOLO si el test lo creo (nunca un mundo preexistente)
+        if not world_existed:
+            for _ in range(10):
+                try:
+                    shutil.rmtree(world_dir, ignore_errors=True)
+                    if not os.path.exists(world_dir):
+                        break
+                except Exception:
+                    time.sleep(1)
         # borrar zips creados por el test
         for f in os.listdir(BACKUP_DIR_REAL):
             if f not in baseline:
