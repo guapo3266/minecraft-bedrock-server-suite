@@ -98,9 +98,12 @@ python -m pytest tests/ -q
 
 Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local, más suites de inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback) y de la máquina de estados del disparo manual de backup en caliente. Desde la revisión de 2026-08-02 incluyen además regresiones de los fixes (reintento inmediato tras snapshot incompleto, validación de snapshot por `level.dat`, retención con reloj inyectable, filtro de backups corruptos en la GUI, guard TOCTOU del restore) y propiedades adicionales: prefijos de log apilados, idempotencia/normalización de rutas y consenso anti-drift del guard zip-slip entre sus copias.
 
-### Detalles técnicos
+### Licencia y aviso legal
 
-Me dio bastantes dolores de cabeza la parte donde la compresión del ZIP se quedaba colgada, así que el worker corre en un proceso separado vía `subprocess` (arranque rápido, sin el pipe de bootstrap de `multiprocessing.spawn`, que se colgaba 50-120 s con el servidor en marcha) con un timeout de seguridad: si tarda más de 2 minutos comprimiendo, el wrapper mata el proceso para que el servidor no quede congelado. La cancelación cooperativa usa un archivo marcador (un hijo subprocess no comparte eventos de memoria). Si el `save query` llega incompleto, el wrapper reintenta el ciclo caliente con backoff exponencial (5-60 s, máximo 10 intentos consecutivos, luego espera el intervalo normal de 30 min); el watchdog de 60 s acota el caso en que el servidor no responde. Espero haber tapado todos los huecos de concurrencia. Si ven algún bug me avisan.
+Distribuido bajo licencia MIT. Ver archivo `LICENSE`.
+
+> **NO ES UN PRODUCTO OFICIAL DE MINECRAFT. NO ESTÁ APROBADO POR NI ASOCIADO CON MOJANG O MICROSOFT.**  
+> Minecraft y Bedrock Dedicated Server (BDS) son marcas de Mojang Synergies AB / Microsoft Corporation. Este proyecto es una herramienta comunitaria independiente y no redistribuye binarios ni archivos del juego original.
 
 ---
 
@@ -197,6 +200,13 @@ python -m pytest tests/ -q
 ```
 
 Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control, plus backup fault-injection suites (cancellation, double backup, incomplete snapshot, corrupt ZIP, rollback) and the hot-backup manual trigger state machine. Since the 2026-08-02 review it also includes fix regressions (immediate retry after an incomplete snapshot, snapshot validation by `level.dat`, clock-injectable retention, corrupt-backup filtering in the GUI, restore TOCTOU guard) and extra properties: stacked log prefixes, path idempotence/normalization and anti-drift consensus of the zip-slip guard across its copies.
+
+### License and disclaimer
+
+Distributed under the MIT License. See `LICENSE` for details.
+
+> **NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.**  
+> Minecraft and Bedrock Dedicated Server (BDS) are trademarks of Mojang Synergies AB / Microsoft Corporation. This project is an independent community tool and does not redistribute proprietary game binaries.
 
 ### Random technical notes
 
