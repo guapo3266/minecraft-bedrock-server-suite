@@ -1,67 +1,42 @@
-# Ejecutables y binarios oficiales de Minecraft BDS
-bedrock_server.exe
-bedrock_server.pdb
-*.dll
-
-# Datos de mundos y logs
-worlds/
-logs/
-*.log
-packet-statistics.txt
-release-notes.txt
-
-# Configuración local (usar server.properties.example como plantilla)
-server.properties
-allowlist.json
-permissions.json
-packetlimitconfig.json
-profanity_filter.wlist
-
-# Backups y temporales
-*.zip
-*.tmp
-Backups_Minecraft/
-_POSIBLEMENTE_CORRUPTO*
-backups/
-
-# Marcador del setup inicial (first-run wizard): nunca viaja entre instalaciones
-data/setup_done.json
-
-# Python
+# ── Python ──────────────────────────────────────────────
 __pycache__/
 *.pyc
-*.pyo
-
-# Archivos compilados sobrantes
-*.exe
-*.o
-*.obj
-
-# IDE y editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-Thumbs.db
-Desktop.ini
-.DS_Store
-
-# Scripts de test temporales (prefijo __audit_ / __test_ / __apply_ / __verify_ / __port_)
-__audit_*
-__test_*
-__apply_*
-__verify_*
-__port_*
-
-# GUI React (gui_frontend)
-gui_frontend/node_modules/
-.codewhale/
-archived/
 .pytest_cache/
-.hypothesis/
 
-# Auditorias Semgrep (salidas locales, no versionar)
-static_analysis_semgrep_*/
+# ── Herramienta local (no es parte del proyecto) ────────
+.codewhale/
+
+# ── Datos del servidor (privados y/o pesados) ───────────
+worlds/
+backups/
+behavior_packs/
+resource_packs/
+development_behavior_packs/
+development_resource_packs/
+development_skin_packs/
+world_templates/
+data/
+definitions/
+config/
+
+# ── Binarios de Mojang (EULA/licencia: no redistribuir) ─
+bedrock_server.exe
+bedrock_server.pdb
+bedrock_server_symbols.pdb
+bds_update.zip
+
+# ── Config del servidor (contiene datos locales) ────────
+server.properties
+permissions.json
+allowlist.json
+whitelist.json
+packetlimitconfig.json
+profanity_filter.wlist
+packet-statistics.txt
+
+# ── Historiales/archivos previos (limpieza del repo) ────
+archived/
+
+# ── Herramientas externas / generados pesados ────────────
+static_analysis_semgrep_1/
+gui_frontend/node_modules/

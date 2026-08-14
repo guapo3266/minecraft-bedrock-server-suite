@@ -150,6 +150,17 @@ const STRINGS = {
     inviteListening: 'Escuchando en {port}',
     inviteStopped: 'Servidor detenido — inícialo para recibir conexiones',
     inviteOutside: 'Fuera de tu casa: abre el puerto {port} UDP en tu router (port forwarding) o usa ZeroTier/Tailscale/Playit.',
+    quickCommands: 'Comandos rápidos',
+    cmdDay: 'Hacer de día',
+    cmdNight: 'Hacer de noche',
+    cmdWeatherClear: 'Despejar clima',
+    cmdList: 'Listar jugadores',
+    cmdBackup: 'Forzar backup',
+    cmdKeepInventory: 'Conservar inventario',
+    cmdShowCoords: 'Mostrar coordenadas',
+    starting: 'ARRANCANDO...',
+    stopping: 'DETENIENDO...',
+    uptimeLabel: 'Activo',
     loading: 'Cargando...'
   },
   en: {
@@ -297,6 +308,17 @@ const STRINGS = {
     inviteListening: 'Listening on {port}',
     inviteStopped: 'Server stopped — start it to accept connections',
     inviteOutside: 'Outside your home: open UDP port {port} in your router (port forwarding) or use ZeroTier/Tailscale/Playit.',
+    quickCommands: 'Quick commands',
+    cmdDay: 'Set time to day',
+    cmdNight: 'Set time to night',
+    cmdWeatherClear: 'Clear weather',
+    cmdList: 'List players',
+    cmdBackup: 'Force backup',
+    cmdKeepInventory: 'Keep inventory on death',
+    cmdShowCoords: 'Show coordinates',
+    starting: 'STARTING...',
+    stopping: 'STOPPING...',
+    uptimeLabel: 'Uptime',
     loading: 'Loading...'
   }
 };

@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { Send, Trash2, Search, ArrowDown } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Send, Trash2, Search, ArrowDown, Sun, Moon, CloudSun, Users, Save, Shield, Compass } from 'lucide-react';
 import { TerminalMotionIcon, ServerMotionIcon, UsersMotionIcon } from './hover/AnimatedIcons';
 import { CpuMotionIcon } from './hover/HardwareMotionIcons';
-import { TriangleAlertIcon } from './hover/AnimatedStatusIcons';
-import SpringChip from './hover/SpringChip';
+import { TriangleAlertIcon, DotsVerticalIcon } from './hover/AnimatedStatusIcons';
 import ClickSpark from './reactbits/ClickSpark';
 import ShinyText from './reactbits/ShinyText';
 import { useI18n } from '../i18n.jsx';
@@ -15,6 +15,16 @@ const TYPE_FILTERS = [
   { id: 'players', match: (l) => l.type === 'join' || l.type === 'leave' },
   { id: 'system', match: (l) => l.type === 'system' || l.type === 'backup' },
   { id: 'command', match: (l) => l.type === 'command' }
+];
+
+const QUICK_COMMANDS = [
+  { id: 'day', command: 'time set day', labelKey: 'cmdDay', icon: Sun, color: 'text-amber-300', hover: 'hover:bg-amber-500/15' },
+  { id: 'night', command: 'time set night', labelKey: 'cmdNight', icon: Moon, color: 'text-sky-300', hover: 'hover:bg-sky-500/15' },
+  { id: 'clear', command: 'weather clear', labelKey: 'cmdWeatherClear', icon: CloudSun, color: 'text-cyan-300', hover: 'hover:bg-cyan-500/15' },
+  { id: 'list', command: 'list', labelKey: 'cmdList', icon: Users, color: 'text-emerald-300', hover: 'hover:bg-emerald-500/15' },
+  { id: 'backup', command: 'backup', labelKey: 'cmdBackup', icon: Save, color: 'text-amber-300', hover: 'hover:bg-amber-500/15' },
+  { id: 'keepinv', command: 'gamerule keepinventory true', labelKey: 'cmdKeepInventory', icon: Shield, color: 'text-purple-300', hover: 'hover:bg-purple-500/15' },
+  { id: 'coords', command: 'gamerule showcoordinates true', labelKey: 'cmdShowCoords', icon: Compass, color: 'text-emerald-300', hover: 'hover:bg-emerald-500/15' }
 ];
 
 // Estado de "radio button": solo el filtro activo lleva color; los demas se
@@ -60,9 +70,60 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
   const [autoScroll, setAutoScroll] = useState(true);
   const [history, setHistory] = useState([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuRect, setMenuRect] = useState(null);
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
+  const menuRef = useRef(null);
   const { t } = useI18n();
+
+  const closeQuickMenu = () => {
+    setMenuOpen(false);
+    setMenuRect(null);
+  };
+
+  const toggleQuickMenu = (e) => {
+    if (menuOpen) {
+      closeQuickMenu();
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const w = 240;
+    const h = 270;
+    // Abrir hacia arriba si no hay espacio hacia abajo
+    const fitsBelow = rect.bottom + h + 8 <= window.innerHeight;
+    const top = fitsBelow ? rect.bottom + 4 : Math.max(8, rect.top - h - 4);
+    const left = Math.max(8, Math.min(rect.right - w, window.innerWidth - w - 8));
+    setMenuRect({ top, left });
+    setMenuOpen(true);
+  };
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (ev) => {
+      if (menuRef.current && menuRef.current.contains(ev.target)) return;
+      if (ev.target && ev.target.closest && ev.target.closest('[data-quick-menu-trigger]')) return;
+      closeQuickMenu();
+    };
+    const onKey = (ev) => {
+      if (ev.key === 'Escape') closeQuickMenu();
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', closeQuickMenu, true);
+    window.addEventListener('resize', closeQuickMenu);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', closeQuickMenu, true);
+      window.removeEventListener('resize', closeQuickMenu);
+    };
+  }, [menuOpen]);
+
+  const handleRunQuick = (cmd) => {
+    closeQuickMenu();
+    onSendCommand(cmd);
+  };
 
   const filteredLogs = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -239,8 +300,8 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
         </button>
       )}
 
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="flex items-center gap-3 border-t border-white/10 bg-black/60 px-4 py-3">
+      {/* Input Form con botón 3-puntos de comandos rápidos */}
+      <form onSubmit={handleSubmit} className="flex items-center gap-2.5 border-t border-white/10 bg-black/60 px-4 py-3">
         <span className="font-mono font-bold text-emerald-400 text-lg">&gt;</span>
         <input
           ref={inputRef}
@@ -249,27 +310,68 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={isRunning ? t('placeholderRunning') : t('placeholderStopped')}
-          className="flex-1 bg-transparent py-3 font-mono text-xs text-white outline-none placeholder:text-slate-400"
+          className="flex-1 bg-transparent py-2 font-mono text-xs text-white outline-none placeholder:text-slate-400"
         />
         <button
+          type="button"
+          onClick={toggleQuickMenu}
+          data-quick-menu-trigger="true"
+          title={t('quickCommands')}
+          className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white transition-all active:scale-95 shadow-sm"
+        >
+          <DotsVerticalIcon size={18} />
+        </button>
+        <button
           type="submit"
-          className="flex min-h-[44px] items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition-colors"
+          className="flex min-h-[40px] items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-black hover:bg-emerald-400 transition-colors shadow-lg active:scale-95"
         >
           <Send className="h-3.5 w-3.5" />
           {t('send')}
         </button>
       </form>
 
-      {/* Quick Command Chips */}
-      <div className="flex gap-2 border-t border-white/10 bg-black/40 px-4 py-2">
-        {['list', 'save query', 'say Servidor en mantenimiento.', 'time query day'].map((cmd) => (
-          <SpringChip
-            key={cmd}
-            text={cmd}
-            onClick={() => onSendCommand(cmd)}
-          />
-        ))}
-      </div>
+      {/* Menú flotante de Comandos Rápidos (estilo 3-puntos con portal) */}
+      {createPortal(
+        <AnimatePresence>
+          {menuOpen && menuRect && (
+            <motion.div
+              ref={menuRef}
+              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+              transition={{ duration: 0.12 }}
+              style={{
+                position: 'fixed',
+                top: menuRect.top,
+                left: menuRect.left,
+                zIndex: 60
+              }}
+              className="w-64 rounded-2xl border border-white/15 bg-slate-900/95 p-1.5 shadow-2xl backdrop-blur-xl space-y-0.5"
+            >
+              <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/10 mb-1">
+                {t('quickCommands')}
+              </div>
+              {QUICK_COMMANDS.map((qc) => {
+                const Icon = qc.icon;
+                return (
+                  <button
+                    key={qc.id}
+                    onClick={() => handleRunQuick(qc.command)}
+                    className={`flex w-full items-center justify-between gap-2.5 rounded-xl px-3 py-2 text-xs font-semibold ${qc.color} transition-colors ${qc.hover}`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span>{t(qc.labelKey)}</span>
+                    </div>
+                    <span className="font-mono text-[10px] text-slate-500">/{qc.command.split(' ')[0]}</span>
+                  </button>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </section>
   );
 }

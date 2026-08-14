@@ -7,6 +7,17 @@ import { DownloadMotionIcon } from './hover/HardwareMotionIcons';
 import { Settings } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
+function formatUptime(totalSeconds) {
+  if (!totalSeconds || totalSeconds < 0) return '00:00';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) {
+    return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+  }
+  return `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+}
+
 export default function Navbar({ status, onOpenUpdate, onOpenProps, latency = null }) {
   const { t, lang, setLang } = useI18n();
   const isOnline = status.running;
@@ -76,9 +87,14 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, latency = nu
 
         <PingIndicator status={status} latency={latency} />
 
-        <div className={`flex items-center gap-3 rounded-full border px-4 py-2 text-sm font-bold tracking-wider transition-all duration-300 ${badgeStyle}`}>
+        <div className={`flex items-center gap-2.5 rounded-full border px-4 py-2 text-sm font-bold tracking-wider transition-all duration-300 ${badgeStyle}`}>
           <span className={`h-2.5 w-2.5 rounded-full animate-pulse ${dotStyle}`} />
           <ShinyText text={statusText} />
+          {isOnline && typeof status.uptime === 'number' && status.uptime > 0 && (
+            <span className="font-mono text-xs font-medium text-emerald-300/80 border-l border-emerald-500/30 pl-2.5">
+              {formatUptime(status.uptime)}
+            </span>
+          )}
         </div>
       </div>
     </header>

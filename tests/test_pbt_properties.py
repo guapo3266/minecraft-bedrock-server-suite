@@ -485,7 +485,7 @@ def test_rotate_newest_always_survives(days_ago_list):
             ])
             newest_name = os.path.basename(max(created, key=os.path.getmtime))
 
-            ab.rotate_backups()
+            ab.rotate_backups(now=now)
 
             assert newest_name in os.listdir(backup_dir), (
                 f"Rotacion elimino el backup mas reciente: {newest_name}"
@@ -514,7 +514,7 @@ def test_rotate_old_survivors_bounded_by_recent_layer(days_ago_list):
                 (f"t_{i:04d}", dt) for i, dt in enumerate(dates)
             ])
 
-            ab.rotate_backups()
+            ab.rotate_backups(now=now)
 
             old_survivors = 0
             for name in os.listdir(backup_dir):

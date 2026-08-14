@@ -310,15 +310,15 @@ export default function App() {
         {/* Botonera de Control con ClickSpark & ConfirmButton */}
         <ControlsBar status={status} onAction={handleAction} />
 
-        {/* Medidor Compacto de Hardware (RAM & CPU) */}
-        <HardwareMeter hardware={status.hardware} running={status.running} />
-
-        {/* Conectividad: IP local/publica para invitar jugadores */}
-        <ConnectivityCard
-          connectivity={connectivity}
-          running={status.running}
-          onRefresh={() => fetchConnectivity(true)}
-        />
+        {/* Métricas de Hardware y Conectividad en 2 Columnas */}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <HardwareMeter hardware={status.hardware} running={status.running} />
+          <ConnectivityCard
+            connectivity={connectivity}
+            running={status.running}
+            onRefresh={() => fetchConnectivity(true)}
+          />
+        </div>
 
         {/* Área Principal Dividida: Consola Terminal y Panel Lateral por Pestañas (Hover.dev ChipTabs) */}
         <main className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">
