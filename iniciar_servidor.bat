@@ -1,12 +1,11 @@
 @echo off
-title Minecraft Bedrock Server - Servidor de Guapo
+title Minecraft Bedrock Server Suite
 color 0a
 
 echo.
 echo  ==========================================
 echo  ^|                                        ^|
-echo  ^|   MINECRAFT BEDROCK SERVER             ^|
-echo  ^|   Servidor de Guapo                    ^|
+echo  ^|   MINECRAFT BEDROCK SERVER SUITE       ^|
 echo  ^|                                        ^|
 echo  ==========================================
 echo.
