@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import PixelSnow from './components/reactbits/PixelSnow';
 import Navbar from './components/Navbar';
 import HardwareMeter from './components/HardwareMeter';
+import ConnectivityCard from './components/ConnectivityCard';
 import ControlsBar from './components/ControlsBar';
 import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
@@ -43,6 +44,22 @@ export default function App() {
   const logSeqRef = useRef(0);
   const [setupInfo, setSetupInfo] = useState(null);
   const [setupAttempt, setSetupAttempt] = useState(0);
+  const [connectivity, setConnectivity] = useState(null);
+
+  const fetchConnectivity = async (refresh = false) => {
+    try {
+      const res = await fetch(`/api/connectivity${refresh ? '?refresh=1' : ''}`);
+      const data = await res.json();
+      setConnectivity(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // IP local/publica una sola vez al montar (el endpoint tiene su propia cache)
+  useEffect(() => {
+    fetchConnectivity();
+  }, []);
 
   const makeLog = (text, type) => {
     logSeqRef.current += 1;
@@ -295,6 +312,13 @@ export default function App() {
 
         {/* Medidor Compacto de Hardware (RAM & CPU) */}
         <HardwareMeter hardware={status.hardware} running={status.running} />
+
+        {/* Conectividad: IP local/publica para invitar jugadores */}
+        <ConnectivityCard
+          connectivity={connectivity}
+          running={status.running}
+          onRefresh={() => fetchConnectivity(true)}
+        />
 
         {/* Área Principal Dividida: Consola Terminal y Panel Lateral por Pestañas (Hover.dev ChipTabs) */}
         <main className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">

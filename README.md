@@ -33,7 +33,7 @@ Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola e
 iniciar_servidor.bat     ← doble clic y el servidor arranca con la consola
 ```
 
-Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, hace backups automáticos cada 30 minutos (más uno al arrancar y otro al apagar) y mantiene los últimos 15 backups. Para forzar un backup caliente al instante, escribí `backup` en la consola del wrapper.
+Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, hace backups automáticos cada 30 minutos (más uno al arrancar y otro al apagar) y mantiene los últimos 15 backups. Para forzar un backup caliente al instante, escribí `backup` en la consola del wrapper. Si falta `bedrock_server.exe`, el `.bat` pregunta y lo descarga solo desde Mojang.
 
 Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI y seguir usando los scripts de respaldo de siempre.
 
@@ -44,7 +44,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 - Backup al arrancar el servidor y otro al apagarlo.
 - Menú interactivo con `.bat` para restaurar el mundo fácil (`02_restaurar_backup.bat`, `03_regresar_al_anterior.bat`).
 - Script para abrir los puertos del firewall (`configurar_firewall.bat`).
-- Desde la GUI: consola de comandos en vivo, métricas de RAM/CPU, jugadores online, forzar backup y actualizador de BDS con backup preventivo.
+- Desde la GUI: consola de comandos en vivo, métricas de RAM/CPU, jugadores online, forzar backup, actualizador de BDS con backup preventivo y una tarjeta con tu IP local/pública para invitar amigos.
 
 ### Archivos
 
@@ -55,6 +55,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 | `server_gui_server.py` | Backend de la GUI: FastAPI + WebSockets, sirve el frontend |
 | `server_wrapper.py` | Script principal: lee la consola, detecta jugadores, maneja los backups |
 | `backup_worker.py` | Worker de compresión en proceso separado (subprocess, arranque rápido) |
+| `tools/bds_first_run.py` | Primer arranque por consola: descarga BDS si falta (pregunta S/n) |
 | `auto_backup.py` | Comprime la base de datos a ZIP |
 | `restore_backup.py` | Restaura un backup |
 | `gui_frontend/` | Frontend React (código fuente + `dist/` compilado, listo para usar) |
@@ -132,7 +133,7 @@ Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, s
 iniciar_servidor.bat     ← double-click and the server starts with the console
 ```
 
-The original mode: the wrapper reads the server console, detects players, runs automatic backups every 30 minutes (plus one on start and one on stop) and keeps the last 15 backups. To force a hot backup on the spot, type `backup` in the wrapper console.
+The original mode: the wrapper reads the server console, detects players, runs automatic backups every 30 minutes (plus one on start and one on stop) and keeps the last 15 backups. To force a hot backup on the spot, type `backup` in the wrapper console. If `bedrock_server.exe` is missing, the `.bat` asks and downloads it from Mojang.
 
 Both modes share the same wrapper and folder — you can start with the GUI and keep using the same backup scripts as always.
 
@@ -143,7 +144,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 - Backup on server start and on server stop.
 - Interactive `.bat` menus to restore the world easily (`02_restaurar_backup.bat`, `03_regresar_al_anterior.bat`).
 - Firewall port opener (`configurar_firewall.bat`).
-- From the GUI: live command console, RAM/CPU metrics, online players, forced backup and a BDS updater with a preventive backup.
+- From the GUI: live command console, RAM/CPU metrics, online players, forced backup, a BDS updater with a preventive backup and a card with your local/public IP to invite friends.
 
 ### Files
 
@@ -154,6 +155,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 | `server_gui_server.py` | GUI backend: FastAPI + WebSockets, serves the frontend |
 | `server_wrapper.py` | Main script: reads the console, detects players, handles backups |
 | `backup_worker.py` | Compression worker in a separate process (subprocess, fast startup) |
+| `tools/bds_first_run.py` | Console first run: downloads BDS if missing (asks S/n) |
 | `auto_backup.py` | Zips the database |
 | `restore_backup.py` | Restores a backup |
 | `gui_frontend/` | React frontend (source + prebuilt `dist/`, ready to use) |

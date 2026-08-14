@@ -140,6 +140,16 @@ const STRINGS = {
     confirmRestartMsg: 'El servidor se reiniciará. ¿Estás seguro?',
     titleRunning: '{count} jugadores • Servidor',
     titleStopped: 'Servidor • Apagado',
+    inviteTitle: 'Cómo invitar a tus amigos',
+    inviteLan: 'Misma red (Wi-Fi/LAN)',
+    inviteInternet: 'Por internet',
+    ipPublicUnavailable: 'No se pudo detectar',
+    copy: 'Copiar',
+    copied: 'Copiado',
+    refresh: 'Actualizar',
+    inviteListening: 'Escuchando en {port}',
+    inviteStopped: 'Servidor detenido — inícialo para recibir conexiones',
+    inviteOutside: 'Fuera de tu casa: abre el puerto {port} UDP en tu router (port forwarding) o usa ZeroTier/Tailscale/Playit.',
     loading: 'Cargando...'
   },
   en: {
@@ -277,6 +287,16 @@ const STRINGS = {
     confirmRestartMsg: 'The server will restart. Are you sure?',
     titleRunning: '{count} players • Server',
     titleStopped: 'Server • Stopped',
+    inviteTitle: 'How to invite your friends',
+    inviteLan: 'Same network (Wi-Fi/LAN)',
+    inviteInternet: 'Over the internet',
+    ipPublicUnavailable: 'Could not be detected',
+    copy: 'Copy',
+    copied: 'Copied',
+    refresh: 'Refresh',
+    inviteListening: 'Listening on {port}',
+    inviteStopped: 'Server stopped — start it to accept connections',
+    inviteOutside: 'Outside your home: open UDP port {port} in your router (port forwarding) or use ZeroTier/Tailscale/Playit.',
     loading: 'Loading...'
   }
 };

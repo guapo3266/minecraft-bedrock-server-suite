@@ -230,7 +230,7 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
         shutil.rmtree(prev_dir, ignore_errors=True)
 
 
-def _download_and_install_bds(tag="[Actualizador BDS]"):
+def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
     """Descarga el BDS oficial y lo aplica a BASE_DIR con staging + rollback.
 
     Pipeline COMPARTIDO entre update_bds y el setup inicial (first-run):
@@ -240,24 +240,29 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
     funcion devuelve (False, None); solo las excepciones inesperadas se
     propagan al llamador. La limpieza del zip temporal y del staging ocurre
     en el finally (todos los caminos).
+
+    `log_fn(msg, tipo)`: destino de los mensajes de progreso. Por defecto usa
+    manager.add_log (GUI); el primer arranque por consola pasa print.
     """
+    if log_fn is None:
+        log_fn = manager.add_log
     temp_zip = os.path.join(config.BASE_DIR, "bds_update.zip")
     staging_dir = None
     downloaded_version = None
     try:
         url, downloaded_version = _fetch_latest_bedrock_download()
         if not url:
-            manager.add_log(L(f"{tag} No se pudo obtener la URL de descarga oficial. Abortando.", f"{tag} Could not get the official download URL. Aborting."), "error")
+            log_fn(L(f"{tag} No se pudo obtener la URL de descarga oficial. Abortando.", f"{tag} Could not get the official download URL. Aborting."), "error")
             return False, None
 
-        manager.add_log(L(f"{tag} Descargando binarios desde Mojang...", f"{tag} Downloading binaries from Mojang..."), "system")
+        log_fn(L(f"{tag} Descargando binarios desde Mojang...", f"{tag} Downloading binaries from Mojang..."), "system")
         # S3: límite de tamaño de descarga para no llenar el disco
         max_bytes = 400 * 1024 * 1024
         dl = requests.get(url, headers=_UA_HEADERS, stream=True, timeout=30)
         content_length = dl.headers.get("Content-Length")
         try:
             if content_length and int(content_length) > max_bytes:
-                manager.add_log(L(f"{tag} Descarga demasiado grande ({content_length} bytes). Abortando.", f"{tag} Download too large ({content_length} bytes). Abortando."), "error")
+                log_fn(L(f"{tag} Descarga demasiado grande ({content_length} bytes). Abortando.", f"{tag} Download too large ({content_length} bytes). Abortando."), "error")
                 return False, None
         except (TypeError, ValueError):
             pass
@@ -275,7 +280,7 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
             for chunk in dl.iter_content(chunk_size=8192):
                 total_bytes += len(chunk)
                 if total_bytes > max_bytes:
-                    manager.add_log(L(f"{tag} Descarga excede el límite de 400 MB. Abortando.", f"{tag} Download exceeds the 400 MB limit. Aborting."), "error")
+                    log_fn(L(f"{tag} Descarga excede el límite de 400 MB. Abortando.", f"{tag} Download exceeds the 400 MB limit. Aborting."), "error")
                     return False, None
                 f.write(chunk)
                 if total_bytes >= next_progress_mb * 1024 * 1024:
@@ -283,11 +288,11 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
                     mb = total_bytes // (1024 * 1024)
                     if total_known and total_known > 0:
                         pct = total_bytes * 100 // total_known
-                        manager.add_log(L(f"{tag} Descargando... {mb} MB ({pct}%)", f"{tag} Downloading... {mb} MB ({pct}%)"), "system")
+                        log_fn(L(f"{tag} Descargando... {mb} MB ({pct}%)", f"{tag} Downloading... {mb} MB ({pct}%)"), "system")
                     else:
-                        manager.add_log(L(f"{tag} Descargando... {mb} MB", f"{tag} Downloading... {mb} MB"), "system")
+                        log_fn(L(f"{tag} Descargando... {mb} MB", f"{tag} Downloading... {mb} MB"), "system")
 
-        manager.add_log(L(f"{tag} Descomprimiendo y actualizando ejecutable...", f"{tag} Extracting and updating executable..."), "system")
+        log_fn(L(f"{tag} Descomprimiendo y actualizando ejecutable...", f"{tag} Extracting and updating executable..."), "system")
         preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
         preserve_dirs = {"worlds", "backups", "web", "gui_frontend"}
 
@@ -301,13 +306,13 @@ def _download_and_install_bds(tag="[Actualizador BDS]"):
                 name = item.filename
                 # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
                 if not _is_safe_zip_entry(name):
-                    manager.add_log(L(f"{tag} Entrada insegura en el zip ignorada: {name}", f"{tag} Unsafe zip entry ignored: {name}"), "error")
+                    log_fn(L(f"{tag} Entrada insegura en el zip ignorada: {name}", f"{tag} Unsafe zip entry ignored: {name}"), "error")
                     continue
                 z.extract(item, staging_dir)
                 extracted += 1
                 # Progreso de extraccion (el zip oficial tiene ~9700 entradas)
                 if extracted % 1000 == 0:
-                    manager.add_log(L(f"{tag} Descomprimiendo... {extracted} archivos", f"{tag} Extracting... {extracted} files"), "system")
+                    log_fn(L(f"{tag} Descomprimiendo... {extracted} archivos", f"{tag} Extracting... {extracted} files"), "system")
 
         # D3: raiz efectiva del staging (zip plano actual o una unica
         # carpeta raiz historica); falla cerrada ante estructuras ambiguas.
