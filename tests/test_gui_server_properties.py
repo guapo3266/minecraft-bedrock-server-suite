@@ -200,14 +200,15 @@ def local_origin(draw):
     scheme = draw(st.sampled_from(["http", "https"]))
     host = draw(st.sampled_from(["127.0.0.1", "localhost"]))
     port = draw(st.integers(min_value=1, max_value=65535))
-    return f"{scheme}://{host}:{port}"
+    return f"{scheme}://{host}:{port}", port
 
 
 @given(local_origin())
 @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
-def test_origin_accepts_local_browser(origin):
-    """El navegador de la propia maquina siempre pasa."""
-    assert sgs._is_allowed_origin(origin) is True, f"rechazado: {origin!r}"
+def test_origin_accepts_local_browser(origin_and_port):
+    """El navegador de la propia maquina siempre pasa cuando coincide el puerto."""
+    origin, port = origin_and_port
+    assert sgs._is_allowed_origin(origin, expected_port=port) is True, f"rechazado: {origin!r}"
 
 
 @given(st.one_of(st.none(), origin_text))
@@ -226,21 +227,22 @@ def test_origin_consistency(origin):
         host = urlsplit(origin).hostname
     except ValueError:
         host = None
-    expected = host in ("127.0.0.1", "localhost")
+    expected = host in ("127.0.0.1", "localhost", "::1")
     assert sgs._is_allowed_origin(origin) is expected, f"{origin!r} -> host={host!r}"
 
 
-@pytest.mark.parametrize("origin,expected", [
-    (None, True),                                    # curl / scripts locales
-    ("", True),
-    ("http://127.0.0.1:8000", True),                 # GUI React servida por uvicorn
-    ("http://localhost:8000", True),
-    ("http://127.0.0.1:9999", True),                 # puerto distinto, mismo host
-    ("http://evil.example.com", False),              # pagina maliciosa
-    ("https://evil.example.com/steal", False),
-    ("http://192.168.1.10:8000", False),             # otra maquina de la LAN
-    ("http://127.0.0.1.evil.com", False),            # dominio que termina en la IP
-    ("not a url", False),                            # malformado sin hostname
+@pytest.mark.parametrize("origin,expected_port,expected", [
+    (None, 8000, True),                                    # curl / scripts locales
+    ("", 8000, True),
+    ("http://127.0.0.1:8000", 8000, True),                 # GUI React servida en puerto 8000
+    ("http://localhost:8000", 8000, True),
+    ("http://127.0.0.1:9999", 8000, False),                # puerto distinto RECHAZADO (anti-CSRF local)
+    ("http://localhost:3000", 8000, False),                # puerto distinto RECHAZADO
+    ("http://evil.example.com", 8000, False),              # pagina maliciosa
+    ("https://evil.example.com/steal", 8000, False),
+    ("http://192.168.1.10:8000", 8000, False),             # otra maquina de la LAN
+    ("http://127.0.0.1.evil.com", 8000, False),            # dominio que termina en la IP
+    ("not a url", 8000, False),                            # malformado sin hostname
 ])
-def test_origin_examples(origin, expected):
-    assert sgs._is_allowed_origin(origin) is expected
+def test_origin_examples(origin, expected_port, expected):
+    assert sgs._is_allowed_origin(origin, expected_port=expected_port) is expected

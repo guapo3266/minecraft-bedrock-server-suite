@@ -169,6 +169,7 @@ L_PY_FILES = [
     "backup_worker.py",
     "gui_backend/supervisor.py",
     "gui_backend/services/bds_update.py",
+    "gui_backend/services/external_probe.py",
     "gui_backend/routers/actions.py",
     "gui_backend/routers/backups.py",
     "gui_backend/routers/setup.py",

@@ -9,10 +9,10 @@ Este documento es la referencia para detectar regresiones de comportamiento.
 | Guard | Dónde se aplica | Resultado al fallar |
 |---|---|---|
 | `_ensure_local` (IP loopback: `127.0.0.1`, `::1`) | Todos los endpoints REST y el WS | REST: `403 {"detail": "Acceso denegado: solo conexiones locales"}`; WS: `close(1008)` |
-| `_check_origin` (header `Origin` local o ausente; anti-CSRF) | Solo endpoints de escritura y el WS | `403 {"detail": "Acceso denegado: origen no permitido"}`; WS: `close(1008)` |
+| `_check_origin` (header `Origin` local con el MISMO puerto del request, o ausente; anti-CSRF) | Solo endpoints de escritura y el WS | `403 {"detail": "Acceso denegado: origen no permitido"}`; WS: `close(1008)` |
 
 Endpoint solo con `_ensure_local` (lectura): `GET /api/status`, `GET /api/server_properties`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /`, `GET /favicon.svg`.
-Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`, `POST /api/server_properties`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download`, `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
+Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`, `POST /api/server_properties`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
 
 ## Estado público (payload `status` — compartido por `/api/status`, WS `init` y WS `status`)
 
@@ -24,6 +24,8 @@ Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`,
   "last_backup": "HH:MM:SS | Ninguno",
   "backup_in_progress": false,
   "update_in_progress": false,
+  "external_instance": false,
+  "external_instance_reason": null,
   "uptime": 0,
   "hardware": {
     "ram_mb": 0.0, "ram_pct": 0.0, "cpu_pct": 0.0,
@@ -82,11 +84,11 @@ Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`,
 
 | acción | Respuestas 200 | Respuestas de error |
 |---|---|---|
-| `start` | `{"status": "starting"}` / `{"status": "already_running"}` / `{"status": "busy", "message": "Operación en curso (restauración/actualización)"}` / `{"status": "error", "message": "<e>"}` | — |
+| `start` | `{"status": "starting"}` / `{"status": "already_running"}` / `{"status": "busy", "message": "Operación en curso (restauración/actualización)"}` / `{"status": "error", "message": "<e>"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (sonda externa) |
 | `stop` | `{"status": "stopping"}` / `{"status": "not_running"}` | — |
 | `restart` | `{"status": "restarting"}` (progreso solo por logs) | — |
 | `backup` | `{"status": "hot_backup_dispatched"}` (caliente) / `{"status": "backup_dispatched"}` (frío) / `{"status": "busy", "message": "Ya hay un backup en curso"}` | 500 `"Error al iniciar backup: <e>"` (caliente) |
-| `update_bds` | `{"status": "update_dispatched"}` / `{"status": "already_updating"}` | — |
+| `update_bds` | `{"status": "update_dispatched"}` / `{"status": "already_updating"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (sonda externa, solo con `is_running == false`) |
 | otra | — | 400 `"Acción no válida"` |
 
 ### `GET /api/check_update`
@@ -100,7 +102,7 @@ Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`,
 ### `POST /api/restore`
 - Body: `{"filename": "<str>"}`.
 - 400 `"Cuerpo JSON invalido"` / `"Nombre de backup invalido"` (basename != nombre).
-- 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`).
+- 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`) / `"Hay una instancia externa del servidor en ejecución; restauración cancelada"` (sonda externa bajo `op_lock`).
 - 404: `FileNotFoundError` (texto del error).
 - 500: error genérico.
 - 200: `{"status": "ok", "backup": "<filename>"}` + log.
@@ -132,7 +134,7 @@ Servidor → cliente:
 |---|---|---|
 | `init` | `{"type":"init","logs":[...],"status":{...}}` | Al conectar (snapshot de historial + estado) |
 | `log` | `{"type":"log","data":{entrada}}` | Cada nueva línea del servidor/log |
-| `status` | `{"type":"status","data":{...}}` | Cada ~2s (bucle `hardware_metrics_loop`) |
+| `status` | `{"type":"status","data":{...}}` | Cada ~2s (bucle de métricas + sonda de instancia externa) |
 | `pong` | `{"type":"pong"}` | Respuesta a `ping` |
 
 Cliente → servidor:
@@ -158,4 +160,4 @@ Cliente → servidor:
 - Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
 - `uvicorn.run("server_gui_server:app", host="127.0.0.1", ...)`.
 - Estáticos: `/assets` desde `gui_frontend/dist/assets` (si existe) y `/static` desde `web/`.
-- `lifespan`: `manager.loop`, `recover_interrupted_updates()` y bucle de métricas (2s).
+- `lifespan`: `manager.loop`, `recover_interrupted_updates()`, `recover_interrupted_restores()` y bucle de métricas (2s, incluye la sonda de instancia externa).

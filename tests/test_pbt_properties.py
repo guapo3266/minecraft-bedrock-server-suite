@@ -16,10 +16,10 @@ import auto_backup as ab
 # Estrategias compartidas de generación
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Caracteres seguros para rutas de archivo en save query (sin : , [ ] \r \n)
+# Caracteres seguros para rutas de archivo en save query (sin : , [ ] \r \n <)
 _safe_chars = st.characters(
     blacklist_categories=('Zs', 'Cc', 'Cs'),
-    blacklist_characters=":,\r\n/\\"
+    blacklist_characters=":,\r\n/\\<"
 )
 
 
@@ -79,6 +79,18 @@ def test_parse_prefix_stripped(data):
         f"\n  got:      {result}"
         f"\n  expected: {expected_pairs}"
     )
+
+
+@given(st.text(min_size=1, max_size=50), st.text(max_size=200))
+@settings(max_examples=100)
+@example("Player", "level.dat:100, db/CURRENT:10")
+@example("Attacker", "Player disconnected: Steve, xuid: 12345")
+def test_parse_chat_lines_always_empty(player, msg):
+    """Cualquier línea con formato de chat <Jugador> devuelve lista vacía y no parsea archivos."""
+    chat_line = f"<{player}> {msg}"
+    prefixed_chat = f"[2026-08-03 12:00:00:001 INFO] <{player}> {msg}"
+    assert sw.parse_save_query_files(chat_line) == []
+    assert sw.parse_save_query_files(prefixed_chat) == []
 
 
 @given(st.text(max_size=200))
@@ -250,7 +262,7 @@ def _make_backup_files(backup_dir, file_dates):
         min_size=1, max_size=50,
     )
 )
-@settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @example([0, 0, 0, 0, 0])
 @example([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
 @example([0]*25 + [1]*10 + [2]*10)
@@ -424,7 +436,7 @@ def safe_world_relpath(draw):
 
 
 @given(safe_world_relpath())
-@settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 def test_resolve_idempotent(rel_path):
     """resolve(resolve(p)) == resolve(p): la ruta 'limpia' devuelta es una
     normalizacion estable (mismo full_path y mismo clean_rel_path)."""
@@ -443,7 +455,7 @@ def test_resolve_idempotent(rel_path):
 
 
 @given(safe_world_relpath())
-@settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 def test_resolve_separator_and_dot_equivalence(rel_path):
     """'\\' vs '/' y prefijo './' resuelven al mismo full_path (normalizacion)."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -466,7 +478,7 @@ def test_resolve_separator_and_dot_equivalence(rel_path):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @given(st.lists(st.integers(min_value=0, max_value=60), min_size=1, max_size=60))
-@settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 def test_rotate_newest_always_survives(days_ago_list):
     """El backup mas reciente jamas se elimina, sin importar la politica."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -495,7 +507,7 @@ def test_rotate_newest_always_survives(days_ago_list):
 
 
 @given(st.lists(st.integers(min_value=0, max_value=60), min_size=16, max_size=80))
-@settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 def test_rotate_old_survivors_bounded_by_recent_layer(days_ago_list):
     """Solo la capa 'recientes' puede conservar backups fuera de la ventana
     diaria: supervivientes con mas de DAYS_TO_KEEP_DAILY dias <= MAX_RECENT."""

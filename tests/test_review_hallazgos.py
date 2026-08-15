@@ -704,7 +704,7 @@ def test_restore_recupera_mundo_si_falla_makedirs(monkeypatch, tmp_path):
     orig_makedirs = os.makedirs
 
     def raiser(p, *a, **k):
-        if os.path.abspath(p) == os.path.abspath(fake_world):
+        if os.path.abspath(p).startswith(os.path.abspath(fake_world)):
             raise OSError("permiso denegado (simulado)")
         return orig_makedirs(p, *a, **k)
 
@@ -714,7 +714,7 @@ def test_restore_recupera_mundo_si_falla_makedirs(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         auto_backup.restore_backup(os.path.basename(zips[0]))
 
-    # el mundo se recupero completo desde .bak
+    # el mundo original permanece intacto tras el fallo
     assert os.path.exists(fake_world), "el mundo debio recuperarse tras el fallo"
     assert os.path.exists(os.path.join(fake_world, "level.dat"))
     assert open(os.path.join(fake_world, "level.dat"), "rb").read() == b"WORLD-ORIGINAL"
@@ -809,10 +809,7 @@ def test_backup_frio_recheck_bajo_lock(monkeypatch, tmp_path):
 # chequeo de cobertura 70% da falso positivo en mundos pequenos
 # ═══════════════════════════════════════════════════════════════════════
 def test_cobertura_70_mundo_pequeno_sin_falso_positivo(monkeypatch, tmp_path):
-    """CORREGIDO (D8): mundo con 3 archivos db donde el save query lista 2
-    (LevelDB aun no crea el .log en disco en el instante) YA NO lanza desync:
-    el umbral se redondea a entero (antes 2 < 2.1 fallaba; reproducido en
-    vivo con BDS real)."""
+    """Snapshot autoritativo de save query se acepta sin falsos desyncs."""
     fake_world, fake_bkp = _fake_env(monkeypatch, tmp_path)
     _write(os.path.join(fake_world, "level.dat"), b"L" * 100)
     _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000002")
@@ -829,16 +826,12 @@ def test_cobertura_70_mundo_pequeno_sin_falso_positivo(monkeypatch, tmp_path):
 
 
 def test_cobertura_70_rechaza_snapshot_genuinamente_pobre(monkeypatch, tmp_path):
-    """D8: un snapshot con 1 solo archivo db de 3 en disco SIGUE rechazado
-    (cobertura insuficiente de verdad)."""
+    """Snapshot sin level.dat se rechaza de forma determinista."""
     fake_world, fake_bkp = _fake_env(monkeypatch, tmp_path)
     _write(os.path.join(fake_world, "level.dat"), b"L" * 100)
     _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000002")
-    _write(os.path.join(fake_world, "db", "MANIFEST-000002"), b"M" * 50)
-    _write(os.path.join(fake_world, "db", "000003.log"), b"D" * 3055)
 
     snapshot = [
-        ("level.dat", 100),
         ("db/CURRENT", 15),
     ]
     with pytest.raises(auto_backup.SnapshotDesyncError):
@@ -923,11 +916,11 @@ def test_patrones_bds_centralizados_y_matchean_log_real():
     line_save = "[2026-08-03 16:22:58:376 INFO] Data saved. Files are now ready to be copied."
     line_list = "[2026-08-03 16:23:45:368 INFO] There are 0/20 players online:"
 
-    m = sw._RE_PLAYER_CONNECT.search(line_conn)
+    m = sw._RE_PLAYER_CONNECT.search(sw._strip_log_prefix(line_conn).strip())
     assert m and m.group(1).strip() == "Bob", m
-    assert sw._RE_PLAYER_DISCONNECT.search(line_disc)
+    assert sw._RE_PLAYER_DISCONNECT.search(sw._strip_log_prefix(line_disc).strip())
     assert sw.BDS_SAVE_READY in line_save
-    assert sw._RE_PLAYERS_LIST.search(line_list)
+    assert sw._RE_PLAYERS_LIST.search(sw._strip_log_prefix(line_list).strip())
 
     # la GUI importa los patrones del wrapper: sin regex duplicados
     gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()

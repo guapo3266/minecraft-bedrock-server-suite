@@ -77,6 +77,9 @@ async def download_backup(filename: str, request: Request):
     """
     _ensure_local(request.client.host if request.client else "")
     _check_origin(request)
+    sec_fetch_site = request.headers.get("sec-fetch-site", "").lower()
+    if sec_fetch_site == "cross-site":
+        raise HTTPException(status_code=403, detail="Descarga cross-site rechazada")
     if not filename or os.path.basename(filename) != filename:
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
     full = os.path.join(auto_backup.BACKUP_DIR, filename)

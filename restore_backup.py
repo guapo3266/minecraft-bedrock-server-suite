@@ -16,25 +16,115 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def _world_name():
+def _world_name(base_dir=None):
     """Nombre del nivel desde server.properties (misma regla que auto_backup)."""
-    props_path = os.path.join(BASE_DIR, "server.properties")
+    bdir = base_dir or BASE_DIR
+    props_path = os.path.join(bdir, "server.properties")
     if os.path.exists(props_path):
         try:
             with open(props_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line.startswith("level-name="):
-                        return line.split("=", 1)[1].strip()
+                        val = line.split("=", 1)[1].strip()
+                        if val:
+                            return val
         except Exception:
             pass
     return "Bedrock level"
 
 
+def _resolve_backup_dir(base_dir):
+    return os.path.abspath(os.path.join(
+        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
+        os.path.basename(os.path.normpath(base_dir)),
+    ))
+
+
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())
 SERVER_NAME = os.path.basename(os.path.normpath(BASE_DIR))
-BACKUP_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "Backups_Minecraft", "auto_backups", SERVER_NAME))
+BACKUP_DIR = _resolve_backup_dir(BASE_DIR)
 _CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
+
+
+def get_world_dir(base_dir=None):
+    """Resuelve la ruta del mundo activo dinámicamente según server.properties."""
+    bdir = base_dir or BASE_DIR
+    if bdir == BASE_DIR and "WORLD_DIR" in globals():
+        current_global = globals()["WORLD_DIR"]
+        if current_global != os.path.join(BASE_DIR, "worlds", "Bedrock level") and current_global != os.path.join(BASE_DIR, "worlds", _world_name(BASE_DIR)):
+            return current_global
+    return os.path.join(bdir, "worlds", _world_name(bdir))
+
+
+def get_backup_dir(base_dir=None):
+    """Resuelve el directorio de backups dinámicamente."""
+    bdir = base_dir or BASE_DIR
+    if bdir == BASE_DIR and "BACKUP_DIR" in globals():
+        current_global = globals()["BACKUP_DIR"]
+        if current_global != _resolve_backup_dir(BASE_DIR):
+            return current_global
+    return _resolve_backup_dir(bdir)
+
+
+def _quarantine_and_restore(active_path, bak_path, is_dir=True):
+    """Garantiza la recuperación del resguardo .bak aislando la ruta activa.
+
+    1. Intenta renombrar active_path a .failed_<nonce> para liberar la ruta y
+       hacer os.rename(bak_path, active_path).
+    2. Si active_path no existe, hace os.rename(bak_path, active_path).
+    3. Si active_path no pudo ser renombrado ni eliminado (p. ej. archivos bloqueados
+       por Windows Defender o procesos en segundo plano), copia recursivamente
+       el contenido de bak_path sobre active_path y limpia bak_path.
+    """
+    if not os.path.exists(bak_path):
+        return
+
+    restored = False
+    if os.path.exists(active_path):
+        failed_path = active_path + f".failed_{os.urandom(4).hex()}"
+        try:
+            os.rename(active_path, failed_path)
+        except Exception:
+            pass
+        else:
+            try:
+                os.rename(bak_path, active_path)
+                restored = True
+            except Exception as e_rb:
+                print(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}")
+            try:
+                if is_dir:
+                    shutil.rmtree(failed_path, ignore_errors=True)
+                else:
+                    os.remove(failed_path)
+            except Exception:
+                pass
+
+    if not restored and not os.path.exists(active_path):
+        try:
+            os.rename(bak_path, active_path)
+            restored = True
+        except Exception as e_rb:
+            print(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}")
+
+    if not restored and is_dir and os.path.isdir(bak_path):
+        try:
+            for root, dirs, files in os.walk(bak_path):
+                rel = os.path.relpath(root, bak_path)
+                target_dir = os.path.join(active_path, rel)
+                os.makedirs(target_dir, exist_ok=True)
+                for f in files:
+                    src_f = os.path.join(root, f)
+                    dst_f = os.path.join(target_dir, f)
+                    try:
+                        shutil.copy2(src_f, dst_f)
+                    except Exception:
+                        pass
+            shutil.rmtree(bak_path, ignore_errors=True)
+            restored = True
+        except Exception as e_fallback:
+            print(f"[CRITICO] Fallo en recuperacion fallback de resguardo: {e_fallback}")
 
 
 def _is_safe_zip_entry(filename: str) -> bool:
@@ -222,77 +312,129 @@ def list_and_restore():
             else:
                 world_infos.append(entry)
 
-    bak_dir = WORLD_DIR + ".bak"
-    pack_baks = []  # (destino, bak) para rollback
+    active_world_dir = get_world_dir()
+    active_backup_dir = get_backup_dir()
 
-    print("[*] Resguardando mundo actual...")
-    if os.path.exists(WORLD_DIR):
-        if os.path.exists(bak_dir):
-            try:
-                shutil.rmtree(bak_dir)
-            except Exception as e:
-                print(f"[ERROR] No se pudo limpiar el resguardo anterior: {e}")
-                input("\nPresiona Enter para salir...")
-                return
-        try:
-            os.rename(WORLD_DIR, bak_dir)
-        except Exception as e:
-            print(f"[ERROR] No se pudo resguardar el mundo actual. Esta el servidor encendido?: {e}")
-            input("\nApaga el servidor primero y vuelve a intentarlo. Presiona Enter...")
-            return
+    nonce = os.urandom(4).hex()
+    world_staging = active_world_dir + f".restore_staging_{nonce}"
+    pack_dir_stagings = {}   # dest_dir -> staging_dir
+    pack_file_stagings = {}  # dest_file -> staging_file
 
-    print("[*] Descomprimiendo y restaurando backup (mundo + packs de servidor)...")
+    for _entry, (kind, folder, rel) in pack_infos:
+        if folder:
+            dest_dir = os.path.normpath(os.path.join(BASE_DIR, kind, folder))
+            if dest_dir not in pack_dir_stagings:
+                pack_dir_stagings[dest_dir] = dest_dir + f".restore_staging_{nonce}"
+        else:
+            dest_file = os.path.normpath(os.path.join(BASE_DIR, kind, rel))
+            if dest_file not in pack_file_stagings:
+                pack_file_stagings[dest_file] = dest_file + f".restore_staging_{nonce}"
+
+    print("[*] Descomprimiendo backup en área temporal (staging)...")
     try:
-        # Resguardar las carpetas de packs afectadas (si existen)
-        pack_dests = set()
-        for _entry, (kind, folder, _rel) in pack_infos:
-            pack_dests.add(os.path.join(BASE_DIR, kind, folder))
-        for dest in sorted(pack_dests):
-            if os.path.exists(dest):
-                bak = dest + ".bak"
-                if os.path.exists(bak):
-                    shutil.rmtree(bak, ignore_errors=True)
-                os.rename(dest, bak)
-                pack_baks.append((dest, bak))
-
-        os.makedirs(WORLD_DIR, exist_ok=True)
+        os.makedirs(world_staging, exist_ok=True)
         with zipfile.ZipFile(selected_zip, "r") as zipf:
             for entry in world_infos:
-                zipf.extract(entry, WORLD_DIR)
+                zipf.extract(entry, world_staging)
             for entry, (kind, folder, rel) in pack_infos:
-                _extract_pack_entry(zipf, entry, os.path.join(BASE_DIR, kind, folder), rel)
-        if os.path.exists(bak_dir):
-            try:
-                shutil.rmtree(bak_dir)
-            except Exception:
-                print("[AVISO] No se pudo eliminar el resguardo .bak (puedes borrarlo a mano).")
-        for dest, bak in pack_baks:
-            if os.path.exists(bak):
+                if folder:
+                    dest_dir = os.path.normpath(os.path.join(BASE_DIR, kind, folder))
+                    _extract_pack_entry(zipf, entry, pack_dir_stagings[dest_dir], rel)
+                else:
+                    dest_file = os.path.normpath(os.path.join(BASE_DIR, kind, rel))
+                    staging_f = pack_file_stagings[dest_file]
+                    os.makedirs(os.path.dirname(staging_f), exist_ok=True)
+                    with zipf.open(entry, "r") as src, open(staging_f, "wb") as out:
+                        shutil.copyfileobj(src, out)
+
+        if world_infos and not os.path.exists(os.path.join(world_staging, "level.dat")):
+            raise RuntimeError("El staging no contiene level.dat válido; restauración abortada sin tocar el mundo.")
+    except Exception as e:
+        print(f"[ERROR] Falló la descompresión: {e}. El mundo original NO fue modificado.")
+        shutil.rmtree(world_staging, ignore_errors=True)
+        for s_dir in pack_dir_stagings.values():
+            shutil.rmtree(s_dir, ignore_errors=True)
+        for s_file in pack_file_stagings.values():
+            if os.path.exists(s_file):
                 try:
-                    shutil.rmtree(bak)
+                    os.remove(s_file)
                 except Exception:
-                    print(f"[AVISO] No se pudo eliminar el resguardo {bak} (puedes borrarlo a mano).")
+                    pass
+        input("\nPresiona Enter para salir...")
+        return
+
+    bak_dir = active_world_dir + f".bak_{nonce}"
+    pack_baks = []  # (active_path, bak_path, is_dir)
+    swap_success = False
+
+    print("[*] Intercambiando con el mundo y packs activos...")
+    try:
+        # Resguardar el mundo actual (si existe)
+        if os.path.exists(active_world_dir):
+            os.rename(active_world_dir, bak_dir)
+
+        # Resguardar packs actuales (si existen)
+        for dest_dir in sorted(pack_dir_stagings.keys()):
+            if os.path.exists(dest_dir):
+                bak = dest_dir + f".bak_{nonce}"
+                os.rename(dest_dir, bak)
+                pack_baks.append((dest_dir, bak, True))
+
+        for dest_file in sorted(pack_file_stagings.keys()):
+            if os.path.exists(dest_file):
+                bak = dest_file + f".bak_{nonce}"
+                os.rename(dest_file, bak)
+                pack_baks.append((dest_file, bak, False))
+
+        # Mover staging a destinos finales
+        os.rename(world_staging, active_world_dir)
+        for dest_dir, s_dir in pack_dir_stagings.items():
+            if os.path.exists(s_dir):
+                os.makedirs(os.path.dirname(dest_dir), exist_ok=True)
+                os.rename(s_dir, dest_dir)
+        for dest_file, s_file in pack_file_stagings.items():
+            if os.path.exists(s_file):
+                os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                os.rename(s_file, dest_file)
+
+        swap_success = True
         print("\n=====================================================")
         print("  [OK] MUNDO RESTAURADO EXITOSAMENTE!")
         print("=====================================================")
         print("Ya puedes iniciar el servidor con iniciar_servidor.bat")
     except Exception as e:
-        print(f"[ERROR] Fallo la descompresion: {e}")
+        print(f"[ERROR] Falló el intercambio: {e}. Iniciando rollback...")
+        _quarantine_and_restore(active_world_dir, bak_dir, is_dir=True)
+
+        for active_p, bak_p, is_d in reversed(pack_baks):
+            _quarantine_and_restore(active_p, bak_p, is_dir=is_d)
+
+        shutil.rmtree(world_staging, ignore_errors=True)
+        for s_dir in pack_dir_stagings.values():
+            shutil.rmtree(s_dir, ignore_errors=True)
+        for s_file in pack_file_stagings.values():
+            if os.path.exists(s_file):
+                try:
+                    os.remove(s_file)
+                except Exception:
+                    pass
+
+    # Limpieza de resguardos si todo salió bien
+    if swap_success:
         if os.path.exists(bak_dir):
             try:
-                shutil.rmtree(WORLD_DIR)
-                os.rename(bak_dir, WORLD_DIR)
-                print("[RECUPERADO] Se restauro el mundo anterior desde el resguardo.")
-            except Exception as e2:
-                print(f"[CRITICO] No se pudo recuperar el resguardo: {e2}. El mundo anterior esta en: {bak_dir}")
-        for dest, bak in reversed(pack_baks):
-            try:
-                shutil.rmtree(dest, ignore_errors=True)
-                if os.path.exists(bak):
-                    os.rename(bak, dest)
-                    print(f"[RECUPERADO] Se restauro la carpeta de pack: {dest}")
-            except Exception as e2:
-                print(f"[CRITICO] No se pudo recuperar el pack: {dest}. Resguardo en: {bak}")
+                shutil.rmtree(bak_dir, ignore_errors=True)
+            except Exception:
+                pass
+        for active_p, bak_p, is_d in pack_baks:
+            if os.path.exists(bak_p):
+                try:
+                    if is_d:
+                        shutil.rmtree(bak_p, ignore_errors=True)
+                    else:
+                        os.remove(bak_p)
+                except Exception:
+                    pass
 
     input("\nPresiona Enter para cerrar...")
 

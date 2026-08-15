@@ -12,7 +12,7 @@ import time
 
 from console_lang import L
 # D5: patrones de deteccion del log de BDS centralizados en server_wrapper
-from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT
+from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT, _strip_log_prefix
 
 from gui_backend import config
 from gui_backend.state import manager
@@ -52,9 +52,12 @@ def _spawn_wrapper_process():
 
 def classify_log_line(line_str: str) -> str:
     """Determina el tipo de log ('join', 'leave', 'backup', 'error', 'info') para coloreado en la GUI."""
-    if _RE_PLAYER_CONNECT.search(line_str):
+    clean = _strip_log_prefix(line_str).strip()
+    if clean.startswith("<"):
+        return "info"
+    if _RE_PLAYER_CONNECT.search(clean):
         return "join"
-    if _RE_PLAYER_DISCONNECT.search(line_str):
+    if _RE_PLAYER_DISCONNECT.search(clean):
         return "leave"
     if any(k in line_str.lower() for k in ("backup", "compres", "save query")):
         # FIX F2: "compres" es el prefijo comun de "compression"/"compresion":
@@ -112,8 +115,10 @@ def run_wrapper_thread(process=None):
 
             # Determinar tipo de log para coloreado en la GUI
             log_type = classify_log_line(line_str)
-            m_conn = _RE_PLAYER_CONNECT.search(line_str)
-            m_disc = _RE_PLAYER_DISCONNECT.search(line_str)
+            clean_str = _strip_log_prefix(line_str).strip()
+            is_chat = clean_str.startswith("<")
+            m_conn = _RE_PLAYER_CONNECT.search(clean_str) if not is_chat else None
+            m_disc = _RE_PLAYER_DISCONNECT.search(clean_str) if not is_chat else None
             if m_conn:
                 try:
                     name = m_conn.group(1).strip()

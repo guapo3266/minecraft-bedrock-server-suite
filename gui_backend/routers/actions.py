@@ -23,6 +23,13 @@ async def handle_action(action_name: str, request: Request):
     _check_origin(request)
     action = action_name.lower()
     if action == "start":
+        from gui_backend.services import external_probe
+        is_ext, _ = external_probe.detect_external_bds()
+        if is_ext:
+            raise HTTPException(
+                status_code=409,
+                detail="Hay una instancia externa del servidor en ejecución",
+            )
         # Chequeo + marcado de estado ATOMICOS bajo op_lock (sin bloqueo: si
         # hay una restauracion o actualizacion en curso, se rechaza con 'busy'
         # en vez de esperar). Dos requests simultaneos ya no pueden ver ambos
@@ -193,6 +200,14 @@ async def handle_action(action_name: str, request: Request):
             return {"status": "hot_backup_dispatched"}
 
     elif action == "update_bds":
+        from gui_backend.services import external_probe
+        if not manager.is_running:
+            is_ext, _ = external_probe.detect_external_bds()
+            if is_ext:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Hay una instancia externa del servidor en ejecución",
+                )
         # Guard anti doble actualización: dos threads pisándose bds_update.zip corromperían la instalación
         if manager.update_in_progress:
             return {"status": "already_updating"}
@@ -252,11 +267,20 @@ async def handle_action(action_name: str, request: Request):
                         return
 
                 manager.add_log(L("[Actualizador BDS] Ejecutando backup preventivo de seguridad...", "[Actualizador BDS] Running preventive safety backup..."), "backup")
+                backup_ok = False
                 try:
                     zip_b = auto_backup.create_backup("pre_update_backup")
-                    manager.add_log(L(f"[Actualizador BDS] Backup de seguridad listo: {os.path.basename(zip_b)}", f"[Actualizador BDS] Safety backup ready: {os.path.basename(zip_b)}"), "backup")
+                    if zip_b and isinstance(zip_b, str):
+                        backup_ok = True
+                        manager.add_log(L(f"[Actualizador BDS] Backup de seguridad listo: {os.path.basename(zip_b)}", f"[Actualizador BDS] Safety backup ready: {os.path.basename(zip_b)}"), "backup")
+                    else:
+                        manager.add_log(L("[Actualizador BDS] Error en backup preventivo: no se pudo crear el archivo.", "[Actualizador BDS] Error in preventive backup: could not create the file."), "error")
                 except Exception as e:
                     manager.add_log(L(f"[Actualizador BDS] Error en backup preventivo: {e}", f"[Actualizador BDS] Error in preventive backup: {e}"), "error")
+
+                if not backup_ok:
+                    manager.add_log(L("[Actualizador BDS] Actualización cancelada por fallo en el backup preventivo.", "[Actualizador BDS] Update cancelled due to preventive backup failure."), "error")
+                    return
 
                 # Descarga + staging + aplicacion con rollback: pipeline
                 # compartido con el setup inicial (_download_and_install_bds).

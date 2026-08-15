@@ -27,6 +27,7 @@ from gui_backend.config import BASE_DIR
 from gui_backend.security import _ensure_local, _is_allowed_origin, _is_safe_zip_entry
 from gui_backend.metrics import get_hardware_metrics
 from gui_backend.state import manager
+from gui_backend.services import external_probe as external_probe_service
 from gui_backend.services import bds_update as bds_update_service
 from gui_backend.routers import system, properties, setup, actions, backups, websocket
 
@@ -34,6 +35,7 @@ from gui_backend.routers import system, properties, setup, actions, backups, web
 async def hardware_metrics_loop():
     while True:
         try:
+            external_probe_service.update_external_instance_state()
             manager.update_status()
         except Exception:
             pass
@@ -42,6 +44,10 @@ async def hardware_metrics_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     manager.loop = asyncio.get_running_loop()
+    try:
+        auto_backup.recover_interrupted_restores(config.BASE_DIR)
+    except Exception as exc:
+        manager.add_log(L(f"[Backups] Error en recuperación de restauraciones: {exc}", f"[Backups] Error in restore recovery: {exc}"), "error")
     try:
         bds_update_service.recover_interrupted_updates()
     except Exception as exc:

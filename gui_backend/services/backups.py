@@ -13,7 +13,7 @@ import zipfile
 import auto_backup
 from fastapi import HTTPException
 
-_CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
+_CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO", "_CRASH", "_crash")
 
 
 def _list_backup_files(backup_dir):
@@ -60,6 +60,13 @@ def restore_backup_under_lock(manager, filename):
             raise HTTPException(
                 status_code=409,
                 detail="El servidor se encendió durante la restauración; operación cancelada",
+            )
+        from gui_backend.services import external_probe
+        is_ext, _ = external_probe.detect_external_bds()
+        if is_ext:
+            raise HTTPException(
+                status_code=409,
+                detail="Hay una instancia externa del servidor en ejecución; restauración cancelada",
             )
         return auto_backup.restore_backup(filename)
 

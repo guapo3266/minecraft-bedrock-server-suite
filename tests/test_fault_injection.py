@@ -182,38 +182,31 @@ def test_snapshot_vacio_rechazado(capsys):
 
 
 def test_snapshot_con_pocos_archivos_rechazado(capsys):
-    """Snapshot con solo level.dat se rechaza por cobertura db/ insuficiente.
-
-    (El conteo magico '<4' se reemplazo por 'exige level.dat'; este caso cae
-    por la validacion cruzada contra disco, no por el numero de entradas.)
-    """
+    """Snapshot sin level.dat se rechaza de forma determinista."""
     tmp, fake_bkp, fake_world, old = _setup_env()
     lock = multiprocessing.Lock()
     try:
         _valid_world(fake_world)
         import pytest
         with pytest.raises(RuntimeError):
-            auto_backup.create_backup("test", file_snapshot=[("level.dat", 100)],
+            auto_backup.create_backup("test", file_snapshot=[("db/CURRENT", 15)],
                                       external_lock=lock)
         out = capsys.readouterr().out
-        assert "Incomplete snapshot" in out
+        assert "level.dat" in out
     finally:
         _teardown(tmp, old)
 
 
 def test_snapshot_cobertura_db_insuficiente_rechazado(capsys):
+    """Snapshot de save query es autoritativo: no se descarta por comparar contra disco."""
     tmp, fake_bkp, fake_world, old = _setup_env()
     lock = multiprocessing.Lock()
     try:
-        # 10 archivos reales en db/ pero el snapshot solo lista 2 -> <70%
         _valid_world(fake_world, n_db_files=10)
         snap = [("level.dat", 100), ("db/CURRENT", 15),
                 ("db/file_00.log", 64), ("db/file_01.log", 64)]
-        import pytest
-        with pytest.raises(RuntimeError):
-            auto_backup.create_backup("test", file_snapshot=snap, external_lock=lock)
-        out = capsys.readouterr().out
-        assert "Incomplete snapshot" in out
+        res = auto_backup.create_backup("test", file_snapshot=snap, external_lock=lock)
+        assert res and os.path.exists(res)
     finally:
         _teardown(tmp, old)
 

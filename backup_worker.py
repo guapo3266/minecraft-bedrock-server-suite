@@ -7,11 +7,11 @@ Sustituye al hijo de multiprocessing.spawn: el bootstrap de spawn se colgaba
 bloqueado en la lectura del pipe de arranque de spawn). Con subprocess el
 arranque es inmediato y la compresion real tarda ~1-3s en un mundo de 50MB.
 
-Uso: python backup_worker.py <snapshot.pkl> <cancel_marker> <result.pkl>
-- snapshot.pkl: lista de tuplas (rel_path, byte_length) del save query.
+Uso: python backup_worker.py <snapshot.json> <cancel_marker> <result.json>
+- snapshot.json: lista de tuplas (rel_path, byte_length) del save query.
 - cancel_marker: si este archivo existe, el backup se aborta de forma
   cooperativa (misma semantica que el cancel_event de multiprocessing).
-- result.pkl: diccionario {"zip": ruta_o_False, "error": str|None}.
+- result.json: diccionario {"zip": ruta_o_False, "error": str|None}.
 
 El worker NO comparte locks con el wrapper: usa el lock interno de
 auto_backup (_backup_lock). El wrapper garantiza que no hay backups
@@ -20,7 +20,7 @@ concurrentes via backup_in_progress + join antes del backup de cierre.
 import os
 import sys
 import time
-import pickle
+import json
 
 from console_lang import L
 
@@ -35,11 +35,22 @@ class _FileCancel:
         return os.path.exists(self.path)
 
 
+def load_snapshot(snap_path):
+    """Carga el snapshot (lista de tuplas rel_path, byte_length) desde JSON."""
+    with open(snap_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_result(result_path, result):
+    """Escribe el resultado del backup (zip/error) como JSON UTF-8."""
+    with open(result_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False)
+
+
 def _main():
     snap_path, marker, result_path = sys.argv[1:4]
 
-    with open(snap_path, "rb") as f:
-        file_snapshot = pickle.load(f)
+    file_snapshot = load_snapshot(snap_path)
 
     import auto_backup  # import tardio: solo aqui hace falta
 
@@ -63,13 +74,11 @@ def _main():
         result = {"zip": None, "error": str(e)}
 
     try:
-        with open(result_path, "wb") as f:
-            pickle.dump(result, f)
+        write_result(result_path, result)
     except Exception as e:
         result = {"zip": None, "error": L("No se pudo escribir el resultado: %s", "Could not write the result: %s") % e}
         try:
-            with open(result_path, "wb") as f:
-                pickle.dump(result, f)
+            write_result(result_path, result)
         except Exception:
             pass
 

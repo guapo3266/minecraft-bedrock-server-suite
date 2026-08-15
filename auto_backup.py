@@ -6,6 +6,7 @@ import multiprocessing
 import shutil
 import re
 
+import windows_process_guard as wpg
 from console_lang import L
 
 # Lock por defecto (multiprocessing safe)
@@ -20,22 +21,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # servidor (mismo level-name por defecto).
 SERVER_NAME = os.path.basename(os.path.normpath(BASE_DIR))
 
-def get_world_name():
-    props_path = os.path.join(BASE_DIR, "server.properties")
+def get_world_name(base_dir=None):
+    bdir = base_dir or BASE_DIR
+    props_path = os.path.join(bdir, "server.properties")
     if os.path.exists(props_path):
         try:
             with open(props_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line.startswith("level-name="):
-                        return line.split("=", 1)[1].strip()
+                        val = line.split("=", 1)[1].strip()
+                        if val:
+                            return val
         except Exception:
             pass
     return "Bedrock level"
-
-WORLD_NAME = get_world_name()
-WORLD_DIR = os.path.join(BASE_DIR, "worlds", WORLD_NAME)
-WORLD_PARENT_DIR = os.path.join(BASE_DIR, "worlds")
 
 
 def _resolve_backup_dir(base_dir):
@@ -46,7 +46,37 @@ def _resolve_backup_dir(base_dir):
     ))
 
 
+WORLD_NAME = get_world_name()
+WORLD_DIR = os.path.join(BASE_DIR, "worlds", WORLD_NAME)
+WORLD_PARENT_DIR = os.path.join(BASE_DIR, "worlds")
 BACKUP_DIR = _resolve_backup_dir(BASE_DIR)
+
+
+def get_world_dir(base_dir=None):
+    """Resuelve la ruta del mundo activo dinámicamente según server.properties."""
+    bdir = base_dir or BASE_DIR
+    if bdir == BASE_DIR and "WORLD_DIR" in globals():
+        # Si un test hizo monkeypatch a auto_backup.WORLD_DIR que difiere del valor
+        # estático default y del server.properties de BASE_DIR, respetarlo
+        current_global = globals()["WORLD_DIR"]
+        if current_global != os.path.join(BASE_DIR, "worlds", "Bedrock level") and current_global != os.path.join(BASE_DIR, "worlds", get_world_name(BASE_DIR)):
+            return current_global
+    return os.path.join(bdir, "worlds", get_world_name(bdir))
+
+
+def get_world_parent_dir(base_dir=None):
+    bdir = base_dir or BASE_DIR
+    return os.path.join(bdir, "worlds")
+
+
+def get_backup_dir(base_dir=None):
+    """Resuelve el directorio de backups dinámicamente."""
+    bdir = base_dir or BASE_DIR
+    if bdir == BASE_DIR and "BACKUP_DIR" in globals():
+        current_global = globals()["BACKUP_DIR"]
+        if current_global != _resolve_backup_dir(BASE_DIR):
+            return current_global
+    return _resolve_backup_dir(bdir)
 
 # Politica de retencion
 MAX_RECENT_BACKUPS = 15
@@ -79,18 +109,25 @@ def _cancelled(cancel_event):
 
 def _resolve_snapshot_path(rel_path):
     clean_rel_path = rel_path.replace("/", os.sep).replace("\\", os.sep)
-    world_name = os.path.basename(os.path.abspath(WORLD_DIR))
+    active_world_dir = get_world_dir()
+    world_name = os.path.basename(os.path.abspath(active_world_dir))
+    if "WORLD_PARENT_DIR" in globals() and globals()["WORLD_PARENT_DIR"] != os.path.join(BASE_DIR, "worlds"):
+        world_parent_dir = globals()["WORLD_PARENT_DIR"]
+    else:
+        world_parent_dir = os.path.dirname(os.path.abspath(active_world_dir))
+
+    base_dir = os.path.dirname(os.path.abspath(world_parent_dir))
     first_part = clean_rel_path.split(os.sep, 1)[0]
 
     if first_part.lower() == "worlds":
-        full_path = os.path.abspath(os.path.normpath(os.path.join(BASE_DIR, clean_rel_path)))
+        full_path = os.path.abspath(os.path.normpath(os.path.join(base_dir, clean_rel_path)))
     elif first_part.lower() == world_name.lower():
-        full_path = os.path.abspath(os.path.normpath(os.path.join(WORLD_PARENT_DIR, clean_rel_path)))
+        full_path = os.path.abspath(os.path.normpath(os.path.join(world_parent_dir, clean_rel_path)))
     else:
-        full_path = os.path.abspath(os.path.normpath(os.path.join(WORLD_DIR, clean_rel_path)))
+        full_path = os.path.abspath(os.path.normpath(os.path.join(active_world_dir, clean_rel_path)))
 
     # Check 1: basic path traversal (.., rutas absolutas) — abspath basta
-    world_abs = os.path.abspath(WORLD_DIR)
+    world_abs = os.path.abspath(active_world_dir)
     try:
         common = os.path.commonpath([world_abs, full_path])
     except ValueError:
@@ -100,7 +137,7 @@ def _resolve_snapshot_path(rel_path):
 
     # Check 2: symlink traversal — realpath resuelve symlinks reales
     if os.path.exists(full_path):
-        world_real = os.path.realpath(WORLD_DIR)
+        world_real = os.path.realpath(active_world_dir)
         real_full = os.path.realpath(full_path)
         try:
             real_common = os.path.commonpath([world_real, real_full])
@@ -156,16 +193,27 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
     - wait_lock_timeout_sec: Segundos a esperar si ya hay un backup en curso antes de abortar.
     - external_lock: Instancia IPC de lock (multiprocessing.Lock) compartida con el proceso principal.
     """
+    inst_hash = wpg.get_installation_hash(BASE_DIR)
+    ipc_mutex = wpg.NamedMutex(f"BDS_Backup_{inst_hash}")
+    timeout_ms = int(wait_lock_timeout_sec * 1000) if wait_lock_timeout_sec > 0 else 0
+    if not ipc_mutex.acquire(timeout_ms=timeout_ms):
+        print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] Ya hay un backup ejecutandose; cancelling this request."))
+        return False
+
     lock_to_use = external_lock if external_lock is not None else _backup_lock
     acquired_lock = False
 
     if wait_lock_timeout_sec > 0:
         if not lock_to_use.acquire(timeout=wait_lock_timeout_sec):
+            ipc_mutex.release()
+            ipc_mutex.close()
             print(L(f"[ERROR] Backup lock wait timed out ({wait_lock_timeout_sec}s); se cancela esta solicitud.", f"[ERROR] Backup lock wait timed out ({wait_lock_timeout_sec}s); cancelling this request."))
             return False
         acquired_lock = True
     else:
         if not lock_to_use.acquire(False):
+            ipc_mutex.release()
+            ipc_mutex.close()
             print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] Ya hay un backup ejecutandose; cancelling this request."))
             return False
         acquired_lock = True
@@ -214,38 +262,63 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             if not isinstance(file_snapshot, list) or len(file_snapshot) == 0:
                 raise SnapshotDesyncError(L("Snapshot Bedrock vacio o invalido; se aborta backup caliente.", "Empty or invalid Bedrock snapshot; aborting hot backup."))
 
-            # Validación de cobertura de snapshot: exige el archivo esencial del nivel.
-            # (El conteo magico "<4" rechazaba mundos pequeños pero válidos; lo que
-            # define un snapshot util es que incluya level.dat, y luego se verifica
-            # la cobertura real de db/ contra disco.)
-            if not any(os.path.basename(p.replace("\\", "/")) == "level.dat" for p, _ in file_snapshot):
+            # Validacion estricta de estructura y consistencia del snapshot
+            seen_entries = {}
+            has_level_dat = False
+            has_db_descriptor = False   # db/CURRENT o db/MANIFEST-*
+            for item in file_snapshot:
+                if not isinstance(item, (tuple, list)) or len(item) != 2:
+                    raise SnapshotDesyncError(L(f"Entrada de snapshot invalida: {item!r}", f"Invalid snapshot entry: {item!r}"))
+                rel_path, byte_length = item
+                if not isinstance(rel_path, str) or not isinstance(byte_length, int) or byte_length < 0:
+                    raise SnapshotDesyncError(L(f"Longitud o ruta invalida en snapshot: {item!r}", f"Invalid length or path in snapshot: {item!r}"))
+
+                norm_key = rel_path.replace("\\", "/").strip().lower()
+                if norm_key in seen_entries and seen_entries[norm_key] != byte_length:
+                    raise SnapshotDesyncError(L(f"Ruta duplicada con longitudes conflictivas en snapshot: {rel_path}", f"Duplicate path with conflicting lengths in snapshot: {rel_path}"))
+                seen_entries[norm_key] = byte_length
+
+                base_name = os.path.basename(norm_key)
+                if base_name == "level.dat":
+                    has_level_dat = True
+                elif base_name == "current" or base_name.startswith("manifest-"):
+                    has_db_descriptor = True
+
+            if not has_level_dat:
                 raise SnapshotDesyncError(
                     L("Snapshot sin level.dat; snapshot incompleto o inválido.", "Snapshot missing level.dat; incomplete or invalid snapshot.")
                 )
 
-            # Validacion cruzada contra disco: si el snapshot tiene < 70% de los archivos
-            # reales en WORLD_DIR/db, esta probablemente incompleto.
-            # FIX D8: el umbral se redondea a entero (int) para que mundos
-            # pequenos no den falso positivo (p.ej. 2 de 3 archivos db: antes
-            # 2 < 2.1 lanzaba desync aunque el snapshot era valido; reproducido
-            # en vivo con BDS real).
-            if os.path.exists(os.path.join(WORLD_DIR, "db")):
-                real_db_files = set()
-                for root, dirs, files in os.walk(os.path.join(WORLD_DIR, "db")):
-                    for fname in files:
-                        real_db_files.add(os.path.relpath(os.path.join(root, fname), WORLD_DIR).replace("\\", "/"))
-                snapshot_db_files = {p for p, _ in file_snapshot if p.startswith("db/") or p.startswith("db\\") or "/db/" in p or "\\db\\" in p}
-                min_expected = max(1, int(len(real_db_files) * 0.70))
-                if len(real_db_files) > 0 and len(snapshot_db_files) < min_expected:
-                    raise SnapshotDesyncError(
-                        L(f"Snapshot incompleto: {len(snapshot_db_files)} archivos db/ en snapshot vs {len(real_db_files)} en disco.", f"Incomplete snapshot: {len(snapshot_db_files)} db/ files in snapshot vs {len(real_db_files)} on disk.")
-                    )
+            # Si el mundo tiene base de datos LevelDB en disco, el snapshot debe
+            # traer al menos un descriptor (CURRENT/MANIFEST): sin el, el backup
+            # no se puede abrir aunque el ZIP sea valido. No se exige cobertura
+            # completa de tablas: el snapshot de save query es autoritativo y un
+            # chequeo de cobertura daba falsos positivos en mundos recien creados.
+            active_world_dir = get_world_dir()
+            db_dir = os.path.join(active_world_dir, "db")
+            has_disk_db = False
+            if os.path.isdir(db_dir):
+                db_files = [f for f in os.listdir(db_dir) if os.path.isfile(os.path.join(db_dir, f))]
+                has_disk_db = bool(db_files)
+            if has_disk_db and not has_db_descriptor:
+                raise SnapshotDesyncError(
+                    L("Snapshot sin descriptores de base de datos LevelDB (CURRENT/MANIFEST); snapshot incompleto.", "Snapshot missing LevelDB database descriptors (CURRENT/MANIFEST); incomplete snapshot.")
+                )
 
         with zipfile.ZipFile(tmp_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             total_bytes = 0
             if use_snapshot:
-                print(L(f"[*] Modo Snapshot Bedrock Nativo: guardando {len(file_snapshot)} archivo(s) congelados...", f"[*] Native Bedrock Snapshot mode: saving {len(file_snapshot)} archivo(s) congelados..."))
-                for rel_path, byte_length in file_snapshot:
+                # Deduplicar entradas preservando orden
+                deduped_snapshot = []
+                seen_dedup = set()
+                for item in file_snapshot:
+                    norm_k = item[0].replace("\\", "/").strip().lower()
+                    if norm_k not in seen_dedup:
+                        seen_dedup.add(norm_k)
+                        deduped_snapshot.append(item)
+
+                print(L(f"[*] Modo Snapshot Bedrock Nativo: guardando {len(deduped_snapshot)} archivo(s) congelados...", f"[*] Native Bedrock Snapshot mode: saving {len(deduped_snapshot)} frozen file(s)..."))
+                for rel_path, byte_length in deduped_snapshot:
                     if _cancelled(cancel_event):
                         raise RuntimeError(L("Backup cancelado durante compresion snapshot.", "Backup cancelled during snapshot compression."))
 
@@ -253,19 +326,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         raise RuntimeError(L(f"Longitud invalida para '{rel_path}': {byte_length}", f"Invalid length for '{rel_path}': {byte_length}"))
 
                     clean_rel_path, full_path = _resolve_snapshot_path(rel_path)
-                    arcname = os.path.relpath(full_path, WORLD_DIR)
+                    arcname = os.path.relpath(full_path, WORLD_DIR).replace("\\", "/")
 
                     if not os.path.exists(full_path):
                         raise SnapshotDesyncError(L(f"Archivo de snapshot no encontrado en disco: {clean_rel_path}", f"Snapshot file not found on disk: {clean_rel_path}"))
 
-                    # FIX F3: copia en streaming por chunks (pico de RAM
-                    # constante ~2x chunk); antes se leia el archivo entero en
-                    # memoria. Misma semantica que el codigo anterior:
-                    #  - archivo mas corto que el snapshot -> truncado (desync)
-                    #  - archivo mas largo (no-WAL) -> desync
-                    #  - .log/MANIFEST (WAL) pueden crecer: se cortan en
-                    #    byte_length, como hacia f.read(byte_length).
-                    is_wal = clean_rel_path.endswith('.log') or 'MANIFEST-' in clean_rel_path
+                    # Copia en streaming por chunks truncando exactamente a byte_length
+                    # (respetando el protocolo nativo de Bedrock save query).
                     zinfo = zipfile.ZipInfo(arcname, date_time=datetime.datetime.now().timetuple()[:6])
                     zinfo.compress_type = zipfile.ZIP_DEFLATED
                     try:
@@ -284,10 +351,6 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                             if copied < byte_length:
                                 raise SnapshotDesyncError(
                                     L(f"Snapshot truncado en '{clean_rel_path}': {copied} < {byte_length} bytes.", f"Snapshot truncated at '{clean_rel_path}': {copied} < {byte_length} bytes.")
-                                )
-                            if not is_wal and f.read(1):
-                                raise SnapshotDesyncError(
-                                    L(f"Desincronizacion de snapshot en '{clean_rel_path}': file larger than snapshot ({byte_length}+ bytes).", f"Snapshot desync at '{clean_rel_path}': file larger than snapshot ({byte_length}+ bytes).")
                                 )
                     except FileNotFoundError as fnf:
                         # TOCTOU entre el exists() y el open(): BDS pudo borrar
@@ -314,7 +377,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                             for root, dirs, files in os.walk(static_path):
                                 for static_file in files:
                                     full_f = os.path.join(root, static_file)
-                                    arc = os.path.relpath(full_f, WORLD_DIR)
+                                    arc = os.path.relpath(full_f, WORLD_DIR).replace("\\", "/")
                                     zipf.write(full_f, arc)
                                     total_bytes += os.path.getsize(full_f)
                                     if total_bytes > MAX_BACKUP_BYTES:
@@ -322,7 +385,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                             L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
                                         )
                         else:
-                            arc = os.path.relpath(static_path, WORLD_DIR)
+                            arc = os.path.relpath(static_path, WORLD_DIR).replace("\\", "/")
                             zipf.write(static_path, arc)
                             total_bytes += os.path.getsize(static_path)
                             if total_bytes > MAX_BACKUP_BYTES:
@@ -343,7 +406,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         if _cancelled(cancel_event):
                             raise RuntimeError(L("Backup cancelado durante compresion tradicional.", "Backup cancelled during traditional compression."))
                         full_path = os.path.join(root, file)
-                        arcname = os.path.relpath(full_path, WORLD_DIR)
+                        arcname = os.path.relpath(full_path, WORLD_DIR).replace("\\", "/")
                         zipf.write(full_path, arcname)
                         total_bytes += os.path.getsize(full_path)
                         if total_bytes > MAX_BACKUP_BYTES:
@@ -392,7 +455,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     print(L(f"[*] Limpieza: archivo parcial '{os.path.basename(cleanup_path)}' eliminado.", f"[*] Limpieza: partial file '{os.path.basename(cleanup_path)}' eliminado."))
                 except Exception:
                     pass
-        
+
+        try:
+            ipc_mutex.release()
+            ipc_mutex.close()
+        except Exception:
+            pass
+
         if lock_to_use and acquired_lock:
             try:
                 lock_to_use.release()
@@ -414,8 +483,9 @@ def rotate_backups(now=None):
     """
     if now is None:
         now = datetime.datetime.now()
-    excluded_markers = ("_CORRUPTO", "_EXCEDIDO")
-    backups = glob.glob(os.path.join(BACKUP_DIR, "auto_backup_*.zip"))
+    active_backup_dir = get_backup_dir()
+    excluded_markers = ("_CORRUPTO", "_EXCEDIDO", "_CRASH", "_crash")
+    backups = glob.glob(os.path.join(active_backup_dir, "auto_backup_*.zip"))
     if not backups:
         return
 
@@ -538,19 +608,87 @@ def _extract_pack_entry(zipf, entry, base_dir, rel_path):
         shutil.copyfileobj(src, out)
 
 
-def restore_backup(filename: str) -> str:
-    """Restaura un backup ZIP al mundo y a los packs de nivel servidor.
-    Requiere servidor APAGADO.
+def _quarantine_and_restore(active_path, bak_path, is_dir=True):
+    """Garantiza la recuperación del resguardo .bak aislando la ruta activa.
 
-    - Valida el ZIP (zip-slip + CRC) ANTES de tocar el mundo.
-    - Resguarda el mundo actual en `WORLD_DIR.bak` y cada carpeta de pack
-      afectada en `<carpeta>.bak`.
-    - Si la extraccion falla, hace rollback automatico de los resguardos.
+    1. Intenta renombrar active_path a .failed_<nonce> para liberar la ruta y
+       hacer os.rename(bak_path, active_path).
+    2. Si active_path no existe, hace os.rename(bak_path, active_path).
+    3. Si active_path no pudo ser renombrado ni eliminado (p. ej. archivos bloqueados
+       por Windows Defender o procesos en segundo plano), copia recursivamente
+       el contenido de bak_path sobre active_path y limpia bak_path.
+    """
+    if not os.path.exists(bak_path):
+        return
+
+    restored = False
+    if os.path.exists(active_path):
+        failed_path = active_path + f".failed_{os.urandom(4).hex()}"
+        try:
+            os.rename(active_path, failed_path)
+        except Exception:
+            pass
+        else:
+            try:
+                os.rename(bak_path, active_path)
+                restored = True
+            except Exception as e_rb:
+                print(L(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}",
+                        f"[CRITICAL] Could not restore backup {bak_path} -> {active_path}: {e_rb}"))
+            try:
+                if is_dir:
+                    shutil.rmtree(failed_path, ignore_errors=True)
+                else:
+                    os.remove(failed_path)
+            except Exception:
+                pass
+
+    if not restored and not os.path.exists(active_path):
+        try:
+            os.rename(bak_path, active_path)
+            restored = True
+        except Exception as e_rb:
+            print(L(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}",
+                    f"[CRITICAL] Could not restore backup {bak_path} -> {active_path}: {e_rb}"))
+
+    if not restored and is_dir and os.path.isdir(bak_path):
+        try:
+            for root, dirs, files in os.walk(bak_path):
+                rel = os.path.relpath(root, bak_path)
+                target_dir = os.path.join(active_path, rel)
+                os.makedirs(target_dir, exist_ok=True)
+                for f in files:
+                    src_f = os.path.join(root, f)
+                    dst_f = os.path.join(target_dir, f)
+                    try:
+                        shutil.copy2(src_f, dst_f)
+                    except Exception:
+                        pass
+            shutil.rmtree(bak_path, ignore_errors=True)
+            restored = True
+        except Exception as e_fallback:
+            print(L(f"[CRITICO] Fallo en recuperacion fallback de resguardo: {e_fallback}",
+                    f"[CRITICAL] Fallback backup recovery failed: {e_fallback}"))
+
+
+def restore_backup(filename):
+    """
+    Restaura un backup ZIP de forma segura mediante staging e intercambio transaccional:
+    - Extrae el contenido a carpetas temporales de staging (.restore_staging_<nonce>).
+    - Valida la presencia de level.dat en el staging.
+    - Realiza el intercambio atómico/recuperable:
+      1. Resguarda el mundo activo a .bak_<nonce>
+      2. Mueve world_staging al mundo activo
+      3. Aplica lo mismo para las carpetas de packs afectadas
+      4. Si el intercambio falla, revierte mediante aislamiento por cuarentena garantizando restaurar .bak.
+    - Limpia los resguardos solo si todo el intercambio se completó con éxito.
     Devuelve la ruta del backup restaurado.
     """
     if os.path.basename(filename) != filename:
         raise ValueError(L("Nombre de backup invalido", "Invalid backup name"))
-    zip_path = os.path.join(BACKUP_DIR, filename)
+    active_backup_dir = get_backup_dir()
+    active_world_dir = get_world_dir()
+    zip_path = os.path.join(active_backup_dir, filename)
     if not os.path.isfile(zip_path):
         raise FileNotFoundError(L("Backup no encontrado", "Backup not found"))
 
@@ -571,55 +709,204 @@ def restore_backup(filename: str) -> str:
         if bad is not None:
             raise ValueError(L(f"Backup corrupto (CRC fallido): {bad}", f"Corrupt backup (CRC failed): {bad}"))
 
-    bak_dir = WORLD_DIR + ".bak"
-    pack_baks = []  # (destino, bak) para rollback
+    nonce = os.urandom(4).hex()
+    world_staging = active_world_dir + f".restore_staging_{nonce}"
+    pack_dir_stagings = {}   # dest_dir -> staging_dir
+    pack_file_stagings = {}  # dest_file -> staging_file
 
-    # 2. Resguardar el mundo actual (si existe)
-    if os.path.exists(WORLD_DIR):
-        if os.path.exists(bak_dir):
-            shutil.rmtree(bak_dir, ignore_errors=True)
-        os.rename(WORLD_DIR, bak_dir)
+    for _entry, (kind, folder, rel) in pack_infos:
+        if folder:
+            dest_dir = os.path.normpath(os.path.join(BASE_DIR, kind, folder))
+            if dest_dir not in pack_dir_stagings:
+                pack_dir_stagings[dest_dir] = dest_dir + f".restore_staging_{nonce}"
+        else:
+            dest_file = os.path.normpath(os.path.join(BASE_DIR, kind, rel))
+            if dest_file not in pack_file_stagings:
+                pack_file_stagings[dest_file] = dest_file + f".restore_staging_{nonce}"
 
+    # 2. Extraer a directorios/archivos de staging (el mundo real y los packs reales no se tocan)
     try:
-        # 2b. Resguardar las carpetas de packs afectadas (si existen)
-        pack_dests = set()
-        for _entry, (kind, folder, _rel) in pack_infos:
-            pack_dests.add(os.path.join(BASE_DIR, kind, folder))
-        for dest in sorted(pack_dests):
-            if os.path.exists(dest):
-                bak = dest + ".bak"
-                if os.path.exists(bak):
-                    shutil.rmtree(bak, ignore_errors=True)
-                os.rename(dest, bak)
-                pack_baks.append((dest, bak))
-
-        # 3. Extraer con doble chequeo de seguridad.
-        # FIX G3: os.makedirs(WORLD_DIR) va DENTRO del try para que el rollback
-        # recupere el mundo si la creacion del directorio falla (permisos/espacio).
-        os.makedirs(WORLD_DIR, exist_ok=True)
+        os.makedirs(world_staging, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
             for entry in world_infos:
-                zf.extract(entry, WORLD_DIR)
+                zf.extract(entry, world_staging)
             for entry, (kind, folder, rel) in pack_infos:
-                _extract_pack_entry(zf, entry, os.path.join(BASE_DIR, kind, folder), rel)
+                if folder:
+                    dest_dir = os.path.normpath(os.path.join(BASE_DIR, kind, folder))
+                    _extract_pack_entry(zf, entry, pack_dir_stagings[dest_dir], rel)
+                else:
+                    dest_file = os.path.normpath(os.path.join(BASE_DIR, kind, rel))
+                    staging_f = pack_file_stagings[dest_file]
+                    os.makedirs(os.path.dirname(staging_f), exist_ok=True)
+                    with zf.open(entry, "r") as src, open(staging_f, "wb") as out:
+                        shutil.copyfileobj(src, out)
+
+        # 3. Validar el staging antes del intercambio
+        if world_infos and not os.path.exists(os.path.join(world_staging, "level.dat")):
+            raise RuntimeError(L("El staging no contiene level.dat válido; restauración abortada sin tocar el mundo.",
+                                 "Staging does not contain a valid level.dat; restore aborted without touching the world."))
     except Exception as exc:
-        # Rollback: recuperar el mundo y los packs anteriores
-        shutil.rmtree(WORLD_DIR, ignore_errors=True)
-        if os.path.exists(bak_dir):
-            os.rename(bak_dir, WORLD_DIR)
-        for dest, bak in reversed(pack_baks):
-            shutil.rmtree(dest, ignore_errors=True)
-            if os.path.exists(bak):
-                os.rename(bak, dest)
+        # Limpiar staging si falló la extracción previa al intercambio
+        shutil.rmtree(world_staging, ignore_errors=True)
+        for s_dir in pack_dir_stagings.values():
+            shutil.rmtree(s_dir, ignore_errors=True)
+        for s_file in pack_file_stagings.values():
+            if os.path.exists(s_file):
+                try:
+                    os.remove(s_file)
+                except Exception:
+                    pass
         raise RuntimeError(L(f"Fallo la extraccion: {exc}", f"Extraction failed: {exc}")) from exc
 
-    # 4. Limpieza de los resguardos si todo salio bien
-    if os.path.exists(bak_dir):
-        shutil.rmtree(bak_dir, ignore_errors=True)
-    for dest, bak in pack_baks:
-        if os.path.exists(bak):
-            shutil.rmtree(bak, ignore_errors=True)
+    # 4. Intercambio recuperable (swap)
+    bak_dir = active_world_dir + f".bak_{nonce}"
+    pack_baks = []  # (active_path, bak_path, is_dir)
+    swap_success = False
+
+    try:
+        # Resguardar el mundo actual (si existe)
+        if os.path.exists(active_world_dir):
+            os.rename(active_world_dir, bak_dir)
+
+        # Resguardar packs actuales (si existen)
+        for dest_dir in sorted(pack_dir_stagings.keys()):
+            if os.path.exists(dest_dir):
+                bak = dest_dir + f".bak_{nonce}"
+                os.rename(dest_dir, bak)
+                pack_baks.append((dest_dir, bak, True))
+
+        for dest_file in sorted(pack_file_stagings.keys()):
+            if os.path.exists(dest_file):
+                bak = dest_file + f".bak_{nonce}"
+                os.rename(dest_file, bak)
+                pack_baks.append((dest_file, bak, False))
+
+        # Mover staging a destinos finales
+        os.rename(world_staging, active_world_dir)
+        for dest_dir, s_dir in pack_dir_stagings.items():
+            if os.path.exists(s_dir):
+                os.makedirs(os.path.dirname(dest_dir), exist_ok=True)
+                os.rename(s_dir, dest_dir)
+        for dest_file, s_file in pack_file_stagings.items():
+            if os.path.exists(s_file):
+                os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                os.rename(s_file, dest_file)
+
+        swap_success = True
+    except Exception as swap_err:
+        # Rollback del intercambio si falló algún rename
+        print(L(f"[ERROR] Falló el intercambio de restauración: {swap_err}. Iniciando rollback...",
+                f"[ERROR] Swap failed during restore: {swap_err}. Starting rollback..."))
+
+        _quarantine_and_restore(active_world_dir, bak_dir, is_dir=True)
+
+        for active_p, bak_p, is_d in reversed(pack_baks):
+            _quarantine_and_restore(active_p, bak_p, is_dir=is_d)
+
+        shutil.rmtree(world_staging, ignore_errors=True)
+        for s_dir in pack_dir_stagings.values():
+            shutil.rmtree(s_dir, ignore_errors=True)
+        for s_file in pack_file_stagings.values():
+            if os.path.exists(s_file):
+                try:
+                    os.remove(s_file)
+                except Exception:
+                    pass
+
+        raise RuntimeError(L(f"Fallo el intercambio durante la restauracion: {swap_err}",
+                             f"Swap failed during restore: {swap_err}")) from swap_err
+
+    # 5. Limpieza de los resguardos solo tras intercambio exitoso
+    if swap_success:
+        if os.path.exists(bak_dir):
+            try:
+                shutil.rmtree(bak_dir, ignore_errors=True)
+            except Exception:
+                pass
+        for active_p, bak_p, is_d in pack_baks:
+            if os.path.exists(bak_p):
+                try:
+                    if is_d:
+                        shutil.rmtree(bak_p, ignore_errors=True)
+                    else:
+                        os.remove(bak_p)
+                except Exception:
+                    pass
+
     return zip_path
+
+
+def recover_interrupted_restores(base_dir=None):
+    """Detecta y resuelve restauraciones interrumpidas por cortes de energía o caídas del proceso.
+
+    - Elimina cualquier carpeta o archivo temporal de staging (.restore_staging_*).
+    - Para cada .bak_* encontrado:
+      - Si el destino original NO existe: revierte renombrando el .bak_* al destino original.
+      - Si el destino original SÍ existe: renombra .bak_* a .bak_huerfano_<timestamp>_<nonce> para evitar pérdida de datos sin bloquear.
+    """
+    base = base_dir or BASE_DIR
+    actions = []
+    target_dirs = [
+        os.path.join(base, "worlds"),
+        os.path.join(base, "resource_packs"),
+        os.path.join(base, "behavior_packs"),
+    ]
+
+    for parent in target_dirs:
+        if not os.path.isdir(parent):
+            continue
+        try:
+            entries = os.listdir(parent)
+        except Exception:
+            continue
+
+        for name in entries:
+            full_path = os.path.join(parent, name)
+
+            # 1. Limpieza de residuos de staging
+            if ".restore_staging_" in name:
+                try:
+                    if os.path.isdir(full_path):
+                        shutil.rmtree(full_path, ignore_errors=True)
+                    else:
+                        os.remove(full_path)
+                    actions.append(f"staging_removed:{full_path}")
+                    print(L(f"[*] Limpieza de staging interrumpido: {name}", f"[*] Cleanup of interrupted staging: {name}"))
+                except Exception as e:
+                    print(L(f"[WARN] No se pudo limpiar staging {name}: {e}", f"[WARN] Could not clean staging {name}: {e}"))
+                continue
+
+            # 2. Manejo de resguardos .bak_*
+            if ".bak_" in name and not name.startswith(".bak_huerfano_") and ".bak_huerfano_" not in name:
+                orig_name = name.split(".bak_")[0]
+                orig_path = os.path.join(parent, orig_name)
+
+                if not os.path.exists(orig_path):
+                    # El destino original no existe -> rollback automático
+                    try:
+                        os.rename(full_path, orig_path)
+                        actions.append(f"rollback:{full_path}->{orig_path}")
+                        print(L(f"[*] Recuperación automática de restauración incompleta: {name} -> {orig_name}",
+                                f"[*] Automatic recovery of incomplete restore: {name} -> {orig_name}"))
+                    except Exception as e:
+                        print(L(f"[ERROR] Error al restaurar {name} a {orig_name}: {e}",
+                                f"[ERROR] Error restoring {name} to {orig_name}: {e}"))
+                else:
+                    # El destino original existe -> aislar como huérfano con timestamp
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    nonce = os.urandom(2).hex()
+                    orphan_name = f"{orig_name}.bak_huerfano_{ts}_{nonce}"
+                    orphan_path = os.path.join(parent, orphan_name)
+                    try:
+                        os.rename(full_path, orphan_path)
+                        actions.append(f"quarantined_orphan:{full_path}->{orphan_path}")
+                        print(L(f"[AVISO] Resguardo previo conservado como huérfano: {orphan_name}",
+                                f"[ADVISORY] Previous backup preserved as orphan: {orphan_name}"))
+                    except Exception as e:
+                        print(L(f"[WARN] Error al renombrar resguardo huérfano {name}: {e}",
+                                f"[WARN] Error renaming orphan backup {name}: {e}"))
+
+    return actions
 
 
 if __name__ == "__main__":

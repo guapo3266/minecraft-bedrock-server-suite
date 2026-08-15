@@ -20,6 +20,7 @@ import re
 import os
 
 import auto_backup
+import windows_process_guard as wpg
 
 from console_lang import L
 
@@ -63,9 +64,18 @@ BDS_PLAYER_CONNECTED = "Player connected:"
 BDS_PLAYER_DISCONNECTED = "Player disconnected:"
 BDS_SAVE_READY = "Data saved. Files are now ready to be copied."
 BDS_PLAYERS_LIST_HEAD = "players online:"
-_RE_PLAYER_CONNECT = re.compile(r"Player\s+connected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
-_RE_PLAYER_DISCONNECT = re.compile(r"Player\s+disconnected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
-_RE_PLAYERS_LIST = re.compile(r"There are (\d+)/\d+ players online:(.*)")
+_RE_PLAYER_CONNECT = re.compile(r"^Player\s+connected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
+_RE_PLAYER_DISCONNECT = re.compile(r"^Player\s+disconnected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
+_RE_PLAYERS_LIST = re.compile(r"^There are (\d+)/\d+ players online:(.*)")
+
+def _strip_log_prefix(line):
+    """Elimina prefijos estándar de timestamp/nivel de log de BDS ([YYYY-MM-DD HH:MM:SS:mmm LEVEL] o [LEVEL])."""
+    if not line:
+        return ""
+    return re.sub(
+        r'^(?:(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} (?:INFO|WARN|ERROR|DEBUG|LOG)\]|\[(?:INFO|WARN|ERROR|DEBUG|LOG)\]) +)+',
+        '', line,
+    )
 
 # ═══════════════════════════════════════════════════════════════
 # ESTADO GLOBAL (protegido por state_lock)
@@ -130,20 +140,12 @@ def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
 
 def parse_save_query_files(line):
     """Extrae pares (ruta_relativa, bytes) de una línea de save query."""
-    # Limpia prefijos de log de Bedrock ([YYYY-MM-DD HH:MM:SS:mmm LEVEL] o
-    # [LEVEL]) SOLO si van seguidos de espacio. Las rutas de archivo pueden
-    # empezar con '[' pero nunca contienen espacios (p.ej. '[/]:0'): el
-    # regex anterior comía cualquier '[...]' inicial y las perdía.
-    line = re.sub(
-        r'^(?:(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} (?:INFO|WARN|ERROR|DEBUG|LOG)\]|\[(?:INFO|WARN|ERROR|DEBUG|LOG)\]) +)+',
-        '', line,
-    )
-
-    if ":" not in line:
+    stripped = _strip_log_prefix(line).strip()
+    if not stripped or stripped.startswith("<") or ":" not in stripped:
         return []
 
     parsed = []
-    for rel_path, size_str in re.findall(r"([^,\r\n]+?):(\d+)", line):
+    for rel_path, size_str in re.findall(r"([^,\r\n]+?):(\d+)", stripped):
         clean_rel = rel_path.strip()
         if clean_rel:
             parsed.append((clean_rel, int(size_str)))
@@ -259,19 +261,19 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
         print(L("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...", "[Worker] Starting compression in a separate process (subprocess)..."))
 
-        import pickle as _pickle
+        import json as _json
         _base = os.path.dirname(os.path.abspath(__file__))
         _stamp = int(time.time() * 1000)
-        _nonce = os.urandom(4).hex()  # nombre no predecible: el .pkl se deserializa con pickle
+        _nonce = os.urandom(4).hex()
         _tmpdir = os.environ.get("TEMP", ".")
-        _snap_path = os.path.join(_tmpdir, "bw_snap_%d_%s.pkl" % (_stamp, _nonce))
+        _snap_path = os.path.join(_tmpdir, "bw_snap_%d_%s.json" % (_stamp, _nonce))
         _marker = os.path.join(_tmpdir, "bw_cancel_%d_%s.mark" % (_stamp, _nonce))
-        _result = os.path.join(_tmpdir, "bw_result_%d_%s.pkl" % (_stamp, _nonce))
+        _result = os.path.join(_tmpdir, "bw_result_%d_%s.json" % (_stamp, _nonce))
         _worker = os.path.join(_base, "backup_worker.py")
 
         try:
-            with open(_snap_path, "wb") as _f:
-                _pickle.dump(file_snapshot, _f)
+            with open(_snap_path, "w", encoding="utf-8") as _f:
+                _json.dump(file_snapshot, _f, ensure_ascii=False)
             # Si el evento de cancelacion es el nuevo _FileCancelEvent, usar SU
             # archivo como marker (asi los puntos de cancelacion existentes,
             # que llaman a .set(), cancelan de verdad al worker).
@@ -359,8 +361,8 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             active_compress_process = None
 
         try:
-            with open(_result, "rb") as _f:
-                result = _pickle.load(_f)
+            with open(_result, "r", encoding="utf-8") as _f:
+                result = _json.load(_f)
         except Exception:
             result = {"zip": None, "error": L("El proceso termino sin devolver un resultado", "The process exited without returning a result")}
         for _p in (_snap_path, _marker, _result):
@@ -465,76 +467,74 @@ def read_stdout():
             except Exception:
                 pass
 
-            # --- Detectar conexión de jugador ---
-            match_conn = _RE_PLAYER_CONNECT.search(line)
-            if match_conn:
-                name = match_conn.group(1).strip()
-                with state_lock:
-                    players_online.add(name)
+            # Limpieza de prefijo de log y filtro anti-spoofing de chat (<Jugador>)
+            clean_line = _strip_log_prefix(line).strip()
+            is_chat = clean_line.startswith("<")
 
-            # --- Detectar desconexión de jugador ---
-            match_disc = _RE_PLAYER_DISCONNECT.search(line)
-            if match_disc:
-                name = match_disc.group(1).strip()
-                with state_lock:
-                    players_online.discard(name)
+            match_conn = None
+            match_disc = None
 
-            # --- Sincronización con comando 'list' ---
-            # Fix: 'list' nunca se envía durante un backup, pero si una continuación
-            # quedó pendiente justo cuando arrancó un backup, no debe tratarse una línea
-            # de save query (p. ej. "Data saved. Files are now ready to be copied.")
-            # como si fuera una lista de nombres de jugadores.
-            with state_lock:
-                is_expecting_list = expecting_list_names and not backup_in_progress
-
-            match_list = _RE_PLAYERS_LIST.search(line)
-            if match_list:
-                count = int(match_list.group(1))
-                names_str = match_list.group(2).strip()
-                with state_lock:
-                    if count == 0:
-                        players_online.clear()
-                        expecting_list_names = False
-                    elif names_str:
-                        parsed_names = {n.strip() for n in names_str.split(",") if n.strip()}
-                        if parsed_names:
-                            players_online.clear()
-                            players_online.update(parsed_names)
-                            lines_waited_for_list = 0  # H3: parseo exitoso, contador consistente
-                        expecting_list_names = False
-                    else:
-                        expecting_list_names = True
-                        lines_waited_for_list = 0
-            elif is_expecting_list:
-                lines_waited_for_list += 1
-                if lines_waited_for_list > 10:
+            if not is_chat:
+                # --- Detectar conexión de jugador ---
+                match_conn = _RE_PLAYER_CONNECT.search(clean_line)
+                if match_conn:
+                    name = match_conn.group(1).strip()
                     with state_lock:
-                        expecting_list_names = False
-                else:
-                    # Fix: el chequeo debe hacerse sobre la línea ORIGINAL, no sobre
-                    # cleaned_line -- cleaned_line ya tiene el prefijo '[...]' removido,
-                    # así que 'cleaned_line.startswith("[")' nunca es True para una
-                    # línea real de BDS con timestamp, y el ruido (autosave, chunks,
-                    # etc.) se colaba como si fueran nombres de jugadores.
-                    if line.strip().startswith("["):
-                        pass
-                    else:
-                        cleaned_line = re.sub(r'^(?:\[.*?\]\s*)+', '', line)
-                        stripped = cleaned_line.strip()
-                        if stripped and stripped.lower() not in ("quit correctly",):
-                            parsed_names = {n.strip() for n in stripped.split(",") if n.strip()}
+                        players_online.add(name)
+
+                # --- Detectar desconexión de jugador ---
+                match_disc = _RE_PLAYER_DISCONNECT.search(clean_line)
+                if match_disc:
+                    name = match_disc.group(1).strip()
+                    with state_lock:
+                        players_online.discard(name)
+
+                # --- Sincronización con comando 'list' ---
+                with state_lock:
+                    is_expecting_list = expecting_list_names and not backup_in_progress
+
+                match_list = _RE_PLAYERS_LIST.search(clean_line)
+                if match_list:
+                    count = int(match_list.group(1))
+                    names_str = match_list.group(2).strip()
+                    with state_lock:
+                        if count == 0:
+                            players_online.clear()
+                            expecting_list_names = False
+                        elif names_str:
+                            parsed_names = {n.strip() for n in names_str.split(",") if n.strip()}
                             if parsed_names:
-                                with state_lock:
-                                    players_online.clear()
-                                    players_online.update(parsed_names)
-                                    expecting_list_names = False
-                                lines_waited_for_list = 0  # H3: parseo exitoso, contador consistente
+                                players_online.clear()
+                                players_online.update(parsed_names)
+                                lines_waited_for_list = 0
+                            expecting_list_names = False
+                        else:
+                            expecting_list_names = True
+                            lines_waited_for_list = 0
+                elif is_expecting_list:
+                    lines_waited_for_list += 1
+                    if lines_waited_for_list > 10:
+                        with state_lock:
+                            expecting_list_names = False
+                    else:
+                        if line.strip().startswith("["):
+                            pass
+                        else:
+                            stripped = clean_line
+                            if stripped and stripped.lower() not in ("quit correctly",):
+                                parsed_names = {n.strip() for n in stripped.split(",") if n.strip()}
+                                if parsed_names:
+                                    with state_lock:
+                                        players_online.clear()
+                                        players_online.update(parsed_names)
+                                        expecting_list_names = False
+                                    lines_waited_for_list = 0
 
             # --- Detectar respuesta exitosa de save query ---
-            save_ready_in_line = BDS_SAVE_READY in line
+            save_ready_in_line = (BDS_SAVE_READY in clean_line) if not is_chat else False
 
             # --- Parsear líneas de respuesta de 'save query' (Archivos y truncado de bytes) ---
-            parsed_files = parse_save_query_files(line)
+            parsed_files = parse_save_query_files(clean_line) if not is_chat else []
 
             if save_ready_in_line or parsed_files or save_query_ready_seen:
                 with state_lock:
@@ -808,9 +808,23 @@ def should_run_initial_backup():
 # PUNTO DE ENTRADA PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    wrapper_mutex = wpg.NamedMutex(f"BDS_Wrapper_{wpg.get_installation_hash(BASE_DIR)}")
+    if wrapper_mutex.already_exists or not wrapper_mutex.acquire(timeout_ms=100):
+        print(L("[Wrapper] [ERROR] Ya hay una instancia del wrapper en ejecución para este servidor. Abortando.",
+                "[Wrapper] [ERROR] An instance of the wrapper is already running for this server. Aborting."))
+        wrapper_mutex.close()
+        sys.exit(1)
+
+    bds_job = None
     print("=========================================================")
     print(L("  INICIANDO SERVIDOR CON WRAPPER", "  STARTING SERVER WITH WRAPPER"))
     print("=========================================================")
+
+    # Recuperación de restauraciones interrumpidas (.bak o .restore_staging_*)
+    try:
+        auto_backup.recover_interrupted_restores(BASE_DIR)
+    except Exception as e:
+        print(L(f"[Wrapper] [WARN] Error en recuperación de restauraciones: {e}", f"[Wrapper] [WARN] Error in restore recovery: {e}"))
 
     # Backup inicial (antes de arrancar el proceso de Bedrock)
     if should_run_initial_backup():
@@ -852,8 +866,21 @@ if __name__ == "__main__":
             cwd=BASE_DIR,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
+        if sys.platform == "win32":
+            bds_job = wpg.create_job_object_for_process(server_process.pid)
+            if not bds_job:
+                print(L("[Wrapper] [ERROR] No se pudo configurar el Job Object de Windows para BDS. Abortando.",
+                        "[Wrapper] [ERROR] Could not configure Windows Job Object for BDS. Aborting."))
+                try:
+                    server_process.kill()
+                    server_process.wait()
+                except Exception:
+                    pass
+                wrapper_mutex.close()
+                sys.exit(1)
     except Exception as e:
         print(L(f"[Wrapper] Error al iniciar BDS: {e}", f"[Wrapper] Error starting BDS: {e}"))
+        wrapper_mutex.close()
         sys.exit(1)
 
     # Lanzar hilos de servicio
@@ -977,10 +1004,13 @@ if __name__ == "__main__":
 
             # ── Paso 2: Backup final de cierre ──
             if server_process and server_process.returncode is not None and server_process.returncode != 0:
-                print(L("[Wrapper] ADVERTENCIA: El servidor no finalizó con código 0. El backup de cierre puede ser de un estado inconsistente.", "[Wrapper] WARNING: The server did not exit with code 0. El backup de cierre puede ser de un estado inconsistente."))
+                print(L(f"[Wrapper] ADVERTENCIA: BDS finalizó con código {server_process.returncode} (crash/anormal). Creando backup de emergencia...",
+                        f"[Wrapper] WARNING: BDS exited with code {server_process.returncode} (crash/abnormal). Creating emergency backup..."))
+                final_thread = threading.Thread(target=lambda: auto_backup.create_backup("cierre_crash"), daemon=True)
+            else:
+                print(L("[Wrapper] Creando backup final de cierre...", "[Wrapper] Creating final shutdown backup..."))
+                final_thread = threading.Thread(target=execute_final_backup, daemon=True)
 
-            print(L("[Wrapper] Creando backup final de cierre...", "[Wrapper] Creating final shutdown backup..."))
-            final_thread = threading.Thread(target=execute_final_backup, daemon=True)
             final_thread.start()
             try:
                 final_thread.join(timeout=FINAL_BACKUP_TIMEOUT_SEC)
@@ -993,3 +1023,6 @@ if __name__ == "__main__":
             print(L("[Wrapper] Servidor finalizado limpiamente. Adiós.", "[Wrapper] Server finished cleanly. Goodbye."))
         except BaseException as e:
             print(L(f"[Wrapper] Excepción durante limpieza final: {e}", f"[Wrapper] Exception during final cleanup: {e}"))
+
+        wpg.close_job_object(bds_job)
+        wrapper_mutex.close()

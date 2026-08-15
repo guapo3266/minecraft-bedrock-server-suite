@@ -13,15 +13,18 @@ Cubre:
 import os
 import sys
 import time
+import json
 import shutil
 import tempfile
 import datetime
 import asyncio
 import types
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import pytest
 import auto_backup
+import backup_worker
 import server_wrapper as sw
 import server_gui_server as sgs
 import gui_backend.supervisor as supervisor
@@ -822,6 +825,488 @@ def test_backup_frio_cancela_si_servidor_inicio(monkeypatch):
         sgs.manager.backup_in_progress = False
 
 
+# ── 15) Snapshot: archivos no-WAL que crecen post-snapshot se truncan a N bytes ──
+def test_snapshot_archivo_ldb_crece_post_snapshot_exitoso():
+    """Un archivo .ldb que creció en disco tras el snapshot se trunca a los N bytes
+    reportados por save query; el backup tiene éxito sin lanzar desync."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"LEVEL_DAT_HEADER_12345" * 5)
+        # Archivo .ldb con 200 bytes en disco, snapshot indica 100 bytes
+        ldb_path = os.path.join(fake_world, "db", "000005.ldb")
+        _write(ldb_path, b"A" * 100 + b"B" * 100)
+        _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000001")
+
+        snap = [
+            ("level.dat", 110),
+            ("db/000005.ldb", 100),
+            ("db/CURRENT", 15),
+        ]
+        result = auto_backup.create_backup("periodico", file_snapshot=snap)
+        assert result and os.path.exists(result), "el backup debio completarse truncando a 100 bytes"
+
+        # Verificar que en el ZIP el archivo tiene exactamente 100 bytes
+        with zipfile.ZipFile(result, "r") as zf:
+            content = zf.read("db/000005.ldb")
+            assert len(content) == 100
+            assert content == b"A" * 100
+    finally:
+        _teardown(tmp, old)
+
+
+def test_snapshot_level_dat_crece_post_snapshot_exitoso():
+    """level.dat que creció en disco tras save query se trunca a la longitud del snapshot."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"INIT_DATA" * 10 + b"EXTRA_ACTIVE_PLAYERS" * 5)
+        _write(os.path.join(fake_world, "db", "000001.ldb"), b"LDB_DATA_1234567890")
+        _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000001")
+
+        snap = [
+            ("level.dat", 90),
+            ("db/000001.ldb", 19),
+            ("db/CURRENT", 15),
+        ]
+        result = auto_backup.create_backup("periodico", file_snapshot=snap)
+        assert result and os.path.exists(result), "level.dat que crecio debio truncarse a 90 bytes"
+
+        with zipfile.ZipFile(result, "r") as zf:
+            content = zf.read("level.dat")
+            assert len(content) == 90
+            assert content == b"INIT_DATA" * 10
+    finally:
+        _teardown(tmp, old)
+
+
+def test_snapshot_archivo_truncado_en_disco_lanza_desync():
+    """Si un archivo en disco tiene MENOS bytes que los reportados por save query,
+    debe lanzar SnapshotDesyncError para reintento."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"LEVEL_DATA" * 10)
+        _write(os.path.join(fake_world, "db", "000001.ldb"), b"LDB_DATA")  # 8 bytes
+        _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000001")
+
+        snap = [
+            ("level.dat", 100),
+            ("db/000001.ldb", 500),  # snapshot espera 500 bytes pero solo hay 8
+            ("db/CURRENT", 15),
+        ]
+        with pytest.raises(auto_backup.SnapshotDesyncError):
+            auto_backup.create_backup("periodico", file_snapshot=snap)
+    finally:
+        _teardown(tmp, old)
+
+
+def test_snapshot_rutas_duplicadas_conflictivas_rechazado():
+    """Rutas duplicadas en el snapshot con tamaños distintos se rechazan."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"LEVEL_DATA" * 10)
+        _write(os.path.join(fake_world, "db", "000001.ldb"), b"LDB_DATA_1234567890" * 10)
+        _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000001")
+
+        snap = [
+            ("level.dat", 100),
+            ("db/000001.ldb", 50),
+            ("db/000001.ldb", 100),  # duplicado conflictivo
+            ("db/CURRENT", 15),
+        ]
+        with pytest.raises(auto_backup.SnapshotDesyncError):
+            auto_backup.create_backup("periodico", file_snapshot=snap)
+    finally:
+        _teardown(tmp, old)
+
+
+# ── 16) Restauración transaccional con staging ────────────────────────────────
+def test_restore_fallo_extraccion_a_mitad_preserva_mundo_original():
+    """Si la extracción del backup falla a mitad, el mundo original permanece 100% intacto."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"ORIGINAL_LEVEL_DAT_CONTENT")
+        _write(os.path.join(fake_world, "db", "000001.ldb"), b"ORIGINAL_LDB_CONTENT")
+
+        zip_path = os.path.join(fake_bkp, "auto_backup_test_invalido.zip")
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("level.dat", b"NEW_LEVEL_DAT")
+            zf.writestr("db/000001.ldb", b"NEW_LDB")
+
+        orig_extract = zipfile.ZipFile.extract
+
+        def fail_extract(self, member, path=None, pwd=None):
+            member_name = member.filename if hasattr(member, "filename") else member
+            if "000001.ldb" in member_name:
+                raise IOError("Fallo de disco simulado durante extraccion")
+            return orig_extract(self, member, path=path, pwd=pwd)
+
+        zipfile.ZipFile.extract = fail_extract
+        try:
+            with pytest.raises(Exception):
+                auto_backup.restore_backup("auto_backup_test_invalido.zip")
+        finally:
+            zipfile.ZipFile.extract = orig_extract
+
+        # El mundo original debe seguir intacto
+        assert os.path.exists(os.path.join(fake_world, "level.dat"))
+        with open(os.path.join(fake_world, "level.dat"), "rb") as f:
+            assert f.read() == b"ORIGINAL_LEVEL_DAT_CONTENT"
+        with open(os.path.join(fake_world, "db", "000001.ldb"), "rb") as f:
+            assert f.read() == b"ORIGINAL_LDB_CONTENT"
+    finally:
+        _teardown(tmp, old)
+
+
+def test_restore_exitoso_reemplaza_mundo_y_limpia_staging():
+    """Restauración exitosa intercambia staging con el mundo y limpia residuos."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"OLD_WORLD")
+        zip_path = os.path.join(fake_bkp, "auto_backup_test_good.zip")
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("level.dat", b"RESTORED_WORLD_LEVEL_DAT")
+            zf.writestr("db/CURRENT", b"MANIFEST-000001")
+
+        restored = auto_backup.restore_backup("auto_backup_test_good.zip")
+        assert restored == zip_path
+        with open(os.path.join(fake_world, "level.dat"), "rb") as f:
+            assert f.read() == b"RESTORED_WORLD_LEVEL_DAT"
+
+        # Verificar que no quedan carpetas .bak ni .restore_staging
+        parent = os.path.dirname(fake_world)
+        remaining = os.listdir(parent)
+        assert len(remaining) == 1 and remaining[0] == "Bedrock level"
+    finally:
+        _teardown(tmp, old)
+
+
+# ── 17) Bloqueo de update si falla backup preventivo ──────────────────────────
+def test_update_bds_aborta_si_backup_preventivo_falla(monkeypatch):
+    """Si el backup preventivo previo al update falla o retorna False, se aborta sin tocar binarios."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    installed_called = {"called": False}
+
+    def fake_create_backup(*args, **kwargs):
+        return False
+
+    def fake_download_and_install():
+        installed_called["called"] = True
+        return True, "1.21.0.0"
+
+    monkeypatch.setattr(actions_router.auto_backup, "create_backup", fake_create_backup)
+    monkeypatch.setattr(actions_router.bds_update_service, "_download_and_install_bds", fake_download_and_install)
+
+    sgs.manager.is_running = False
+    sgs.manager.update_in_progress = False
+
+    with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+        resp = client.post("/api/action/update_bds")
+        assert resp.json()["status"] == "update_dispatched"
+
+    time.sleep(0.5)
+    assert installed_called["called"] is False, "no debió llamar al instalador si el backup falló"
+    assert sgs.manager.update_in_progress is False
+
+
+# ── 18) Rotación excluye backups marcados como _CRASH ─────────────────────────
+def test_rotate_backups_excluye_crash_backups_de_capa_reciente():
+    """Los backups marcados _CRASH no desplazan backups saludables de la capa 15 recientes."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        now = datetime.datetime(2026, 8, 15, 12, 0, 0)
+        # Crear 15 backups saludables
+        for i in range(15):
+            p = os.path.join(fake_bkp, f"auto_backup_test_ok_{i}.zip")
+            _write(p, b"OK")
+            # poner mtime en el pasado
+            mtime = (now - datetime.timedelta(minutes=i + 1)).timestamp()
+            os.utime(p, (mtime, mtime))
+
+        # Crear 1 backup de CRASH con mtime más reciente que todos
+        crash_p = os.path.join(fake_bkp, "auto_backup_test_cierre_crash_2026-08-15_12-00-00_abcdef.zip")
+        _write(crash_p, b"CRASH")
+        os.utime(crash_p, (now.timestamp(), now.timestamp()))
+
+        auto_backup.rotate_backups(now=now)
+
+        # Los 15 backups saludables deben seguir existiendo + el crash backup (dentro de los 7 días)
+        remaining = os.listdir(fake_bkp)
+        assert len(remaining) == 16
+        assert os.path.basename(crash_p) in remaining
+    finally:
+        _teardown(tmp, old)
+
+
+# ── 19) Escritura atómica de server.properties ────────────────────────────────
+def test_write_props_values_atomico(tmp_path, monkeypatch):
+    """Verifica que _write_props_values escribe limpiamente sin dejar temporales."""
+    from gui_backend.services import properties as props_service
+    fake_props = str(tmp_path / "server.properties")
+    monkeypatch.setattr(props_service.config, "PROPS_PATH", fake_props)
+
+    # Escritura inicial
+    written = props_service._write_props_values({"server-name": "Test Server", "gamemode": "survival"})
+    assert "server-name" in written
+    assert os.path.exists(fake_props)
+
+    # No deben quedar archivos .tmp
+    tmps = list(tmp_path.glob("*.tmp_*"))
+    assert len(tmps) == 0
+
+    # Lectura roundtrip
+    vals = props_service._read_props_values()
+    assert vals["server-name"] == "Test Server"
+    assert vals["gamemode"] == "survival"
+
+
+# ── 20) Bloqueo Sec-Fetch-Site: cross-site en descarga ────────────────────────
+def test_download_backup_rechaza_sec_fetch_site_cross_site(tmp_path, monkeypatch):
+    """Peticiones de descarga iniciadas con Sec-Fetch-Site: cross-site son rechazadas con 403."""
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    fake_bkp = str(tmp_path / "backups")
+    os.makedirs(fake_bkp, exist_ok=True)
+    zip_path = os.path.join(fake_bkp, "auto_backup_test_ok.zip")
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("level.dat", b"TEST")
+
+    monkeypatch.setattr(auto_backup, "BACKUP_DIR", fake_bkp)
+
+    with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
+        # Cross-site -> 403
+        resp = client.get("/api/backups/auto_backup_test_ok.zip/download", headers={"sec-fetch-site": "cross-site"})
+        assert resp.status_code == 403
+        assert "cross-site" in resp.json()["detail"]
+
+        # Same-origin -> 200
+        resp_ok = client.get("/api/backups/auto_backup_test_ok.zip/download", headers={"sec-fetch-site": "same-origin"})
+        assert resp_ok.status_code == 200
+        assert resp_ok.content == open(zip_path, "rb").read()
+
+
+# ── 21) Resolución dinámica de mundo sin reimportar módulo ────────────────────
+def test_dynamic_world_name_resolution_without_reimport(tmp_path):
+    """El cambio de level-name en server.properties se refleja en tiempo de ejecución."""
+    import restore_backup as rb
+    props = tmp_path / "server.properties"
+    props.write_text("level-name=MundoAlfa\n", encoding="utf-8")
+
+    assert auto_backup.get_world_name(str(tmp_path)) == "MundoAlfa"
+    assert auto_backup.get_world_dir(str(tmp_path)).endswith("MundoAlfa")
+    assert rb._world_name(str(tmp_path)) == "MundoAlfa"
+    assert rb.get_world_dir(str(tmp_path)).endswith("MundoAlfa")
+
+    # Cambiar configuración en caliente
+    props.write_text("level-name=MundoBeta\n", encoding="utf-8")
+    assert auto_backup.get_world_name(str(tmp_path)) == "MundoBeta"
+    assert auto_backup.get_world_dir(str(tmp_path)).endswith("MundoBeta")
+    assert rb._world_name(str(tmp_path)) == "MundoBeta"
+    assert rb.get_world_dir(str(tmp_path)).endswith("MundoBeta")
+
+
+# ── 22) Rollback con cuarentena recupera .bak ante archivos bloqueados ─────────
+def test_restore_rollback_quarantines_and_recovers_bak_when_active_world_has_locked_files(tmp_path):
+    """_quarantine_and_restore aísla el mundo activo y recupera .bak incluso con archivos abiertos."""
+    active_world = str(tmp_path / "active_world")
+    bak_world = str(tmp_path / "active_world.bak_test")
+    os.makedirs(active_world, exist_ok=True)
+    os.makedirs(bak_world, exist_ok=True)
+
+    # Archivo original en bak
+    with open(os.path.join(bak_world, "level.dat"), "wb") as f:
+        f.write(b"ORIGINAL_LEVEL_DAT")
+
+    # Archivo en active_world simulando estar bloqueado o abierto
+    locked_file_path = os.path.join(active_world, "db_locked.log")
+    with open(locked_file_path, "wb") as f_active:
+        f_active.write(b"PARTIAL_STAGING_CONTENT")
+        # Mantener el handle abierto simulando bloqueo de proceso Windows
+        with open(locked_file_path, "rb") as _holder:
+            auto_backup._quarantine_and_restore(active_world, bak_world, is_dir=True)
+
+    # active_world debe haber sido recuperado desde bak_world
+    assert os.path.exists(active_world)
+    assert not os.path.exists(bak_world)
+    with open(os.path.join(active_world, "level.dat"), "rb") as f:
+        assert f.read() == b"ORIGINAL_LEVEL_DAT"
+
+
+# ── 23) Worker de compresión usa JSON con soporte Unicode ────────────────────
+def test_backup_worker_json_roundtrip_unicode_y_errores(tmp_path):
+    """Roundtrip de snapshot y result por el código REAL del worker (JSON UTF-8)."""
+    snap_file = str(tmp_path / "snap.json")
+    result_file = str(tmp_path / "result.json")
+
+    # Snapshot con nombres unicode: write/load a través de backup_worker
+    snapshot_data = [["level.dat", 100], ["db/archivo_áéíóú_ñ.ldb", 2048]]
+    with open(snap_file, "w", encoding="utf-8") as f:
+        json.dump(snapshot_data, f, ensure_ascii=False)
+    assert backup_worker.load_snapshot(snap_file) == snapshot_data
+
+    # Resultado con error unicode: write/load a través de backup_worker
+    result_data = {"zip": None, "error": "Error de compresión: verificación fallida 💥"}
+    backup_worker.write_result(result_file, result_data)
+    with open(result_file, "r", encoding="utf-8") as f:
+        loaded_result = json.load(f)
+    assert loaded_result == result_data
+    assert loaded_result["error"] == "Error de compresión: verificación fallida 💥"
+
+    # Roundtrip completo: lo que escribe write_result lo lee load (el wrapper
+    # usa json.load sobre _result; mismo formato, sin escape ascii).
+    roundtrip = {"zip": "auto_backup_x.zip", "error": None}
+    backup_worker.write_result(result_file, roundtrip)
+    with open(result_file, "r", encoding="utf-8") as f:
+        assert json.load(f) == roundtrip
+
+
+# ── 24) Blindaje contra spoofing de eventos desde chat ───────────────────────
+def test_chat_spoofing_defense_no_altera_estado():
+    """Verifica que mensajes de chat de jugadores no manipulen jugadores online ni save query."""
+    import server_wrapper as sw
+    from gui_backend import supervisor
+
+    with sw.state_lock:
+        prev_players = set(sw.players_online)
+    try:
+        # 1. Spoofing de desconexión
+        with sw.state_lock:
+            sw.players_online.clear()
+            sw.players_online.add("Steve")
+
+        chat_disconnect = "[2026-08-15 12:00:00:001 INFO] <Griefer> Player disconnected: Steve, xuid: 12345"
+        clean_line = sw._strip_log_prefix(chat_disconnect).strip()
+        assert clean_line.startswith("<")
+        # Al ser chat, _RE_PLAYER_DISCONNECT no debe ser evaluado ni coincidir sobre clean_line
+        assert not sw._RE_PLAYER_DISCONNECT.search(clean_line)
+        assert supervisor.classify_log_line(chat_disconnect) == "info"
+
+        # 2. Spoofing de save query
+        chat_save_query = "[2026-08-15 12:00:00:001 INFO] <Griefer> db/CURRENT:0, level.dat:0"
+        assert sw.parse_save_query_files(chat_save_query) == []
+        assert sw.parse_save_query_files("<Griefer> db/CURRENT:0, level.dat:0") == []
+
+        # 3. Spoofing de marcadores de backup de la GUI: el chat debe
+        # clasificarse como 'info' y no disparar la máquina de estados
+        # (run_wrapper_thread solo la evalúa cuando log_type == 'backup').
+        chat_compress = "[2026-08-15 12:00:00:002 INFO] <Griefer> Iniciando compresion de archivos en proceso separado"
+        chat_finished = "[2026-08-15 12:00:00:003 INFO] <Griefer> Backup finalizado"
+        assert supervisor.classify_log_line(chat_compress) == "info"
+        assert supervisor.classify_log_line(chat_finished) == "info"
+    finally:
+        with sw.state_lock:
+            sw.players_online.clear()
+            sw.players_online.update(prev_players)
+
+
+# ── 25) Validación estructural LevelDB con condición OR para descriptores ───
+def test_snapshot_leveldb_validation_con_or_y_vacio():
+    """Verifica que el snapshot valide descriptores LevelDB (CURRENT o MANIFEST) cuando hay db/ en disco."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"LEVEL_DAT_BYTES")
+        _write(os.path.join(fake_world, "db", "000001.ldb"), b"LDB_BYTES")
+        _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000001")
+        _write(os.path.join(fake_world, "db", "MANIFEST-000001"), b"MANIFEST_DATA")
+
+        # Caso 1: Snapshot sin CURRENT ni MANIFEST debe lanzar SnapshotDesyncError
+        snap_sin_desc = [("level.dat", 15), ("db/000001.ldb", 9)]
+        with pytest.raises(auto_backup.SnapshotDesyncError):
+            auto_backup.create_backup("periodico", file_snapshot=snap_sin_desc)
+
+        # Caso 2: Snapshot con CURRENT + archivo db es válido
+        snap_con_current = [("level.dat", 15), ("db/CURRENT", 15), ("db/000001.ldb", 9)]
+        res1 = auto_backup.create_backup("periodico", file_snapshot=snap_con_current)
+        assert res1 and os.path.exists(res1)
+
+        # Caso 3: Snapshot con MANIFEST (sin CURRENT) + archivo db es válido (condición OR)
+        snap_con_manifest = [("level.dat", 15), ("db/MANIFEST-000001", 13), ("db/000001.ldb", 9)]
+        res2 = auto_backup.create_backup("periodico", file_snapshot=snap_con_manifest)
+        assert res2 and os.path.exists(res2)
+
+        # Caso 5: snapshot autoritativo con solo el descriptor CURRENT (sin
+        # tablas .ldb) se acepta aunque el disco tenga tablas: el chequeo de
+        # cobertura daba falsos positivos en mundos pequeños (regresión
+        # test_cobertura_70_mundo_pequeno_sin_falso_positivo).
+        snap_descriptor_solo = [("level.dat", 15), ("db/CURRENT", 15)]
+        res4 = auto_backup.create_backup("periodico", file_snapshot=snap_descriptor_solo)
+        assert res4 and os.path.exists(res4)
+
+        # Caso 4: Mundo sin db/ en disco permite snapshot de solo level.dat
+        shutil.rmtree(os.path.join(fake_world, "db"))
+        res3 = auto_backup.create_backup("periodico", file_snapshot=[("level.dat", 15)])
+        assert res3 and os.path.exists(res3)
+    finally:
+        _teardown(tmp, old)
+
+
+# ── 26) Recuperación de restauraciones interrumpidas (rollback y huérfanos) ─
+def test_recover_interrupted_restores_rollback_y_huerfanos(tmp_path):
+    """Verifica limpieza de staging, rollback de .bak si destino falta y cuarentena si destino existe."""
+    worlds_dir = tmp_path / "worlds"
+    worlds_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Residuo de staging debe eliminarse
+    staging_dir = worlds_dir / "Bedrock level.restore_staging_deadbeef"
+    staging_dir.mkdir()
+    (staging_dir / "temp.dat").write_text("junk", encoding="utf-8")
+
+    # 2. .bak sin mundo activo original debe recuperarse (rollback)
+    missing_world_bak = worlds_dir / "MundoPerdido.bak_1234abcd"
+    missing_world_bak.mkdir()
+    (missing_world_bak / "level.dat").write_text("LOST_LEVEL_DAT", encoding="utf-8")
+
+    # 3. .bak con mundo activo existente debe aislarse como .bak_huerfano_*
+    active_world = worlds_dir / "MundoActivo"
+    active_world.mkdir()
+    (active_world / "level.dat").write_text("ACTIVE_LEVEL_DAT", encoding="utf-8")
+    orphan_bak = worlds_dir / "MundoActivo.bak_5678ef01"
+    orphan_bak.mkdir()
+    (orphan_bak / "level.dat").write_text("OLD_BAK_LEVEL_DAT", encoding="utf-8")
+
+    # 4. Residuos de packs: staging y .bak en resource_packs (no server_*)
+    packs_dir = tmp_path / "resource_packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    pack_staging = packs_dir / "MiPack.restore_staging_abcd1234"
+    pack_staging.mkdir()
+    (pack_staging / "manifest.json").write_text("junk", encoding="utf-8")
+    pack_bak = packs_dir / "MiPack.bak_99ff00aa"
+    pack_bak.mkdir()
+    (pack_bak / "manifest.json").write_text("PACK_BAK_MANIFEST", encoding="utf-8")
+
+    actions = auto_backup.recover_interrupted_restores(str(tmp_path))
+
+    # Staging fue eliminado
+    assert not staging_dir.exists()
+
+    # MundoPerdido fue restaurado a su nombre original
+    recovered_world = worlds_dir / "MundoPerdido"
+    assert recovered_world.exists()
+    assert (recovered_world / "level.dat").read_text(encoding="utf-8") == "LOST_LEVEL_DAT"
+    assert not missing_world_bak.exists()
+
+    # MundoActivo sigue intacto y su bak fue renombrado a .bak_huerfano_*
+    assert active_world.exists()
+    assert (active_world / "level.dat").read_text(encoding="utf-8") == "ACTIVE_LEVEL_DAT"
+    assert not orphan_bak.exists()
+    orphans = list(worlds_dir.glob("MundoActivo.bak_huerfano_*"))
+    assert len(orphans) == 1
+    assert (orphans[0] / "level.dat").read_text(encoding="utf-8") == "OLD_BAK_LEVEL_DAT"
+
+    # Packs: staging eliminado y .bak recuperado como pack activo
+    assert not pack_staging.exists()
+    assert (packs_dir / "MiPack").exists()
+    assert (packs_dir / "MiPack" / "manifest.json").read_text(encoding="utf-8") == "PACK_BAK_MANIFEST"
+    assert not pack_bak.exists()
+
+    # Todas las acciones registradas devuelven una lista con los eventos esperados
+    assert any("rollback" in a for a in actions)
+    assert any("staging_removed" in a for a in actions)
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v", "--tb=short"])
+
+

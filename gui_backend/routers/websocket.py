@@ -17,8 +17,18 @@ async def websocket_endpoint(websocket: WebSocket):
     if websocket.client is None or websocket.client.host not in ("127.0.0.1", "::1"):
         await websocket.close(code=1008)
         return
-    # S3: rechazar handshakes de navegador con Origin externo (anti-CSRF)
-    if not _is_allowed_origin(websocket.headers.get("origin")):
+    # S3: rechazar handshakes de navegador con Origin externo o puerto incorrecto (anti-CSRF)
+    expected_port = websocket.url.port
+    if expected_port is None:
+        host_hdr = websocket.headers.get("host", "")
+        if ":" in host_hdr:
+            try:
+                expected_port = int(host_hdr.split(":")[-1])
+            except ValueError:
+                expected_port = None
+        else:
+            expected_port = 80 if websocket.url.scheme in ("http", "ws") else 443
+    if not _is_allowed_origin(websocket.headers.get("origin"), expected_port=expected_port):
         await websocket.close(code=1008)
         return
     await websocket.accept()

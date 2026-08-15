@@ -49,6 +49,8 @@ class ServerManager:
         # TextIOWrapper no es thread-safe: escrituras concurrentes pueden
         # entremezclarse o corromper el buffer del pipe.
         self.stdin_lock = threading.Lock()
+        self.external_instance = False
+        self.external_instance_reason = None
 
     def add_log(self, text: str, log_type: str = "info"):
         timestamp = time.strftime("%H:%M:%S")
@@ -94,6 +96,12 @@ def build_public_status(manager, players=None):
     if players is None:
         with manager.lock:
             players = list(manager.players_online)
+            ext_inst = manager.external_instance
+            ext_reason = manager.external_instance_reason
+    else:
+        with manager.lock:
+            ext_inst = manager.external_instance
+            ext_reason = manager.external_instance_reason
     return {
         "running": manager.is_running,
         "players": players,
@@ -101,6 +109,8 @@ def build_public_status(manager, players=None):
         "last_backup": manager.last_backup_time,
         "backup_in_progress": manager.backup_in_progress,
         "update_in_progress": manager.update_in_progress,
+        "external_instance": ext_inst,
+        "external_instance_reason": ext_reason,
         "uptime": int(time.time() - manager.start_time) if (manager.is_running and manager.start_time) else 0,
         "hardware": hw
     }
