@@ -6,6 +6,9 @@ __pycache__/
 # ── Herramienta local (no es parte del proyecto) ────────
 .codewhale/
 
+# ── Instrucciones locales para agentes (cada carpeta tiene la suya) ──
+AGENTS.md
+
 # ── Datos del servidor (privados y/o pesados) ───────────
 worlds/
 backups/
