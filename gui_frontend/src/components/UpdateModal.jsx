@@ -6,10 +6,10 @@ import Magnet from './reactbits/Magnet';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import { DownloadMotionIcon, ShieldMotionIcon } from './hover/HardwareMotionIcons';
-import { X, CheckCircle } from 'lucide-react';
+import { X, CheckCircle, History } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
-export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpdate, isUpdating }) {
+export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpdate, onRollback, isUpdating }) {
   const { t } = useI18n();
   if (!isOpen) return null;
   const versionUnavailable = !updateInfo || updateInfo.has_update == null || updateInfo.unavailable;
@@ -105,6 +105,36 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                 </div>
               </SpotlightCard>
             </TiltCard>
+
+            {/* Versión anterior guardada: volver con un clic (swap simétrico) */}
+            {updateInfo?.has_previous && (
+              <TiltCard>
+                <SpotlightCard spotlightColor="rgba(244, 63, 94, 0.15)">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 text-sm font-bold text-rose-300">
+                        <History className="h-4 w-4" />
+                        <span>{t('rollbackTitle')}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {t('rollbackDesc')}{' '}
+                        <span className="font-mono text-slate-300">
+                          {updateInfo.previous_version ? `v${updateInfo.previous_version}` : t('rollbackUnknown')}
+                        </span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={onRollback}
+                      disabled={isUpdating}
+                      className="flex shrink-0 items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition-all hover:bg-rose-500/25 hover:border-rose-500/70 disabled:opacity-50"
+                    >
+                      <History className="h-4 w-4" />
+                      <ShinyText text={t('rollbackNow')} />
+                    </button>
+                  </div>
+                </SpotlightCard>
+              </TiltCard>
+            )}
           </div>
 
           {/* Footer Actions */}

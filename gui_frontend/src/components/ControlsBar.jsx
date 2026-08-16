@@ -69,6 +69,7 @@ export default function ControlsBar({ status, onAction }) {
           onClick={() => onAction('backup')}
           variant="amber"
           className="w-full py-4 text-base"
+          disabled={status?.backup_in_progress}
         >
           <Save className="h-5 w-5 text-amber-400" />
           <ShinyText text={t('backup')} />

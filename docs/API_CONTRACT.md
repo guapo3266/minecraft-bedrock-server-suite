@@ -11,8 +11,8 @@ Este documento es la referencia para detectar regresiones de comportamiento.
 | `_ensure_local` (IP loopback: `127.0.0.1`, `::1`) | Todos los endpoints REST y el WS | REST: `403 {"detail": "Acceso denegado: solo conexiones locales"}`; WS: `close(1008)` |
 | `_check_origin` (header `Origin` local con el MISMO puerto del request, o ausente; anti-CSRF) | Solo endpoints de escritura y el WS | `403 {"detail": "Acceso denegado: origen no permitido"}`; WS: `close(1008)` |
 
-Endpoint solo con `_ensure_local` (lectura): `GET /api/status`, `GET /api/server_properties`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /`, `GET /favicon.svg`.
-Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`, `POST /api/server_properties`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
+Endpoint solo con `_ensure_local` (lectura): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /`, `GET /favicon.svg`.
+Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
 
 ## Estado público (payload `status` — compartido por `/api/status`, WS `init` y WS `status`)
 
@@ -67,8 +67,35 @@ Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`,
 - 400 `"Cuerpo JSON invalido"` / `"No hay campos para guardar"` / `"Valores deben ser texto"` / detalle de validación por campo.
 - 200: `{"status": "ok", "written": [<claves>], "restart_required": true}` + log de sistema.
 
+### `GET /api/schedule`
+- 200: config de programación (o defaults si nunca se guardó):
+  `{"backup_interval_min": <int 5-1440>, "backup_only_with_players": <bool>, "daily_backup_time": "<HH:MM>"|null, "auto_restart_on_crash": <bool>, "daily_restart_time": "<HH:MM>"|null}`.
+
+### `POST /api/schedule`
+- Body: subset de las claves anteriores (las no enviadas conservan su valor/default).
+- 400 `"Cuerpo JSON invalido"` / validación (`backup_interval_min debe estar entre 5 y 1440`, `<campo> debe ser "HH:MM" o null`, etc.).
+- 200: `{"status": "ok", "config": <config normalizada>}` + log de sistema.
+- Efecto inmediato: el wrapper relee `data/schedule_config.json` por mtime en
+  cada tick de su scheduler (sin reiniciar).
+
 ### `GET /api/setup_status`
 - 200: `{"required": <bool>, "bds_installed": <bool>}`.
+
+### `GET /api/players`- 200: `{"online": ["<nombre>"], "known": [{"name", "xuid", "permission": "operator"|"member"|"visitor"|"default", "allowlisted": <bool>, "first_seen", "last_seen", "online": <bool>}], "allow_list_enabled": <bool>, "server_running": <bool>}`.
+- `known` sale del registro propio (`data/known_players.json`, alimentado por los eventos de conexión) cruzado con `permissions.json` (por xuid) y `allowlist.json` (por nombre o xuid); archivos ausentes/corruptos se leen como vacíos.
+- Solo lectura: las mutaciones de permisos/allowlist se hacen con comandos de consola de BDS (`op`/`deop`, `allowlist add/remove`, `kick`) vía `POST /api/command`.
+
+### `GET /api/history/metrics?hours=24`
+- `hours` ∈ {1, 6, 24}; otro valor → 400.
+- 200: `{"points": [{"ts", "ram_mb", "ram_pct", "cpu_pct", "disk_used_pct", "sys_used_pct", "running"}]}` (muestreo cada 30 s, downsample a ≤300 puntos).
+
+### `GET /api/history/logs?limit=500`
+- `limit` 1–1000; fuera de rango → 400.
+- 200: `{"logs": [{"ts", "time", "type", "text"}]}` en orden cronológico (más viejo primero). Retención 7 días.
+
+### `GET /api/history/sessions?days=7`
+- `days` 1–90; fuera de rango → 400.
+- 200: `{"sessions": [{"player", "xuid", "started_ts", "ended_ts", "duration_sec"}], "totals": [{"player", "total_sec", "sessions"}]}`. `ended_ts` null = sesión abierta. Retención 90 días.
 
 ### `POST /api/setup/install_bds`
 - 409 `"El servidor esta en ejecucion; detenlo antes de instalar"` — con servidor corriendo.
@@ -89,10 +116,11 @@ Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`,
 | `restart` | `{"status": "restarting"}` (progreso solo por logs) | — |
 | `backup` | `{"status": "hot_backup_dispatched"}` (caliente) / `{"status": "backup_dispatched"}` (frío) / `{"status": "busy", "message": "Ya hay un backup en curso"}` | 500 `"Error al iniciar backup: <e>"` (caliente) |
 | `update_bds` | `{"status": "update_dispatched"}` / `{"status": "already_updating"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (sonda externa, solo con `is_running == false`) |
+| `rollback_bds` | `{"status": "rollback_dispatched"}` / `{"status": "already_updating"}` | 409 instancia externa / 409 `"No hay una versión anterior guardada para restaurar"` |
 | otra | — | 400 `"Acción no válida"` |
 
 ### `GET /api/check_update`
-- 200: `{"current_version": <str|null>, "latest_version": <str|null>, "download_url": <str|null>, "has_update": <bool|null>, "unavailable": <bool>, "reason": <str|null>}`.
+- 200: `{"current_version": <str|null>, "latest_version": <str|null>, "download_url": <str|null>, "has_update": <bool|null>, "unavailable": <bool>, "reason": <str|null>, "has_previous": <bool>, "previous_version": <str|null>}` (`has_previous`: hay resguardo en `data/bds_previous` recuperable con `rollback_bds`).
 
 ### `GET /api/backups`
 - 200: `{"backups": [{"filename": "<str>", "size_mb": <float>, "date": "YYYY-MM-DD HH:MM:SS"}, ...]}` ordenado por mtime desc.

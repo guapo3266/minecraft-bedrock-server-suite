@@ -4,7 +4,7 @@ import ShinyText from './reactbits/ShinyText';
 import PingIndicator from './hover/PingIndicator';
 import { ServerMotionIcon } from './hover/AnimatedIcons';
 import { DownloadMotionIcon } from './hover/HardwareMotionIcons';
-import { Settings } from 'lucide-react';
+import { Settings, CalendarClock } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
 function formatUptime(totalSeconds) {
@@ -18,7 +18,7 @@ function formatUptime(totalSeconds) {
   return `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
 }
 
-export default function Navbar({ status, onOpenUpdate, onOpenProps, latency = null }) {
+export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedule, latency = null }) {
   const { t, lang, setLang } = useI18n();
   const isOnline = status.running;
   const isBackup = status.backup_in_progress;
@@ -59,6 +59,15 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, latency = nu
         >
           <Settings className="h-4 w-4 text-cyan-400" />
           <span>{t('settings')}</span>
+        </button>
+
+        <button
+          onClick={onOpenSchedule}
+          className="flex items-center gap-2 rounded-xl border border-purple-500/40 bg-purple-500/10 px-3.5 py-2 text-xs font-bold text-purple-300 hover:bg-purple-500/20 transition-all shadow-lg"
+          title={t('schedTitle')}
+        >
+          <CalendarClock className="h-4 w-4 text-purple-400" />
+          <span>{t('schedMenu')}</span>
         </button>
 
         <button

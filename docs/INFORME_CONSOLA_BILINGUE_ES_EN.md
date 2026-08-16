@@ -21,7 +21,14 @@ El toggle ES/EN del navbar controla también el idioma de los mensajes que gener
 
 1. **Todo mensaje nuevo de consola debe usar `L(es, en)`.** Sin `L()`, en modo ES saldrá en inglés sin error.
 2. **Ambos argumentos deben ser del mismo tipo** (f-string o string plano) **y con placeholders `{..}` idénticos** — ambos f-strings se evalúan con las mismas variables; si divergieran, el segundo lanzaría `KeyError`. Esta propiedad está protegida por `tests/test_console_lang_pbt.py` (exhaustivo sobre el código fuente + PBT de la extracción).
-3. **Los marcadores internos deben coincidir en AMBOS idiomas** en la clasificación de logs de `server_gui_server.py`:
+3. **Los marcadores internos deben coincidir en AMBOS idiomas** en la clasificación de logs de `gui_backend/supervisor.py` (`classify_log_line` y los handlers de `run_wrapper_thread`; antes del refactor V5 vivían en `server_gui_server.py`):
+
+   > **Actualización 2026-08-16:** desde el canal de eventos NDJSON
+   > (ver `INFORME_IPC_EVENTOS_NDJSON.md`), estos marcadores son el
+   > **FALLBACK** del estado: solo mandan cuando el canal de eventos no
+   > está vivo (`manager.events_alive == False`). Deben seguir coincidiendo
+   > en ambos idiomas hasta la fase 3 de aquella migración.
+
    | Marcador | Efecto |
    |---|---|
    | `"BDS stopped"` / `"BDS detenido"` | `server_stopped_event` → stop/restart/update esperan por él |

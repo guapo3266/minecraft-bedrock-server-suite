@@ -29,14 +29,22 @@ from gui_backend.metrics import get_hardware_metrics
 from gui_backend.state import manager
 from gui_backend.services import external_probe as external_probe_service
 from gui_backend.services import bds_update as bds_update_service
-from gui_backend.routers import system, properties, setup, actions, backups, websocket
+from gui_backend.services import watchdog as watchdog_service
+from gui_backend.services import history as history_service
+from gui_backend.routers import system, properties, setup, actions, backups, websocket, schedule, players, history
 
 
 async def hardware_metrics_loop():
+    tick = 0
     while True:
         try:
             external_probe_service.update_external_instance_state()
             manager.update_status()
+            tick += 1
+            if tick % 15 == 0:  # cada ~30s: persistir metricas + retencion diaria
+                hw = get_hardware_metrics()
+                history_service.record_metrics(hw, manager.is_running)
+                history_service.maybe_sweep()
         except Exception:
             pass
         await asyncio.sleep(2.0)
@@ -53,6 +61,16 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         manager.add_log(L(f"[Actualizador BDS] No se pudo revisar una actualizacion interrumpida: {exc}", f"[Actualizador BDS] Could not check for an interrupted update: {exc}"), "error")
     task = asyncio.create_task(hardware_metrics_loop())
+    # Watchdog opt-in (sin config no actua nunca). Hilo daemon: muere con la GUI.
+    try:
+        watchdog_service.start()
+    except Exception as exc:
+        manager.add_log(L(f"[Watchdog] No se pudo iniciar el watchdog: {exc}", f"[Watchdog] Could not start the watchdog: {exc}"), "error")
+    # Historial persistente: precarga log_history y registra los sinks
+    try:
+        history_service.start()
+    except Exception as exc:
+        manager.add_log(L(f"[Historial] No se pudo inicializar el historial: {exc}", f"[History] Could not initialize history: {exc}"), "error")
     yield
     task.cancel()
 
@@ -77,6 +95,9 @@ def create_app() -> FastAPI:
     app.include_router(setup.router)
     app.include_router(actions.router)
     app.include_router(backups.router)
+    app.include_router(schedule.router)
+    app.include_router(players.router)
+    app.include_router(history.router)
     app.include_router(websocket.router)
 
     return app

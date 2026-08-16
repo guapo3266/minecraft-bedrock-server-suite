@@ -12,6 +12,7 @@ from console_lang import L
 from gui_backend import config, supervisor
 from gui_backend.security import _ensure_local, _check_origin
 from gui_backend.services import bds_update as bds_update_service
+from gui_backend.services import lifecycle as lifecycle_service
 from gui_backend.state import manager
 
 router = APIRouter()
@@ -23,44 +24,22 @@ async def handle_action(action_name: str, request: Request):
     _check_origin(request)
     action = action_name.lower()
     if action == "start":
-        from gui_backend.services import external_probe
-        is_ext, _ = external_probe.detect_external_bds()
-        if is_ext:
+        status, detalle = lifecycle_service.start_wrapper()
+        if status == "external":
             raise HTTPException(
                 status_code=409,
                 detail="Hay una instancia externa del servidor en ejecución",
             )
-        # Chequeo + marcado de estado ATOMICOS bajo op_lock (sin bloqueo: si
-        # hay una restauracion o actualizacion en curso, se rechaza con 'busy'
-        # en vez de esperar). Dos requests simultaneos ya no pueden ver ambos
-        # is_running == False y lanzar dos wrappers.
-        if not manager.op_lock.acquire(blocking=False):
+        if status == "error":
+            return {"status": "error", "message": detalle}
+        if status == "busy":
             return {"status": "busy", "message": "Operación en curso (restauración/actualización)"}
-        try:
-            if manager.is_running:
-                return {"status": "already_running"}
-            # FIX G1: el subproceso del wrapper se crea BAJO el lock, de modo
-            # que wrapper_process existe antes de liberarlo: update_bds y
-            # restore ya no pueden ver is_running=True con wrapper_process
-            # None y saltarse la detencion del servidor durante el arranque.
-            try:
-                proc = supervisor._spawn_wrapper_process()
-            except Exception as e:
-                manager.add_log(L(f"[GUI Backend] Error al iniciar el wrapper: {e}", f"[GUI Backend] Error starting the wrapper: {e}"), "error")
-                return {"status": "error", "message": str(e)}
-            # FIX G2: wrapper_process se asigna BAJO el lock (el hilo lo
-            # re-afirma al arrancar): tras la respuesta de start, /stop ya
-            # nunca ve is_running=True con wrapper_process=None.
-            manager.wrapper_process = proc
-            manager.is_running = True  # el hilo lo reafirma al arrancar
-        finally:
-            manager.op_lock.release()
-        threading.Thread(target=supervisor.run_wrapper_thread, args=(proc,), daemon=True).start()
-        return {"status": "starting"}
+        return {"status": status}
 
     elif action == "stop":
         if not manager.is_running or not manager.wrapper_process:
             return {"status": "not_running"}
+        manager.stop_requested = True  # stop deliberado: el watchdog no debe re-lanzar
         try:
             with manager.stdin_lock:
                 manager.wrapper_process.stdin.write("stop\n")
@@ -71,74 +50,7 @@ async def handle_action(action_name: str, request: Request):
         return {"status": "stopping"}
 
     elif action == "restart":
-        def do_restart():
-            exit_event = manager.wrapper_exit_event
-            if manager.is_running and manager.wrapper_process:
-                try:
-                    with manager.stdin_lock:
-                        manager.wrapper_process.stdin.write("stop\n")
-                        manager.wrapper_process.stdin.flush()
-                except Exception:
-                    pass
-                manager.add_log(L("[GUI Backend] Reiniciando servidor...", "[GUI Backend] Restarting server..."), "system")
-                # G8: espera en DOS fases antes de lanzar otro wrapper (evita
-                # dobles instancias y pisado de estado):
-                #  Fase 1: que BDS muera (evento propio, independiente del
-                #    cierre del wrapper). Antes se esperaba el evento de salida
-                #    del wrapper con solo 30s, pero ese evento solo llega tras
-                #    el backup final de cierre (tope interno de 240s): con un
-                #    mundo grande el reinicio se abortaba siempre aunque el
-                #    servidor ya se hubiera detenido.
-                if not manager.server_stopped_event.wait(timeout=config.SERVER_STOP_TIMEOUT_SEC):
-                    manager.add_log(
-                        L(f"[GUI Backend] El servidor no se detuvo en {config.SERVER_STOP_TIMEOUT_SEC}s. "
-                          "Reinicio cancelado.",
-                          f"[GUI Backend] The server did not stop within {config.SERVER_STOP_TIMEOUT_SEC}s. "
-                          "Restart cancelled."),
-                        "error",
-                    )
-                    return
-                #  Fase 2: que el wrapper termine del todo (backup final de
-                #    cierre incluido) antes de lanzar otro: dos wrappers
-                #    comprimiendo el mismo mundo pisarian sus copias.
-                if not exit_event.wait(timeout=config.WRAPPER_EXIT_TIMEOUT_SEC):
-                    manager.add_log(
-                        L(f"[GUI Backend] El wrapper no termino en {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
-                          "(incluye el backup final de cierre). Reinicio cancelado; "
-                          "inicia el servidor manualmente.",
-                          f"[GUI Backend] The wrapper did not finish within {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
-                          "(includes the final shutdown backup). Restart cancelled; "
-                          "start the server manually."),
-                        "error",
-                    )
-                    return
-            # Chequeo + lanzamiento atomicos bajo op_lock: si hay una
-            # actualizacion/restauracion/backup en curso, no se re-lanza BDS
-            # (arrancar mientras se reemplazan binarios o se copia el mundo
-            # corromperia ambos).
-            if not manager.op_lock.acquire(blocking=False):
-                manager.add_log(L("[GUI Backend] Operación en curso (actualización/restauración/backup); reinicio abortado.", "[GUI Backend] Operation in progress (update/restore/backup); restart aborted."), "error")
-                return
-            try:
-                # Alguien más pudo arrancar el servidor mientras esperábamos; no duplicar
-                if manager.is_running:
-                    manager.add_log(L("[GUI Backend] Otro inicio detectado durante el reinicio. Abortando.", "[GUI Backend] Another start detected during restart. Aborting."), "error")
-                    return
-                # FIX G1: crear el subproceso bajo el lock (igual que start)
-                proc = supervisor._spawn_wrapper_process()
-                # FIX G2: wrapper_process asignado bajo el lock
-                manager.wrapper_process = proc
-                # H1: marcar en marcha bajo el lock (igual que start). Sin
-                # esto, dos restarts simultaneos podian ver is_running=False
-                # tras el spawn y lanzar dos wrappers que pisarian el mundo.
-                manager.is_running = True
-                threading.Thread(target=supervisor.run_wrapper_thread, args=(proc,), daemon=True).start()
-            except Exception as e:
-                manager.add_log(L(f"[GUI Backend] Error al iniciar el wrapper: {e}", f"[GUI Backend] Error starting the wrapper: {e}"), "error")
-            finally:
-                manager.op_lock.release()
-
-        threading.Thread(target=do_restart, daemon=True).start()
+        threading.Thread(target=lifecycle_service.restart_wrapper, daemon=True).start()
         return {"status": "restarting"}
 
     elif action == "backup":
@@ -148,46 +60,7 @@ async def handle_action(action_name: str, request: Request):
             # segundo podian pisarse por compartir nombre).
             if manager.backup_in_progress:
                 return {"status": "busy", "message": L("Ya hay un backup en curso", "A backup is already in progress")}
-            def manual_off_backup():
-                # op_lock durante TODA la copia: un start inmediato modificaria
-                # el mundo mientras se comprime, dando un backup inconsistente.
-                with manager.op_lock:
-                    # Re-chequeo atomico bajo el lock: `start` pudo ganar la
-                    # carrera entre la decision del handler (servidor apagado)
-                    # y la adquisicion del lock. Un backup en frio sobre un
-                    # mundo vivo seria inconsistente.
-                    if manager.is_running:
-                        manager.add_log(
-                            L("[GUI Backend] El servidor se encendió; backup en frío cancelado (usa el backup en caliente).", "[GUI Backend] The server started; cold backup cancelled (use the hot backup)."),
-                            "error",
-                        )
-                        return
-                    # Re-chequeo atomico bajo el lock (FIX G5): dos clics
-                    # simultaneos pueden pasar el check del handler; aqui se
-                    # descarta el segundo con op_lock ya adquirido.
-                    if manager.backup_in_progress:
-                        manager.add_log(
-                            L("[GUI Backend] Ya hay un backup en frío en curso; solicitud ignorada.", "[GUI Backend] A cold backup is already in progress; request ignored."),
-                            "error",
-                        )
-                        return
-                    manager.backup_in_progress = True
-                    manager.update_status()
-                    manager.add_log(L("[GUI Backend] Ejecutando backup en frío...", "[GUI Backend] Running cold backup..."), "backup")
-                    try:
-                        zip_path = auto_backup.create_backup("gui_manual")
-                        if zip_path:
-                            manager.last_backup_time = time.strftime("%H:%M:%S")
-                            manager.add_log(L(f"[GUI Backend] Backup exitoso: {os.path.basename(zip_path)}", f"[GUI Backend] Backup successful: {os.path.basename(zip_path)}"), "backup")
-                        else:
-                            manager.add_log(L("[GUI Backend] Error en backup: no se produjo un ZIP (revisa la consola del servidor).", "[GUI Backend] Backup error: no ZIP was produced (check the server console)."), "error")
-                    except Exception as e:
-                        manager.add_log(L(f"[GUI Backend] Error en backup: {e}", f"[GUI Backend] Backup error: {e}"), "error")
-                    finally:
-                        manager.backup_in_progress = False
-                        manager.update_status()
-
-            threading.Thread(target=manual_off_backup, daemon=True).start()
+            threading.Thread(target=lifecycle_service.cold_backup, args=("gui_manual",), daemon=True).start()
             return {"status": "backup_dispatched"}
         else:
             try:
@@ -223,48 +96,10 @@ async def handle_action(action_name: str, request: Request):
             manager.op_lock.acquire()
             try:
                 manager.add_log(L("[Actualizador BDS] Iniciando proceso de actualización de Mojang...", "[Actualizador BDS] Starting Mojang update process..."), "system")
-                if manager.is_running and manager.wrapper_process:
-                    manager.add_log(L("[Actualizador BDS] Deteniendo servidor de Minecraft...", "[Actualizador BDS] Stopping Minecraft server..."), "system")
-                    try:
-                        with manager.stdin_lock:
-                            manager.wrapper_process.stdin.write("stop\n")
-                            manager.wrapper_process.stdin.flush()
-                    except Exception:
-                        pass
-                    # G8: espera en DOS fases antes de tocar binarios:
-                    #  Fase 1: BDS muerto (evento propio; antes se esperaba la
-                    #    salida del wrapper con 30s, que no llega hasta terminar
-                    #    el backup final de cierre y abortaba la actualizacion
-                    #    con un mensaje enganoso).
-                    if not manager.server_stopped_event.wait(timeout=config.SERVER_STOP_TIMEOUT_SEC):
-                        # D6: comportamiento intencional (nunca actualizar con el
-                        # servidor vivo); el mensaje deja claro el estado y como seguir.
-                        # H1: si vencio la fase 1, BDS puede seguir deteniendose:
-                        # el mensaje no da por hecho que quedo detenido.
-                        manager.add_log(
-                            L(f"[Actualizador BDS] El servidor no se detuvo en {config.SERVER_STOP_TIMEOUT_SEC}s. "
-                              "Actualización cancelada; "
-                              "si el servidor quedó detenido, reinícialo con ▶ Iniciar.",
-                              f"[Actualizador BDS] The server did not stop within {config.SERVER_STOP_TIMEOUT_SEC}s. "
-                              "Update cancelled; "
-                              "if the server ended up stopped, restart it with ▶ Start."),
-                            "error",
-                        )
-                        return
-                    #  Fase 2: wrapper completamente terminado (backup final de
-                    #    cierre incluido) antes de reemplazar binarios o lanzar
-                    #    el backup preventivo.
-                    if not manager.wrapper_exit_event.wait(timeout=config.WRAPPER_EXIT_TIMEOUT_SEC):
-                        manager.add_log(
-                            L(f"[Actualizador BDS] El wrapper no termino en {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
-                              "(incluye el backup final de cierre). Actualización cancelada; "
-                              "el servidor quedó detenido. Reinícialo con ▶ Iniciar.",
-                              f"[Actualizador BDS] The wrapper did not finish within {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
-                              "(includes the final shutdown backup). Update cancelled; "
-                              "the server ended up stopped. Restart it with ▶ Start."),
-                            "error",
-                        )
-                        return
+                # G8/D6: detener y esperar completo antes de tocar binarios;
+                # si no se detiene a tiempo, la actualizacion se cancela.
+                if not lifecycle_service.stop_and_wait("[Actualizador BDS]"):
+                    return
 
                 manager.add_log(L("[Actualizador BDS] Ejecutando backup preventivo de seguridad...", "[Actualizador BDS] Running preventive safety backup..."), "backup")
                 backup_ok = False
@@ -297,6 +132,48 @@ async def handle_action(action_name: str, request: Request):
 
         threading.Thread(target=do_update, daemon=True).start()
         return {"status": "update_dispatched"}
+
+    elif action == "rollback_bds":
+        from gui_backend.services import external_probe
+        if not manager.is_running:
+            is_ext, _ = external_probe.detect_external_bds()
+            if is_ext:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Hay una instancia externa del servidor en ejecución",
+                )
+        if manager.update_in_progress:
+            return {"status": "already_updating"}
+        has_previous, _prev_version = bds_update_service.read_previous_version()
+        if not has_previous:
+            raise HTTPException(
+                status_code=409,
+                detail="No hay una versión anterior guardada para restaurar",
+            )
+        # Reusa el flag update_in_progress: el frontend ya tiene wired el
+        # flujo de "operación en curso" (modal, cierre automatico).
+        manager.update_in_progress = True
+        manager.update_status()
+
+        def do_rollback():
+            # op_lock durante TODO el ciclo: un start durante la reversión
+            # arrancaria BDS mientras se reemplazan los binarios.
+            manager.op_lock.acquire()
+            try:
+                manager.add_log(L("[Rollback BDS] Iniciando reversión a la versión anterior...", "[Rollback BDS] Starting rollback to the previous version..."), "system")
+                if not lifecycle_service.stop_and_wait("[Rollback BDS]"):
+                    return
+                bds_update_service.rollback_bds()
+            except Exception as e:
+                manager.add_log(L(f"[Rollback BDS] Error al revertir: {e}", f"[Rollback BDS] Error rolling back: {e}"), "error")
+            finally:
+                manager.op_lock.release()
+                manager.update_in_progress = False
+                manager.update_status()
+                manager.add_log(L("[Rollback BDS] Proceso de reversión finalizado.", "[Rollback BDS] Rollback process finished."), "system")
+
+        threading.Thread(target=do_rollback, daemon=True).start()
+        return {"status": "rollback_dispatched"}
 
     else:
         raise HTTPException(status_code=400, detail="Acción no válida")
@@ -340,6 +217,7 @@ async def check_update(request: Request):
         # Comparación semántica numérica (evita falsos 'has_update' con versiones más nuevas)
         has_update = bds_update_service._version_tuple(latest_ver) > bds_update_service._version_tuple(current_ver)
 
+    has_previous, previous_version = bds_update_service.read_previous_version()
     return {
         "current_version": current_ver,
         "latest_version": latest_ver,
@@ -347,4 +225,6 @@ async def check_update(request: Request):
         "has_update": has_update,
         "unavailable": unavailable,
         "reason": reason,
+        "has_previous": has_previous,
+        "previous_version": previous_version,
     }

@@ -125,6 +125,11 @@ async def send_command(req: CommandRequest, request: Request):
         manager.add_log(L("[SISTEMA] El servidor de Minecraft está APAGADO. Presiona '▶ Iniciar Servidor' primero.", "[SISTEMA] The Minecraft server is OFF. Press '▶ Start Server' first."), "error")
         return {"status": "offline", "message": "El servidor no está en ejecución"}
     
+    # 'stop' en consola apaga el wrapper entero (lo intercepta el wrapper,
+    # no BDS): es un stop deliberado y el watchdog no debe re-lanzarlo.
+    if cmd.lower() == "stop":
+        manager.stop_requested = True
+
     try:
         with manager.stdin_lock:
             manager.wrapper_process.stdin.write(cmd + "\n")

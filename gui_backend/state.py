@@ -20,6 +20,7 @@ class ServerManager:
         self.wrapper_process = None
         self.is_running = False
         self.players_online = set()
+        self.players_xuid = {}  # cache name -> xuid (registry persistente en supervisor)
         self.log_history = []
         self.max_log_history = 500
         self._log_seq = 0  # id secuencial estable para React keys (filtros/streaming)
@@ -51,6 +52,22 @@ class ServerManager:
         self.stdin_lock = threading.Lock()
         self.external_instance = False
         self.external_instance_reason = None
+        # Registros de suscriptores para services que viven ARRIBA en la
+        # cadena (state/supervisor no pueden importarlos): history engancha
+        # aqui sus escritores en start(). Cada sink se invoca fuera de
+        # manager.lock y nunca debe lanzar (add_log lo envuelve en try/except).
+        self.log_sinks = []         # sink(entry: dict) — cada add_log
+        self.player_event_sinks = []  # sink(name, xuid, online: bool)
+        # Canal de eventos NDJSON del wrapper (IPC estructurada): path del
+        # archivo que el wrapper escribe esta sesion (lo fija _spawn_wrapper_
+        # process) y señal de canal vivo (True tras recibir wrapper_started;
+        # con False el parseo de stdout de supervisor sigue siendo autoritativo).
+        self.events_file = None
+        self.events_alive = False
+        # True = la ausencia del wrapper es esperada (nunca arranco o alguien
+        # pidio pararlo). El watchdog solo trata como crash un wrapper muerto
+        # con False; _spawn_wrapper_process lo limpia en cada arranque.
+        self.stop_requested = True
 
     def add_log(self, text: str, log_type: str = "info"):
         timestamp = time.strftime("%H:%M:%S")
@@ -64,6 +81,13 @@ class ServerManager:
         # Broadcast vía WebSocket en asyncio
         if self.loop and self.active_websockets:
             asyncio.run_coroutine_threadsafe(self.broadcast({"type": "log", "data": entry}), self.loop)
+        # Persistencia (history) y otros suscriptores: fuera del lock, y un
+        # sink que falle jamas rompe el logging en vivo.
+        for sink in list(self.log_sinks):
+            try:
+                sink(entry)
+            except Exception:
+                pass
 
     def update_status(self):
         status_payload = {

@@ -24,3 +24,8 @@ SERVER_STOP_TIMEOUT_SEC = 75      # Fase 1: max segundos esperando que BDS muera
                                   # el wrapper fuerza el kill y la GUI solo observa)
 WRAPPER_EXIT_TIMEOUT_SEC = 450    # Fase 2: max segundos esperando al wrapper completo
                                   # (75 BDS + 135 join worker + 240 backup final + margen)
+
+# Watchdog (gui_backend/services/watchdog.py): opt-in via data/schedule_config.json.
+WATCHDOG_POLL_SEC = 5             # Periodo del ciclo de vigilancia
+WATCHDOG_STABLE_UPTIME_SEC = 600  # Uptime tras el cual se reinicia el backoff de crashes
+WATCHDOG_BACKOFF_SCHEDULE = (30, 60, 120, 300)  # Segundos entre re-arranques consecutivos

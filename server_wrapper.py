@@ -11,6 +11,7 @@ Que hace:
   - Redireccion de logs con manejo de errores de encoding.
 """
 
+import json
 import subprocess
 import threading
 import multiprocessing
@@ -37,7 +38,6 @@ from console_lang import L
 # ═══════════════════════════════════════════════════════════════
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
-BACKUP_INTERVAL_SEC = 30 * 60           # 30 minutos entre backups
 WATCHDOG_HOLDING_TIMEOUT_SEC = 60       # Max segundos esperando respuesta de save query
 LIST_SYNC_INTERVAL_SEC = 60             # Cada 60s (modo prueba)
 FINAL_BACKUP_LOCK_WAIT_SEC = 5          # Espera mínima por el lock (ya no hay proceso activo)
@@ -64,9 +64,81 @@ BDS_PLAYER_CONNECTED = "Player connected:"
 BDS_PLAYER_DISCONNECTED = "Player disconnected:"
 BDS_SAVE_READY = "Data saved. Files are now ready to be copied."
 BDS_PLAYERS_LIST_HEAD = "players online:"
-_RE_PLAYER_CONNECT = re.compile(r"^Player\s+connected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
-_RE_PLAYER_DISCONNECT = re.compile(r"^Player\s+disconnected\s*:\s*(.+?),\s*xuid\s*:", re.IGNORECASE)
+_RE_PLAYER_CONNECT = re.compile(r"^Player\s+connected\s*:\s*(.+?),\s*xuid\s*:\s*(\d+)", re.IGNORECASE)
+_RE_PLAYER_DISCONNECT = re.compile(r"^Player\s+disconnected\s*:\s*(.+?),\s*xuid\s*:\s*(\d+)", re.IGNORECASE)
 _RE_PLAYERS_LIST = re.compile(r"^There are (\d+)/\d+ players online:(.*)")
+_RE_VERSION = re.compile(r"Version:\s*(\d+\.\d+\.\d+\.\d+)")
+
+# ═══════════════════════════════════════════════════════════════
+# Canal de eventos NDJSON (IPC wrapper -> GUI)
+# ───────────────────────────────────────────────────────────────
+# Dual-write: cada senal de maquina se emite ADEMAS como linea JSON en
+# data/wrapper_events/ (los marcadores bilingues de consola siguen
+# intactos como fallback de la GUI). Path por env WRAPPER_EVENTS_FILE
+# (la GUI lo pasa al spawn); sin env, se genera uno por boot del
+# wrapper. Un fallo del canal jamas afecta al wrapper.
+# Esquema y contrato: docs/INFORME_IPC_EVENTOS_NDJSON.md
+# ═══════════════════════════════════════════════════════════════
+EVENTS_DIR = os.path.join(BASE_DIR, "data", "wrapper_events")
+EVENTS_RETENTION_DAYS = 7
+_events_lock = threading.Lock()
+_events_handle = None
+_events_file_path = None
+
+
+def _events_path():
+    return os.environ.get("WRAPPER_EVENTS_FILE") or os.path.join(
+        EVENTS_DIR, "be_%d_%s.ndjson" % (int(time.time()), os.urandom(4).hex())
+    )
+
+
+def _rotate_old_events():
+    """Borra logs de eventos con mas de EVENTS_RETENTION_DAYS dias."""
+    try:
+        cutoff = time.time() - EVENTS_RETENTION_DAYS * 86400
+        for name in os.listdir(EVENTS_DIR):
+            path = os.path.join(EVENTS_DIR, name)
+            try:
+                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _emit_event(event, **data):
+    """Escribe un evento JSON de una linea (append + flush, bajo lock)."""
+    global _events_handle, _events_file_path
+    try:
+        with _events_lock:
+            if _events_handle is None:
+                _events_file_path = _events_path()
+                os.makedirs(os.path.dirname(_events_file_path), exist_ok=True)
+                _events_handle = open(_events_file_path, "a", encoding="utf-8")
+            payload = {"ts": int(time.time() * 1000), "event": event}
+            payload.update(data)
+            _events_handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            _events_handle.flush()
+    except Exception:
+        try:
+            if _events_handle is not None:
+                _events_handle.close()
+        except Exception:
+            pass
+        _events_handle = None
+
+
+def _reset_events_for_tests():
+    global _events_handle, _events_file_path
+    with _events_lock:
+        if _events_handle is not None:
+            try:
+                _events_handle.close()
+            except Exception:
+                pass
+        _events_handle = None
+        _events_file_path = None
 
 def _strip_log_prefix(line):
     """Elimina prefijos estándar de timestamp/nivel de log de BDS ([YYYY-MM-DD HH:MM:SS:mmm LEVEL] o [LEVEL])."""
@@ -257,9 +329,11 @@ def _force_kill_compress_process(proc):
 def execute_backup_worker(file_snapshot=None, cancel_event=None):
     """Hilo efímero que orquesta el proceso de compresión de Bedrock."""
     global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock, snapshot_retry_count, snapshot_retry_at
+    outcome = "exception"  # desenlace real del ciclo (se emite en el finally)
     try:
 
         print(L("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...", "[Worker] Starting compression in a separate process (subprocess)..."))
+        _emit_event("backup_compress_started", files=len(file_snapshot) if file_snapshot else 0)
 
         import json as _json
         _base = os.path.dirname(os.path.abspath(__file__))
@@ -316,6 +390,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 snapshot_retry_count = 0
                 snapshot_retry_at = 0.0
             send_command("save resume")
+            outcome = "launch_error"
             return
 
         with state_lock:
@@ -354,6 +429,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                     os.remove(_p)
                 except Exception:
                     pass
+            outcome = "timeout"
             return
 
         # --- CASO B: Compresión terminó a tiempo ---
@@ -381,13 +457,17 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
         if was_watchdog:
             print(L("[Worker] El watchdog ya había reanudado escrituras previamente.", "[Worker] The watchdog had already resumed writes earlier."))
+            outcome = "watchdog"
             if result["zip"]:
                 mark_corrupt_zip(result["zip"], "POSIBLEMENTE_CORRUPTO")
         else:
             if result["zip"]:
                 print(L("[Worker] Compresión exitosa. Reanudando escritura (save resume)...", "[Worker] Compression successful. Resuming writes (save resume)..."))
+                outcome = "success"
+                _emit_event("backup_ok", zip=result["zip"])
             else:
                 print(L("[Worker] Reanudando escritura tras fallo de backup (save resume)...", "[Worker] Resuming writes after failed backup (save resume)..."))
+                outcome = "failed"
             send_command("save resume")
 
         with state_lock:
@@ -425,6 +505,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
     except Exception as e:
         print(L(f"[Worker] [WARN] Excepcion en worker de backup: {type(e).__name__}: {e}", f"[Worker] [WARN] Exception in backup worker: {type(e).__name__}: {e}"))
         print(L("[Worker]          Limpiando estado del worker...", "[Worker]          Cleaning up worker state..."))
+        outcome = "exception"
         with state_lock:
             backup_in_progress = False
             backup_dispatched = False
@@ -445,6 +526,112 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
         # el boton de backup en frio bloqueado ("Ya hay un backup en curso")
         # hasta reiniciar la GUI.
         print(L("[Worker] Backup finalizado", "[Worker] Backup finished"))
+        _emit_event("backup_finished", outcome=outcome)
+# ═══════════════════════════════════════════════════════════════
+# Config de programacion (data/schedule_config.json, escrita por la GUI)
+# ═════════════════════════════════════════════════════════════════
+SCHEDULE_CONFIG_PATH = os.path.join(BASE_DIR, "data", "schedule_config.json")
+SCHEDULE_STATE_PATH = os.path.join(BASE_DIR, "data", "schedule_state_wrapper.json")
+
+# Defaults = comportamiento historico. Deben coincidir con DEFAULTS de
+# gui_backend/services/schedule_config.py (test anti-drift en tests/).
+SCHEDULE_DEFAULTS = {
+    "backup_interval_min": 30,
+    "backup_only_with_players": True,
+    "daily_backup_time": None,
+    "auto_restart_on_crash": False,
+    "daily_restart_time": None,
+}
+
+_schedule_cfg_cache = {"mtime": None, "cfg": dict(SCHEDULE_DEFAULTS)}
+
+# Fecha (YYYY-MM-DD) del ultimo backup diario disparado; persistida para que
+# un reinicio del wrapper (p. ej. el reinicio diario) no lo re-dispare.
+last_daily_backup_date = None
+
+
+def _load_schedule_config():
+    """Lee data/schedule_config.json; recarga solo si cambio el mtime.
+
+    Leniente: la GUI valida al escribir; ante clave ausente, JSON corrupto o
+    error de lectura se usan los defaults historicos (nunca se lanza).
+    """
+    try:
+        mtime = os.stat(SCHEDULE_CONFIG_PATH).st_mtime
+    except OSError:
+        _schedule_cfg_cache["mtime"] = None
+        _schedule_cfg_cache["cfg"] = dict(SCHEDULE_DEFAULTS)
+        return dict(SCHEDULE_DEFAULTS)
+    if _schedule_cfg_cache["mtime"] == mtime:
+        return dict(_schedule_cfg_cache["cfg"])
+    cfg = dict(SCHEDULE_DEFAULTS)
+    try:
+        with open(SCHEDULE_CONFIG_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            for key in SCHEDULE_DEFAULTS:
+                if key in raw:
+                    cfg[key] = raw[key]
+    except (OSError, ValueError):
+        cfg = dict(SCHEDULE_DEFAULTS)
+    _schedule_cfg_cache["mtime"] = mtime
+    _schedule_cfg_cache["cfg"] = cfg
+    return dict(cfg)
+
+
+def _load_last_daily_backup_date():
+    try:
+        with open(SCHEDULE_STATE_PATH, encoding="utf-8") as f:
+            value = json.load(f).get("last_daily_backup_date")
+        return value if isinstance(value, str) else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _save_last_daily_backup_date(date_str):
+    try:
+        os.makedirs(os.path.dirname(SCHEDULE_STATE_PATH), exist_ok=True)
+        tmp_path = SCHEDULE_STATE_PATH + ".tmp_" + os.urandom(4).hex()
+        with open(tmp_path, "w", encoding="utf-8", newline="") as f:
+            json.dump({"last_daily_backup_date": date_str}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, SCHEDULE_STATE_PATH)
+    except OSError:
+        pass
+
+
+def _should_start_backup(interval_due, retry_due, daily_due, players_count, cfg):
+    """Decision del ciclo periodico en IDLE. Devuelve 'start', 'skip' o 'no'.
+
+    'skip' = intervalo vencido pero sin jugadores (y con requisito activo):
+    se resetea el timer, como hacia el scheduler historico.
+    """
+    if daily_due:
+        return "start"
+    if not (interval_due or retry_due):
+        return "no"
+    if players_count > 0 or not cfg["backup_only_with_players"]:
+        return "start"
+    return "skip"
+
+
+def _crossed_daily_time(localtime, hhmm, fired_date_str):
+    """True si la hora local ya alcanzo 'hhmm' y hoy no se disparo.
+
+    localtime: time.localtime() (usa .tm_hour/.tm_min/.tm_year/...).
+    """
+    if not hhmm:
+        return False
+    today_str = time.strftime("%Y-%m-%d", localtime)
+    if fired_date_str == today_str:
+        return False
+    try:
+        fire_h, fire_m = (int(x) for x in hhmm.split(":"))
+    except ValueError:
+        return False
+    return (localtime.tm_hour, localtime.tm_min) >= (fire_h, fire_m)
+
 # ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdout del servidor
 # ═══════════════════════════════════════════════════════════════
@@ -475,12 +662,18 @@ def read_stdout():
             match_disc = None
 
             if not is_chat:
+                # --- Versión del servidor (eco de la línea de arranque de BDS) ---
+                m_ver = _RE_VERSION.search(clean_line)
+                if m_ver:
+                    _emit_event("version_captured", version=m_ver.group(1))
+
                 # --- Detectar conexión de jugador ---
                 match_conn = _RE_PLAYER_CONNECT.search(clean_line)
                 if match_conn:
                     name = match_conn.group(1).strip()
                     with state_lock:
                         players_online.add(name)
+                    _emit_event("player_connected", name=name, xuid=match_conn.group(2))
 
                 # --- Detectar desconexión de jugador ---
                 match_disc = _RE_PLAYER_DISCONNECT.search(clean_line)
@@ -488,6 +681,7 @@ def read_stdout():
                     name = match_disc.group(1).strip()
                     with state_lock:
                         players_online.discard(name)
+                    _emit_event("player_disconnected", name=name, xuid=match_disc.group(2))
 
                 # --- Sincronización con comando 'list' ---
                 with state_lock:
@@ -568,10 +762,11 @@ def read_stdout():
 # ═══════════════════════════════════════════════════════════════
 def backup_scheduler():
     """Reloj maestro defensivo con evaluación e intervenciones de estado 100% atómicas."""
-    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread, expecting_list_names, snapshot_retry_count, snapshot_retry_at
+    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread, expecting_list_names, snapshot_retry_count, snapshot_retry_at, last_daily_backup_date
 
     last_list_sync = time.time()
     last_save_query = 0.0
+    last_daily_backup_date = _load_last_daily_backup_date()
 
     while True:
         try:
@@ -630,24 +825,38 @@ def backup_scheduler():
                                 last_save_query = now
                 else:
                     # Estado IDLE: evaluar si corresponde iniciar ciclo de backup.
-                    # El ciclo normal (30 min) o el reintento programado por
-                    # snapshot incompleto (backoff: snapshot_retry_at).
+                    # Intervalo configurable (data/schedule_config.json), reintento
+                    # por snapshot incompleto (backoff: snapshot_retry_at) y hora
+                    # fija diaria (dispara aunque no haya jugadores).
+                    cfg = _load_schedule_config()
+                    interval_due = (now - last_backup_completed_time) > (cfg["backup_interval_min"] * 60)
                     retry_due = snapshot_retry_at > 0 and now >= snapshot_retry_at
-                    if (now - last_backup_completed_time) > BACKUP_INTERVAL_SEC or retry_due:
-                        if len(players_online) > 0:
-                            print(L(f"[Wrapper] Hay {len(players_online)} jugador(es) online. Iniciando backup en caliente...", f"[Wrapper] Hay {len(players_online)} player(s) online. Starting hot backup..."))
-                            backup_in_progress = True
-                            backup_dispatched = False
-                            watchdog_fired = False
-                            save_query_ready_seen = False
-                            backup_cancel_event = None
-                            save_hold_timestamp = now
-                            last_save_snapshot = []
-                            expecting_list_names = False  # Fix: no dejar una continuación de 'list' pendiente
-                            snapshot_retry_at = 0.0  # consumir el disparador del reintento
-                            should_send_hold = True
+                    daily_due = _crossed_daily_time(time.localtime(now), cfg["daily_backup_time"], last_daily_backup_date)
+                    accion = _should_start_backup(interval_due, retry_due, daily_due, len(players_online), cfg)
+                    if accion == "start":
+                        if daily_due:
+                            last_daily_backup_date = time.strftime("%Y-%m-%d")
+                            _save_last_daily_backup_date(last_daily_backup_date)
+                            print(L(f"[Wrapper] Backup diario programado ({cfg['daily_backup_time']}). Iniciando backup en caliente...",
+                                    f"[Wrapper] Daily scheduled backup ({cfg['daily_backup_time']}). Starting hot backup..."))
+                        elif len(players_online) > 0:
+                            print(L(f"[Wrapper] Hay {len(players_online)} jugador(es) online. Iniciando backup en caliente...",
+                                    f"[Wrapper] Hay {len(players_online)} player(s) online. Starting hot backup..."))
                         else:
-                            last_backup_completed_time = now
+                            print(L("[Wrapper] Intervalo de backup vencido. Iniciando backup en caliente...",
+                                    "[Wrapper] Backup interval elapsed. Starting hot backup..."))
+                        backup_in_progress = True
+                        backup_dispatched = False
+                        watchdog_fired = False
+                        save_query_ready_seen = False
+                        backup_cancel_event = None
+                        save_hold_timestamp = now
+                        last_save_snapshot = []
+                        expecting_list_names = False  # Fix: no dejar una continuación de 'list' pendiente
+                        snapshot_retry_at = 0.0  # consumir el disparador del reintento
+                        should_send_hold = True
+                    elif accion == "skip":
+                        last_backup_completed_time = now
 
             # --- EJECUCIÓN DE COMANDOS FUERA DEL LOCK ---
             # Sin deadlock: los comandos se ejecutan sin retener state_lock.
@@ -693,6 +902,7 @@ def initiate_shutdown(reason="shutdown"):
             shutting_down = True
             shutdown_requested_at = time.time()  # H1: arranca el reloj del tope de stop
             print(L(f"\n[Wrapper] Apagado iniciado ({reason}).", f"\n[Wrapper] Shutdown initiated ({reason})."))
+            _emit_event("shutdown_initiated", reason=str(reason))
             if backup_in_progress:
                 print(L("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...", "[Wrapper] Cancelling running hot backup before stopping the server..."))
                 cancel_worker = backup_cancel_event
@@ -826,6 +1036,12 @@ if __name__ == "__main__":
     except Exception as e:
         print(L(f"[Wrapper] [WARN] Error en recuperación de restauraciones: {e}", f"[Wrapper] [WARN] Error in restore recovery: {e}"))
 
+    # Canal de eventos: rotar viejos y anunciar el boot (la GUI usa este
+    # evento como señal de "canal vivo" y pasa a consumir eventos como
+    # fuente autoritativa; sin el, mantiene su parseo de logs).
+    _rotate_old_events()
+    _emit_event("wrapper_started", pid=os.getpid(), initial_backup=should_run_initial_backup())
+
     # Backup inicial (antes de arrancar el proceso de Bedrock)
     if should_run_initial_backup():
         t_start_initial_backup = time.time()
@@ -946,6 +1162,7 @@ if __name__ == "__main__":
         # el mundo quedo quieto; NO espera la salida del proceso (que tarda el
         # backup final de cierre, hasta 240s).
         print(L("[Wrapper] BDS detenido. Iniciando limpieza final de cierre...", "[Wrapper] BDS stopped. Starting final shutdown cleanup..."))
+        _emit_event("server_stopped", returncode=(server_process.returncode if server_process else None))
         try:
             with state_lock:
                 shutting_down = True

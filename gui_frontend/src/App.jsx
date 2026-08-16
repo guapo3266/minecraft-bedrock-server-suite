@@ -8,6 +8,7 @@ import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
 import UpdateModal from './components/UpdateModal';
 import PropsModal from './components/PropsModal';
+import ScheduleModal from './components/ScheduleModal';
 import SetupWizard from './components/SetupWizard';
 import { useI18n } from './i18n.jsx';
 
@@ -31,10 +32,13 @@ export default function App() {
 
   const [logs, setLogs] = useState([]);
   const [backups, setBackups] = useState([]);
+  const [playersData, setPlayersData] = useState(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [isPropsModalOpen, setIsPropsModalOpen] = useState(false);
   const [propsFields, setPropsFields] = useState({});
   const [propsServerRunning, setPropsServerRunning] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [scheduleConfig, setScheduleConfig] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateStarted, setUpdateStarted] = useState(false);
@@ -176,6 +180,20 @@ export default function App() {
     }
   };
 
+  const fetchPlayers = async () => {
+    try {
+      const res = await fetch('/api/players');
+      setPlayersData(await res.json());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Vista de jugadores conocidos: al montar y cuando cambia quien esta online
+  useEffect(() => {
+    fetchPlayers();
+  }, [status.player_count]);
+
   const handleOpenUpdate = async () => {
     setIsUpdateModalOpen(true);
     updateStartedRef.current = false;
@@ -200,11 +218,36 @@ export default function App() {
     }
   };
 
+  const handleOpenSchedule = async () => {
+    setIsScheduleModalOpen(true);
+    try {
+      const res = await fetch('/api/schedule');
+      setScheduleConfig(await res.json());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleConfirmUpdate = async () => {
     setIsUpdating(true);
     setUpdateStarted(true);
     try {
       await fetch('/api/action/update_bds', { method: 'POST' });
+    } catch (e) {
+      console.error(e);
+      setIsUpdating(false);
+      setUpdateStarted(false);
+      setIsUpdateModalOpen(false);
+    }
+  };
+
+  // La reversión reusa el flag update_in_progress: el cierre del modal al
+  // terminar ya lo maneja el efecto existente.
+  const handleRollback = async () => {
+    setIsUpdating(true);
+    setUpdateStarted(true);
+    try {
+      await fetch('/api/action/rollback_bds', { method: 'POST' });
     } catch (e) {
       console.error(e);
       setIsUpdating(false);
@@ -305,7 +348,7 @@ export default function App() {
 
       <div className="relative z-10 mx-auto max-w-7xl space-y-5">
         {/* Cabecera Principal */}
-        <Navbar status={status} onOpenUpdate={handleOpenUpdate} onOpenProps={handleOpenProps} latency={latency} />
+        <Navbar status={status} onOpenUpdate={handleOpenUpdate} onOpenProps={handleOpenProps} onOpenSchedule={handleOpenSchedule} latency={latency} />
 
         {/* Botonera de Control con ClickSpark & ConfirmButton */}
         <ControlsBar status={status} onAction={handleAction} />
@@ -331,8 +374,10 @@ export default function App() {
           <aside>
             <SidebarTabs
               players={status.players}
+              playersData={playersData}
               backups={backups}
               onRefreshBackups={fetchBackups}
+              onRefreshPlayers={fetchPlayers}
               isRunning={status.running}
             />
           </aside>
@@ -349,6 +394,7 @@ export default function App() {
         onClose={() => setIsUpdateModalOpen(false)}
         updateInfo={updateInfo}
         onConfirmUpdate={handleConfirmUpdate}
+        onRollback={handleRollback}
         isUpdating={isUpdating}
       />
 
@@ -358,6 +404,13 @@ export default function App() {
         onClose={() => setIsPropsModalOpen(false)}
         fields={propsFields}
         serverRunning={propsServerRunning}
+      />
+
+      {/* Modal de Programación (backups + watchdog) */}
+      <ScheduleModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => setIsScheduleModalOpen(false)}
+        config={scheduleConfig}
       />
     </div>
   );

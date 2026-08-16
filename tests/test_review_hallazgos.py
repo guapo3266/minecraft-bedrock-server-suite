@@ -628,7 +628,8 @@ def test_update_bds_detiene_servidor_antes_de_aplicar(monkeypatch):
     )
     record = {}
 
-    def fake_apply(staging_dir, base_dir, preserve_files, preserve_dirs):
+    def fake_apply(staging_dir, base_dir, preserve_files, preserve_dirs,
+                   keep_prev_dir=None, prev_version=None):
         record["called"] = True
         record["is_running"] = gui.manager.is_running
         record["wrapper_process"] = gui.manager.wrapper_process
@@ -1103,7 +1104,9 @@ def test_update_bds_espera_fase2_antes_de_tocar_instalacion(monkeypatch):
         assert applied["backup"] == 0, "el backup preventivo corrio con el wrapper vivo"
         assert applied["staged"] == 0, "se aplicaron binarios con el wrapper vivo"
         logs = "\n".join(_logs_since(gui.manager.log_history, log_start))
-        assert "wrapper did not finish" in logs and "Update cancelled" in logs, logs
+        # El mensaje de cancelacion vive en lifecycle.stop_and_wait (generico
+        # para update y rollback): "Operation cancelled".
+        assert "wrapper did not finish" in logs and "Operation cancelled" in logs, logs
     finally:
         _reset_manager_state()
         shutil.rmtree(os.path.join(BASE_DIR, "bds_update_staging"), ignore_errors=True)

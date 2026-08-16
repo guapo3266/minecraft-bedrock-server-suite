@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import zipfile
 
 import requests
@@ -112,6 +113,19 @@ def _is_preserved_update_path(rel, preserve_files, preserve_dirs):
 
 
 _UPDATE_MANIFEST_NAME = ".bds_update_manifest.json"
+_PREVIOUS_META_NAME = "bds_previous.json"
+
+# Resguardo persistente de la ultima version anterior (solo una; se reemplaza
+# en cada update/rollback). Dato de instalacion: vive en data/ (ignorado).
+PREVIOUS_VERSION_DIR = os.path.join(config.BASE_DIR, "data", "bds_previous")
+
+# Archivos de control que nunca se aplican al sustituir una instalacion (el
+# zip oficial no los trae; solo existen dentro de resguardos/previous).
+_SKIP_IN_STAGING = {_UPDATE_MANIFEST_NAME, _PREVIOUS_META_NAME}
+
+# Lo que una actualizacion (y por tanto un rollback) JAMAS toca.
+PRESERVE_FILES = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
+PRESERVE_DIRS = {"worlds", "backups", "web", "gui_frontend"}
 
 
 def recover_interrupted_updates(base_dir=None):
@@ -159,7 +173,46 @@ def recover_interrupted_updates(base_dir=None):
             print(f"[Actualizador BDS] No se pudo recuperar {os.path.basename(prev_dir)}: {exc}")
 
 
-def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
+def _save_prev_dir(prev_dir, keep_prev_dir, prev_version):
+    """Conserva el resguardo como version anterior: lo mueve atómico, quita
+    el manifiesto (solo sirve para la recuperación de crashes) y escribe la
+    metadata de version."""
+    if os.path.isdir(keep_prev_dir):
+        shutil.rmtree(keep_prev_dir, ignore_errors=True)
+    os.makedirs(os.path.dirname(keep_prev_dir), exist_ok=True)
+    os.replace(prev_dir, keep_prev_dir)
+    manifest_path = os.path.join(keep_prev_dir, _UPDATE_MANIFEST_NAME)
+    if os.path.isfile(manifest_path):
+        os.remove(manifest_path)
+    meta_tmp = os.path.join(keep_prev_dir, _PREVIOUS_META_NAME + ".tmp")
+    with open(meta_tmp, "w", encoding="utf-8") as f:
+        json.dump({"version": prev_version, "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
+    os.replace(meta_tmp, os.path.join(keep_prev_dir, _PREVIOUS_META_NAME))
+
+
+def read_previous_version():
+    """(hay_resguardo, version_guardada). Version None = desconocida (la GUI
+    no llego a ver el log de BDS antes de actualizar). Nunca lanza."""
+    prev_dir = PREVIOUS_VERSION_DIR
+    if not os.path.isdir(prev_dir):
+        return False, None
+    try:
+        names = os.listdir(prev_dir)
+    except OSError:
+        return False, None
+    if not any(n != _PREVIOUS_META_NAME for n in names):
+        return False, None
+    try:
+        with open(os.path.join(prev_dir, _PREVIOUS_META_NAME), encoding="utf-8") as f:
+            version = json.load(f).get("version")
+        return True, version if isinstance(version, str) else None
+    except (OSError, ValueError, AttributeError):
+        # Sin metadata legible el resguardo sigue siendo aplicable
+        return True, None
+
+
+def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
+                         keep_prev_dir=None, prev_version=None):
     """Aplica un staging extraido a base_dir con rollback ante fallo.
 
     Fase 1: mueve los archivos actuales que seran reemplazados a un dir
@@ -167,13 +220,19 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
     (os.replace, atomico por archivo). Si algo falla en la fase 2, se restauran
     los archivos resguardados y se eliminan los parcialmente aplicados: la
     instalacion nunca queda con binarios de versiones mezcladas.
+
+    Con `keep_prev_dir`, el resguardo de los binarios salientes se conserva
+    alli como "version anterior" (rollback de un clic) en lugar de borrarse.
     """
     prev_dir = tempfile.mkdtemp(prefix="bds_update_prev_", dir=base_dir)
     applied = []  # rutas relativas ya movidas del staging al destino
+    failed = False
     try:
         manifest = []
         for root, _dirs, names in os.walk(staging_dir):
             for n in names:
+                if n in _SKIP_IN_STAGING:
+                    continue
                 rel = os.path.relpath(os.path.join(root, n), staging_dir)
                 if _is_preserved_update_path(rel, preserve_files, preserve_dirs):
                     continue
@@ -190,6 +249,8 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
         # Fase 1: resguardar los actuales que seran reemplazados
         for root, _dirs, names in os.walk(staging_dir):
             for n in names:
+                if n in _SKIP_IN_STAGING:
+                    continue
                 rel = os.path.relpath(os.path.join(root, n), staging_dir)
                 if _is_preserved_update_path(rel, preserve_files, preserve_dirs):
                     continue
@@ -202,6 +263,8 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
         # Fase 2: aplicar los nuevos
         for root, _dirs, names in os.walk(staging_dir):
             for n in names:
+                if n in _SKIP_IN_STAGING:
+                    continue
                 rel = os.path.relpath(os.path.join(root, n), staging_dir)
                 if _is_preserved_update_path(rel, preserve_files, preserve_dirs):
                     continue
@@ -210,6 +273,7 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
                 os.replace(os.path.join(root, n), target)
                 applied.append(rel)
     except Exception:
+        failed = True
         # Rollback: quitar lo parcialmente aplicado y restaurar lo resguardado
         for rel in applied:
             try:
@@ -227,7 +291,10 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs):
         raise
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
-        shutil.rmtree(prev_dir, ignore_errors=True)
+        if keep_prev_dir and not failed:
+            _save_prev_dir(prev_dir, keep_prev_dir, prev_version)
+        else:
+            shutil.rmtree(prev_dir, ignore_errors=True)
 
 
 def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
@@ -293,8 +360,6 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
                         log_fn(L(f"{tag} Descargando... {mb} MB", f"{tag} Downloading... {mb} MB"), "system")
 
         log_fn(L(f"{tag} Descomprimiendo y actualizando ejecutable...", f"{tag} Extracting and updating executable..."), "system")
-        preserve_files = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
-        preserve_dirs = {"worlds", "backups", "web", "gui_frontend"}
 
         # Staging: nunca se toca la instalacion con un zip a medias.
         staging_dir = os.path.join(config.BASE_DIR, "bds_update_staging")
@@ -319,8 +384,13 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         update_root = _resolve_update_root(staging_dir)
 
         # Aplica con rollback: si algo falla a mitad, la instalacion
-        # vuelve a los binarios anteriores (sin versiones mezcladas).
-        _apply_staged_update(update_root, config.BASE_DIR, preserve_files, preserve_dirs)
+        # vuelve a los binarios anteriores (sin versiones mezcladas). El
+        # resguardo queda en data/bds_previous para volver con un clic.
+        # Nota: si la aplicacion FALLA, el resguardo se descarta (la
+        # instalacion queda intacta via rollback interno).
+        _apply_staged_update(update_root, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
+                             keep_prev_dir=PREVIOUS_VERSION_DIR,
+                             prev_version=manager.installed_version)
         if downloaded_version:
             manager.installed_version = downloaded_version
         return True, downloaded_version
@@ -332,3 +402,31 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
                 pass
         if staging_dir and os.path.exists(staging_dir):
             shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def rollback_bds(tag="[Rollback BDS]", log_fn=None):
+    """Vuelve a la version anterior guardada en data/bds_previous.
+
+    Reutiliza _apply_staged_update con el resguardo como staging: los
+    binarios actuales pasan a ser la NUEVA version anterior (swap simetrico:
+    deshacer un rollback es otro rollback). Solo se tocan binarios; worlds/
+    server.properties/permissions/allowlist estan en los preserve sets.
+    """
+    if log_fn is None:
+        log_fn = manager.add_log
+    has_previous, restore_version = read_previous_version()
+    if not has_previous:
+        log_fn(L(f"{tag} No hay una versión anterior guardada para restaurar.", f"{tag} There is no saved previous version to restore."), "error")
+        return False, None
+    version_label = restore_version or "?"
+    log_fn(L(f"{tag} Restaurando la versión anterior ({version_label})...", f"{tag} Restoring the previous version ({version_label})..."), "system")
+    try:
+        _apply_staged_update(PREVIOUS_VERSION_DIR, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
+                             keep_prev_dir=PREVIOUS_VERSION_DIR,
+                             prev_version=manager.installed_version)
+    except Exception as exc:
+        log_fn(L(f"{tag} Error al restaurar; la instalación quedó como estaba: {exc}", f"{tag} Error restoring; the installation was left as it was: {exc}"), "error")
+        return False, None
+    manager.installed_version = restore_version
+    log_fn(L(f"{tag} Versión anterior restaurada ({version_label}). La versión que se dejó de usar ahora es la recuperable.", f"{tag} Previous version restored ({version_label}). The version just left behind is now the recoverable one."), "system")
+    return True, restore_version

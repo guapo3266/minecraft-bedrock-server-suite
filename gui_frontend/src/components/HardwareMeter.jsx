@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import CountUp from './reactbits/CountUp';
+import Sparkline from './Sparkline';
 import { CpuMotionIcon, RamMotionIcon, DownloadMotionIcon } from './hover/HardwareMotionIcons';
 import { useI18n } from '../i18n.jsx';
+
+const RANGES = [1, 6, 24];
 
 export default function HardwareMeter({ hardware, running }) {
   const ramMb = hardware?.ram_mb || 0;
@@ -19,12 +22,52 @@ export default function HardwareMeter({ hardware, running }) {
   const diskLow = diskFreeGb < 5; // menos de 5 GB libres: aviso
   const { t } = useI18n();
 
+  // Historial persistente (SQLite): sparklines por tarjeta
+  const [range, setRange] = useState(24);
+  const [points, setPoints] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/history/metrics?hours=${range}`);
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data.points)) setPoints(data.points);
+      } catch (e) {
+        /* historial opcional: sin el, la GUI funciona igual */
+      }
+    };
+    load();
+    const timer = setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [range]);
+
+  const series = (key) => points.map((p) => p[key] ?? 0);
+
   // El estado "encendido" viene del backend (status.running): la RAM medida
   // ahora incluye siempre la propia GUI, asi que ramMb ya no puede ser 0.
   const isServerRunning = Boolean(running);
 
   return (
     <section className="relative z-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {/* Selector de rango del historial */}
+      <div className="col-span-full flex items-center justify-end gap-1">
+        {RANGES.map((h) => (
+          <button
+            key={h}
+            onClick={() => setRange(h)}
+            className={`rounded-lg border px-2 py-0.5 font-mono text-[10px] font-bold transition-all ${
+              range === h
+                ? 'border-cyan-500/40 bg-cyan-500/20 text-cyan-300'
+                : 'border-white/10 bg-black/30 text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {h}h
+          </button>
+        ))}
+      </div>
       {/* RAM Meter */}
       <TiltCard>
         <SpotlightCard spotlightColor="rgba(16, 185, 129, 0.2)">
@@ -51,6 +94,10 @@ export default function HardwareMeter({ hardware, running }) {
               className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-cyan-400 to-emerald-300 transition-all duration-500 shadow-[0_0_10px_#10b981]"
               style={{ width: `${isServerRunning ? Math.max(Math.min((ramMb / (totalRamGb * 1024)) * 100, 100), 3) : 0}%` }}
             />
+          </div>
+
+          <div className="mt-2">
+            <Sparkline values={series('ram_pct')} color="#10b981" id="ram" />
           </div>
         </SpotlightCard>
       </TiltCard>
@@ -81,6 +128,10 @@ export default function HardwareMeter({ hardware, running }) {
               className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-400 to-purple-400 transition-all duration-500 shadow-[0_0_10px_#06b6d4]"
               style={{ width: `${isServerRunning ? Math.max(Math.min(cpuPct, 100), 3) : 0}%` }}
             />
+          </div>
+
+          <div className="mt-2">
+            <Sparkline values={series('cpu_pct')} color="#06b6d4" id="cpu" />
           </div>
         </SpotlightCard>
       </TiltCard>
@@ -113,6 +164,10 @@ export default function HardwareMeter({ hardware, running }) {
               }`}
               style={{ width: `${Math.max(Math.min(diskUsedPct, 100), 3)}%` }}
             />
+          </div>
+
+          <div className="mt-2">
+            <Sparkline values={series('disk_used_pct')} color="#f59e0b" id="disk" />
           </div>
         </SpotlightCard>
       </TiltCard>
