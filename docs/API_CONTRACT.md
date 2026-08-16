@@ -31,15 +31,20 @@ Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`,
     "ram_mb": 0.0, "ram_pct": 0.0, "cpu_pct": 0.0,
     "total_ram_gb": 0.0, "system_used_gb": 0.0, "system_available_gb": 0.0,
     "system_used_pct": 0.0, "disk_total_gb": 0.0, "disk_free_gb": 0.0, "disk_used_pct": 0.0
-  }
+  },
+  "installed_version": null
 }
 ```
+
+`installed_version`: versión de BDS capturada al arrancar el servidor (evento NDJSON `version_captured`, fallback stdout). `null` mientras no haya arranque en esta sesión de GUI.
 
 ## Entrada de log (WS `log` y WS `init`)
 
 ```json
 {"id": 1, "time": "HH:MM:SS", "text": "...", "type": "info|command|error|system|backup"}
 ```
+
+Tipo especial `session_start`: separador entre el historial precargado y la sesión actual (solo en `WS init`, tras los logs recargados de SQLite). Vive únicamente en memoria — no se persiste ni reaparece en el siguiente arranque; el frontend lo renderiza como divisor, no como línea de log.
 
 ## Endpoints REST
 

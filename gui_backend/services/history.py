@@ -308,3 +308,15 @@ def _preload_log_history():
                 "text": r["text"],
                 "type": r["type"],
             })
+        if rows:
+            # Separador de sesion: marca el corte entre el historial recargado
+            # y los logs en vivo de esta sesion. Se anade directo a log_history
+            # (sin pasar por add_log) para que no dispare los sinks ni se
+            # persista en SQLite: en el siguiente arranque no debe reaparecer.
+            manager._log_seq += 1
+            manager.log_history.append({
+                "id": manager._log_seq,
+                "time": "",
+                "type": "session_start",
+                "text": "",
+            })

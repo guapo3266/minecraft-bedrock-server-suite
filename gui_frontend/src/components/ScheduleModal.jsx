@@ -258,7 +258,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-5 py-2 text-xs font-bold text-black shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:brightness-110 disabled:opacity-50"
+                className="flex min-h-[44px] items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 px-5 py-2 text-xs font-bold text-black shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:brightness-110 disabled:opacity-50"
               >
                 <Save className="h-4 w-4 text-black" />
                 <ShinyText text={saving ? t('saving') : t('save')} />

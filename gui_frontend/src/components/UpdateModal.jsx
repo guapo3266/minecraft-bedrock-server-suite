@@ -126,7 +126,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                     <button
                       onClick={onRollback}
                       disabled={isUpdating}
-                      className="flex shrink-0 items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition-all hover:bg-rose-500/25 hover:border-rose-500/70 disabled:opacity-50"
+                      className="flex min-h-[44px] shrink-0 items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition-all hover:bg-rose-500/25 hover:border-rose-500/70 disabled:opacity-50"
                     >
                       <History className="h-4 w-4" />
                       <ShinyText text={t('rollbackNow')} />
@@ -151,7 +151,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                 <button
                   onClick={onConfirmUpdate}
                   disabled={isUpdating}
-                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-5 py-2 text-xs font-bold text-black shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:brightness-110 disabled:opacity-50"
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 px-5 py-2 text-xs font-bold text-black shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:brightness-110 disabled:opacity-50"
                 >
                   <DownloadMotionIcon className="h-4 w-4 text-black" />
                   <ShinyText text={isUpdating ? t('updating') : t('updateNow')} />

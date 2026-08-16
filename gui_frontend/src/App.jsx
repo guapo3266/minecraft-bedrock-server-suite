@@ -355,7 +355,7 @@ export default function App() {
 
         {/* Métricas de Hardware y Conectividad en 2 Columnas */}
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <HardwareMeter hardware={status.hardware} running={status.running} />
+          <HardwareMeter hardware={status.hardware} running={status.running} version={status.installed_version} />
           <ConnectivityCard
             connectivity={connectivity}
             running={status.running}

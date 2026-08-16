@@ -156,7 +156,13 @@ def test_start_precarga_log_history(hist_env):
         hist_env._persist_log({"id": i, "time": "10:00:00", "type": "info", "text": f"linea {i}"})
     assert gui.manager.log_history == []
     hist_env.start()
-    assert len(gui.manager.log_history) == hist_env.LOG_PRELOAD
+    # LOG_PRELOAD logs de la sesion anterior + 1 separador de sesion al final
+    assert len(gui.manager.log_history) == hist_env.LOG_PRELOAD + 1
+    separador = gui.manager.log_history[-1]
+    assert separador["type"] == "session_start"
+    assert separador["text"] == ""
+    # el separador vive solo en memoria: no se persiste ni reaparece luego
+    assert all(l["type"] != "session_start" for l in hist_env.query_logs(500))
     ids = [e["id"] for e in gui.manager.log_history]
     assert ids == sorted(ids) and ids[0] == 1
     # ids continuos para add_log posteriores (sin colision de React keys)

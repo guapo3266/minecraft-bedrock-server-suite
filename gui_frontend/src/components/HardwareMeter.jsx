@@ -4,11 +4,12 @@ import TiltCard from './hover/TiltCard';
 import CountUp from './reactbits/CountUp';
 import Sparkline from './Sparkline';
 import { CpuMotionIcon, RamMotionIcon, DownloadMotionIcon } from './hover/HardwareMotionIcons';
+import { Package } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
 const RANGES = [1, 6, 24];
 
-export default function HardwareMeter({ hardware, running }) {
+export default function HardwareMeter({ hardware, running, version }) {
   const ramMb = hardware?.ram_mb || 0;
   const cpuPct = hardware?.cpu_pct || 0;
   const totalRamGb = hardware?.total_ram_gb || 23.6;
@@ -168,6 +169,27 @@ export default function HardwareMeter({ hardware, running }) {
 
           <div className="mt-2">
             <Sparkline values={series('disk_used_pct')} color="#f59e0b" id="disk" />
+          </div>
+        </SpotlightCard>
+      </TiltCard>
+
+      {/* Version de BDS: capturada al arrancar el servidor (None apagado) */}
+      <TiltCard>
+        <SpotlightCard spotlightColor="rgba(139, 92, 246, 0.2)">
+          <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-purple-400" />
+              <span>{t('bdsVersion')}</span>
+            </div>
+          </div>
+
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-extrabold text-white" title={version || undefined}>
+              {version || '—'}
+            </span>
+          </div>
+          <div className="mt-2 text-xs font-semibold text-purple-400">
+            {t('bdsVersionHint')}
           </div>
         </SpotlightCard>
       </TiltCard>

@@ -23,58 +23,50 @@ export default function ControlsBar({ status, onAction }) {
   };
 
   return (
-    <section className="relative z-10 flex flex-wrap gap-4">
-      {/* Start Button */}
-      <div className="flex-1 min-w-[200px]">
-        <ConfirmButton
-          onClick={() => onAction('start')}
-          disabled={isRunning}
-          variant="emerald"
-          className="w-full py-4 text-base"
-        >
-          <Play className="h-5 w-5 text-emerald-400 fill-emerald-400" />
-          <ShinyText text={t('start')} />
-        </ConfirmButton>
-      </div>
+    <section className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 lg:flex">
+      {/* Start Button — accion primaria: solida, sin ShinyText (texto negro) */}
+      <ConfirmButton
+        onClick={() => onAction('start')}
+        disabled={isRunning}
+        variant="emeraldSolid"
+        className="w-full py-3.5 text-sm"
+      >
+        <Play className="h-5 w-5 text-black fill-black" />
+        {t('start')}
+      </ConfirmButton>
 
       {/* Stop Button */}
-      <div className="flex-1 min-w-[200px]">
-        <ConfirmButton
-          onClick={() => setConfirmAction('stop')}
-          disabled={!isRunning}
-          variant="rose"
-          className="w-full py-4 text-base"
-        >
-          <Square className="h-5 w-5 text-rose-400 fill-rose-400" />
-          <ShinyText text={t('stop')} />
-        </ConfirmButton>
-      </div>
+      <ConfirmButton
+        onClick={() => setConfirmAction('stop')}
+        disabled={!isRunning}
+        variant="rose"
+        className="w-full py-3.5 text-sm"
+      >
+        <Square className="h-5 w-5 text-rose-400 fill-rose-400" />
+        <ShinyText text={t('stop')} />
+      </ConfirmButton>
 
       {/* Restart Button */}
-      <div className="flex-1 min-w-[200px]">
-        <ConfirmButton
-          onClick={() => setConfirmAction('restart')}
-          disabled={!isRunning}
-          variant="purple"
-          className="w-full py-4 text-base"
-        >
-          <RotateCw className="h-5 w-5 text-purple-400" />
-          <ShinyText text={t('restart')} />
-        </ConfirmButton>
-      </div>
+      <ConfirmButton
+        onClick={() => setConfirmAction('restart')}
+        disabled={!isRunning}
+        variant="purple"
+        className="w-full py-3.5 text-sm"
+      >
+        <RotateCw className="h-5 w-5 text-purple-400" />
+        <ShinyText text={t('restart')} />
+      </ConfirmButton>
 
       {/* Backup Button */}
-      <div className="flex-1 min-w-[200px]">
-        <ConfirmButton
-          onClick={() => onAction('backup')}
-          variant="amber"
-          className="w-full py-4 text-base"
-          disabled={status?.backup_in_progress}
-        >
-          <Save className="h-5 w-5 text-amber-400" />
-          <ShinyText text={t('backup')} />
-        </ConfirmButton>
-      </div>
+      <ConfirmButton
+        onClick={() => onAction('backup')}
+        variant="amber"
+        className="w-full py-3.5 text-sm"
+        disabled={status?.backup_in_progress}
+      >
+        <Save className="h-5 w-5 text-amber-400" />
+        <ShinyText text={t('backup')} />
+      </ConfirmButton>
 
       {/* Modal de confirmación para acciones destructivas (stop/restart).
           Se renderiza con portal a document.body: dentro de la section

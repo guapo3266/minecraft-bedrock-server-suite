@@ -63,6 +63,16 @@ const FILTER_OFF_STYLE = 'border-slate-700 bg-slate-900/50 text-slate-500 hover:
 
 const HISTORY_MAX = 50;
 
+// Prefijo crudo de log de BDS ("[2026-08-16 02:43:56:435 INFO]"): la hora ya
+// se muestra en log.time, asi que se elimina al render para no duplicar
+// timestamps por linea. Solo limpia la presentacion: el filtro de busqueda
+// y el backend siguen trabajando sobre el texto original.
+const RAW_LOG_PREFIX_RE = /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} (?:INFO|WARN|WARNING|ERROR|DEBUG|TRACE)\]\s?/;
+
+function cleanLogText(text) {
+  return (text || '').replace(RAW_LOG_PREFIX_RE, '');
+}
+
 export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRunning }) {
   const [input, setInput] = useState('');
   const [filter, setFilter] = useState('');
@@ -280,12 +290,20 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
         ) : filteredLogs.length === 0 ? (
           <div className="text-slate-400 italic">{t('searchNoMatch')}</div>
         ) : (
-          filteredLogs.map((log) => (
-            <div key={log.id} className={`break-all ${getLogClass(log.type)}`}>
-              <span className="text-slate-400 mr-2">[{log.time}]</span>
-              {log.text}
-            </div>
-          ))
+          filteredLogs.map((log) =>
+            log.type === 'session_start' ? (
+              <div key={log.id} role="separator" aria-label={t('prevSession')} className="my-2 flex items-center gap-3 select-none">
+                <span className="h-px flex-1 bg-white/10" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{t('prevSession')}</span>
+                <span className="h-px flex-1 bg-white/10" />
+              </div>
+            ) : (
+              <div key={log.id} className={`break-all ${getLogClass(log.type)}`}>
+                <span className="text-slate-400 mr-2">[{log.time}]</span>
+                {cleanLogText(log.text)}
+              </div>
+            )
+          )
         )}
       </div>
 

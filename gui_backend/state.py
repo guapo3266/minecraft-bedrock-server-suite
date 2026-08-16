@@ -136,7 +136,10 @@ def build_public_status(manager, players=None):
         "external_instance": ext_inst,
         "external_instance_reason": ext_reason,
         "uptime": int(time.time() - manager.start_time) if (manager.is_running and manager.start_time) else 0,
-        "hardware": hw
+        "hardware": hw,
+        # Version de BDS capturada en el arranque (evento version_captured);
+        # None hasta que el wrapper arranque el servidor.
+        "installed_version": manager.installed_version
     }
 
 
