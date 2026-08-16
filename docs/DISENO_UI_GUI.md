@@ -1,6 +1,6 @@
 # Guía de coherencia visual y general de la GUI
 
-**Fecha:** 2026-08-12
+**Fecha:** 2026-08-12 · **Actualizado:** 2026-08-16 (botón primario sólido, menú de acciones del header, separador de sesión en consola)
 **Alcance:** definición canónica del sistema de diseño de `gui_frontend/` — para que componentes nuevos (y los vendored) mantengan el mismo lenguaje visual
 **Estado:** VIGENTE — referenciar antes de crear o modificar cualquier componente
 
@@ -55,6 +55,7 @@ sobre el fondo.
 | Modal | overlay `fixed inset-0 z-50 bg-black/75 backdrop-blur-md` + card `rounded-2xl border border-<c>-500/40 bg-slate-950 p-6 shadow-2xl` |
 | Input | `rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs ... focus:border-cyan-500/50` |
 | Botón ghost | `rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:bg-white/15` |
+| Botón primario sólido | `bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400` + glow emerald — la acción principal de una botonera ("Iniciar", "Enviar" de la consola); texto plano, sin `ShinyText` (blanco no da contraste sobre el relleno) |
 | Botón acción fuerte | gradiente `from-cyan-500 to-emerald-500` + texto negro + glow cyan |
 | Botón variante | `rounded-xl border bg-<c>-500/20 border-<c>-500/50 text-<c>-300 hover:bg-<c>-500/30 shadow-glow` |
 | Target táctil | `min-h-[44px]` en botones de formularios |
@@ -75,6 +76,7 @@ sobre el fondo.
 
 **Log de terminal por tipo** (`TerminalConsole.getLogClass`):
 join=emerald, leave=rose, backup=amber, system=cyan, command=purple, error=red con fondo `bg-red-950/40`.
+Excepción: el tipo `session_start` no es una línea — se renderiza como divisor horizontal con label ("Logs de la sesión anterior"); llega tras el historial precargado en el `init` del WS y no se persiste.
 
 ## 6. Motion (framer-motion + ReactBits + Hover.dev)
 
@@ -108,4 +110,5 @@ Reglas para convivir con él:
 5. **Campos editables de server.properties:** definidos UNA vez en `propsFields.js`; backend valida con `PROPS_FIELDS` (mismas claves).
 6. **Modal = patrón de §4**; botón primario a la derecha, cancelar ghost.
 7. **Accesibilidad:** focus visible 2px emerald (`:focus-visible` ya global), targets ≥44px en formularios, `aria-live="polite"` en regiones que se actualizan solas (terminal).
-8. **Responsive:** dashboard `grid lg:grid-cols-[1fr_340px]`; sidebar colapsa a una columna en móvil; nada de scroll horizontal.
+8. **Responsive:** dashboard `grid lg:grid-cols-[1fr_340px]`; sidebar colapsa a una columna en móvil; nada de scroll horizontal. La botonera de control es `grid grid-cols-2` en móvil y `lg:flex` a partir de desktop.
+9. **Header:** las acciones secundarias (Configuración, Programación, Actualización BDS) viven en el menú "⋯ Más acciones" con trigger ghost neutro — el color del header queda reservado al estado del servidor. El indicador de latencia solo se muestra con el servidor corriendo.

@@ -125,7 +125,9 @@ vía `manager.add_log`.
 - `start()` (lifespan) crea tablas, cierra sesiones huérfanas (la GUI al
   morir mata wrapper+BDS vía Job Object) y **precarga `manager.log_history`**
   con los últimos 200 logs continuando `_log_seq`: el init del WS entrega
-  historial tras reiniciar la GUI sin cambios de frontend.
+  historial tras reiniciar la GUI sin cambios de frontend. Al final de la
+  precarga añade un marcador `session_start` (solo memoria, no se persiste)
+  que el frontend renderiza como divisor entre sesión anterior y actual.
 - Todo falla a historial-vacío ante `sqlite3.Error`; la persistencia jamás
   rompe la GUI en vivo.
 

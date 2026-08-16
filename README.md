@@ -20,7 +20,7 @@ Usa los comandos nativos de Minecraft (`save hold`, `save query`, `save resume`)
 iniciar_gui.bat     ← doble clic en Windows (instala dependencias solo la primera vez)
 ```
 
-Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola en vivo, botones de iniciar/detener/reiniciar, backups, jugadores online (con permisos, allowlist y kick/ban), medidores de RAM/CPU con gráficas de las últimas 24 horas, programación de backups y watchdog, actualizador oficial de Mojang con vuelta atrás a la versión anterior y una tarjeta con tu IP para invitar amigos. Frontend animado con fondo fluido WebGL.
+Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola en vivo, botones de iniciar/detener/reiniciar, backups, jugadores online (con permisos, allowlist y kick/ban), medidores de RAM/CPU/disco con gráficas de las últimas 24 horas, la versión instalada de BDS, programación de backups y watchdog, actualizador oficial de Mojang con vuelta atrás a la versión anterior y una tarjeta con tu IP para invitar amigos. Frontend animado con fondo fluido WebGL.
 
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
 - Requiere **Python 3.10+** y `pip install -r requirements.txt` (el `.bat` lo hace solo).
@@ -43,7 +43,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 - Programación desde la GUI: cada cuánto, solo cuando hay alguien jugando, o a una hora fija todos los días (aunque el servidor esté apagado).
 - Watchdog opcional: si el servidor se cae solo, se re-levanta; también puede reiniciarse a una hora fija cada día.
 - Gestión de jugadores: permisos (operator/member/visitor), allowlist y kick/ban desde la GUI, con registro de quién jugó y cuánto.
-- Historial persistente: gráficas de RAM/CPU/disco de las últimas 24 h, logs que sobreviven al reinicio de la GUI y tiempo de juego por jugador.
+- Historial persistente: gráficas de RAM/CPU/disco de las últimas 24 h, logs que sobreviven al reinicio de la GUI (marcados con un separador de sesión) y tiempo de juego por jugador.
 - Borra automáticamente los backups viejos (guarda los últimos 15 y 1 diario por una semana).
 - Backup al arrancar el servidor y otro al apagarlo.
 - Actualizador de BDS con marcha atrás: guardo la versión anterior en cada update y si la nueva rompe algo, volvés con un clic.
@@ -91,7 +91,7 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 1. Necesitas Python 3.10+ instalado.
 2. Clonás el repo o descargás el zip.
 3. Copiás `server.properties.example` → `server.properties`.
-4. Tirás el `bedrock_server.exe` original (y sus DLLs) adentro (no se incluye por licencia de Mojang; también podés bajarlo con el botón "Actualización BDS" de la GUI).
+4. Tirás el `bedrock_server.exe` original (y sus DLLs) adentro (no se incluye por licencia de Mojang; también podés bajarlo con la opción "Actualización BDS" del menú de la GUI).
 5. **Con GUI**: doble clic en `iniciar_gui.bat`. **Sin GUI**: doble clic en `iniciar_servidor.bat`.
 
 ### Tests
@@ -128,7 +128,7 @@ It uses the native Minecraft commands (`save hold`, `save query`, `save resume`)
 iniciar_gui.bat     ← double-click on Windows (installs dependencies only once)
 ```
 
-Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, start/stop/restart buttons, backups, online players (with permissions, allowlist and kick/ban), RAM/CPU meters with 24-hour charts, backup scheduling and watchdog, an official Mojang updater with rollback to the previous version and a card with your IP to invite friends. Animated frontend with a WebGL fluid background.
+Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, start/stop/restart buttons, backups, online players (with permissions, allowlist and kick/ban), RAM/CPU/disk meters with 24-hour charts, the installed BDS version, backup scheduling and watchdog, an official Mojang updater with rollback to the previous version and a card with your IP to invite friends. Animated frontend with a WebGL fluid background.
 
 - **No Node.js needed**: the frontend ships prebuilt in `gui_frontend/dist/`.
 - Requires **Python 3.10+** and `pip install -r requirements.txt` (the `.bat` does it for you).
@@ -151,7 +151,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 - Scheduling from the GUI: how often, only when someone is playing, or at a fixed daily time (even with the server off).
 - Optional watchdog: if the server crashes on its own, it restarts by itself; it can also restart at a fixed time every day.
 - Player management: permissions (operator/member/visitor), allowlist and kick/ban from the GUI, with a record of who played and for how long.
-- Persistent history: 24-hour RAM/CPU/disk charts, logs that survive GUI restarts and playtime per player.
+- Persistent history: 24-hour RAM/CPU/disk charts, logs that survive GUI restarts (marked with a session separator) and playtime per player.
 - Auto-deletes old backups (keeps the last 15 and 1 daily for a week).
 - Backup on server start and on server stop.
 - BDS updater with rollback: each update keeps the previous version, and if the new one breaks something you go back with one click.
@@ -199,7 +199,7 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 1. You need Python 3.10+ installed.
 2. Clone the repo or download the zip.
 3. Copy `server.properties.example` → `server.properties`.
-4. Drop your original `bedrock_server.exe` and DLLs inside (not included due to Mojang's license; you can also fetch it with the "BDS Update" button in the GUI).
+4. Drop your original `bedrock_server.exe` and DLLs inside (not included due to Mojang's license; you can also fetch it with the "BDS Update" option in the GUI menu).
 5. **With GUI**: double-click `iniciar_gui.bat`. **Without GUI**: double-click `iniciar_servidor.bat`.
 
 ### Tests
