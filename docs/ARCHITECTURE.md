@@ -190,7 +190,7 @@ vía `manager.add_log`.
 
 ## Arranque
 
-- `iniciar_gui.bat` → `python server_gui_server.py` (`uvicorn.run("server_gui_server:app")`).
+- `iniciar_gui.bat` → `.venv\Scripts\python.exe server_gui_server.py` (`uvicorn.run("server_gui_server:app")`). El `.bat` crea `.venv` (aislado del Python global) e instala `requirements.txt` la primera vez; si la creación falla, usa el `python` del PATH.
 - Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
 - `create_app()` monta `/assets` (build de Vite si existe) y `/static` (web/).
 - `lifespan`: fija `manager.loop`, ejecuta `recover_interrupted_updates()`,

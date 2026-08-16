@@ -189,7 +189,7 @@ Cliente → servidor:
 
 ## Arranque (no modificar)
 
-- `iniciar_gui.bat` → `python server_gui_server.py`.
+- `iniciar_gui.bat` → `.venv\Scripts\python.exe server_gui_server.py` (el `.bat` asegura `.venv` + `requirements.txt`; fallback a `python` del PATH).
 - Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
 - `uvicorn.run("server_gui_server:app", host="127.0.0.1", ...)`.
 - Estáticos: `/assets` desde `gui_frontend/dist/assets` (si existe) y `/static` desde `web/`.

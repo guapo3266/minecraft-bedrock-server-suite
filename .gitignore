@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
+venv/
 
 # ── Herramienta local (no es parte del proyecto) ────────
 .codewhale/
@@ -41,5 +43,5 @@ packet-statistics.txt
 archived/
 
 # ── Herramientas externas / generados pesados ────────────
-static_analysis_semgrep_1/
+static_analysis_semgrep_*/
 gui_frontend/node_modules/

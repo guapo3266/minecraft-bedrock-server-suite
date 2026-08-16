@@ -17,13 +17,13 @@ Usa los comandos nativos de Minecraft (`save hold`, `save query`, `save resume`)
 **1. Con GUI (dashboard web)** — la forma recomendada:
 
 ```
-iniciar_gui.bat     ← doble clic en Windows (instala dependencias solo la primera vez)
+iniciar_gui.bat     ← doble clic en Windows (crea un entorno virtual .venv aislado e instala dependencias solo la primera vez)
 ```
 
 Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola en vivo, botones de iniciar/detener/reiniciar, backups, jugadores online (con permisos, allowlist y kick/ban), medidores de RAM/CPU/disco con gráficas de las últimas 24 horas, la versión instalada de BDS, programación de backups y watchdog, actualizador oficial de Mojang con vuelta atrás a la versión anterior y una tarjeta con tu IP para invitar amigos. Frontend animado con fondo fluido WebGL.
 
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
-- Requiere **Python 3.10+** y `pip install -r requirements.txt` (el `.bat` lo hace solo).
+- Requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global).
 - Solo Windows: el servidor BDS oficial de Mojang únicamente existe para Windows.
 - El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008).
 
@@ -55,8 +55,8 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 
 | Archivo | Qué hace |
 |---|---|
-| `iniciar_gui.bat` | Arranca la GUI (instala dependencias de Python si faltan) |
-| `iniciar_servidor.bat` | Arranca el servidor con el wrapper clásico (sin GUI) |
+| `iniciar_gui.bat` | Arranca la GUI (crea el `.venv` e instala dependencias de Python si faltan) |
+| `iniciar_servidor.bat` | Arranca el servidor con el wrapper clásico (sin GUI; también asegura el `.venv` y las dependencias) |
 | `server_gui_server.py` | Backend de la GUI: FastAPI + WebSockets, sirve el frontend |
 | `server_wrapper.py` | Script principal: lee la consola, detecta jugadores, maneja los backups |
 | `backup_worker.py` | Worker de compresión en proceso separado (subprocess, arranque rápido) |
@@ -92,13 +92,13 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 2. Clonás el repo o descargás el zip.
 3. Copiás `server.properties.example` → `server.properties`.
 4. Tirás el `bedrock_server.exe` original (y sus DLLs) adentro (no se incluye por licencia de Mojang; también podés bajarlo con la opción "Actualización BDS" del menú de la GUI).
-5. **Con GUI**: doble clic en `iniciar_gui.bat`. **Sin GUI**: doble clic en `iniciar_servidor.bat`.
+5. **Con GUI**: doble clic en `iniciar_gui.bat`. **Sin GUI**: doble clic en `iniciar_servidor.bat`. Cualquiera de los dos crea `.venv` e instala las dependencias solo la primera vez.
 
 ### Tests
 
 ```bash
-pip install hypothesis pytest
-python -m pytest tests/ -q
+pip install hypothesis pytest   # o .venv\Scripts\python -m pip install hypothesis pytest
+python -m pytest tests/ -q      # o .venv\Scripts\python -m pytest tests/ -q
 ```
 
 Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local, más suites de inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback) y de la máquina de estados del disparo manual de backup en caliente. Desde la revisión de 2026-08-02 incluyen además regresiones de los fixes (reintento inmediato tras snapshot incompleto, validación de snapshot por `level.dat`, retención con reloj inyectable, filtro de backups corruptos en la GUI, guard TOCTOU del restore) y propiedades adicionales: prefijos de log apilados, idempotencia/normalización de rutas y consenso anti-drift del guard zip-slip entre sus copias. Desde 2026-08-16 suman suites de programación de backups + watchdog, gestión de jugadores, historial SQLite, rollback de BDS y canal de eventos NDJSON (290 tests en total).
@@ -125,13 +125,13 @@ It uses the native Minecraft commands (`save hold`, `save query`, `save resume`)
 **1. With GUI (web dashboard)** — the recommended way:
 
 ```
-iniciar_gui.bat     ← double-click on Windows (installs dependencies only once)
+iniciar_gui.bat     ← double-click on Windows (creates an isolated .venv virtual environment and installs dependencies only once)
 ```
 
 Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, start/stop/restart buttons, backups, online players (with permissions, allowlist and kick/ban), RAM/CPU/disk meters with 24-hour charts, the installed BDS version, backup scheduling and watchdog, an official Mojang updater with rollback to the previous version and a card with your IP to invite friends. Animated frontend with a WebGL fluid background.
 
 - **No Node.js needed**: the frontend ships prebuilt in `gui_frontend/dist/`.
-- Requires **Python 3.10+** and `pip install -r requirements.txt` (the `.bat` does it for you).
+- Requires **Python 3.10+**. The `.bat` creates a `.venv` virtual environment isolated from your machine's Python and installs `requirements.txt` there on first run (nothing goes into the global Python).
 - Windows only: Mojang's official BDS server exists for Windows only.
 - The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008).
 
@@ -163,8 +163,8 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 
 | File | What it does |
 |---|---|
-| `iniciar_gui.bat` | Starts the GUI (installs Python deps if missing) |
-| `iniciar_servidor.bat` | Starts the server with the classic wrapper (no GUI) |
+| `iniciar_gui.bat` | Starts the GUI (creates the `.venv` and installs Python deps if missing) |
+| `iniciar_servidor.bat` | Starts the server with the classic wrapper (no GUI; also ensures the `.venv` and dependencies) |
 | `server_gui_server.py` | GUI backend: FastAPI + WebSockets, serves the frontend |
 | `server_wrapper.py` | Main script: reads the console, detects players, handles backups |
 | `backup_worker.py` | Compression worker in a separate process (subprocess, fast startup) |
@@ -200,13 +200,13 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 2. Clone the repo or download the zip.
 3. Copy `server.properties.example` → `server.properties`.
 4. Drop your original `bedrock_server.exe` and DLLs inside (not included due to Mojang's license; you can also fetch it with the "BDS Update" option in the GUI menu).
-5. **With GUI**: double-click `iniciar_gui.bat`. **Without GUI**: double-click `iniciar_servidor.bat`.
+5. **With GUI**: double-click `iniciar_gui.bat`. **Without GUI**: double-click `iniciar_servidor.bat`. Either one creates the `.venv` and installs dependencies only on the first run.
 
 ### Tests
 
 ```bash
-pip install hypothesis pytest
-python -m pytest tests/ -q
+pip install hypothesis pytest   # or .venv\Scripts\python -m pip install hypothesis pytest
+python -m pytest tests/ -q      # or .venv\Scripts\python -m pytest tests/ -q
 ```
 
 Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control, plus backup fault-injection suites (cancellation, double backup, incomplete snapshot, corrupt ZIP, rollback) and the hot-backup manual trigger state machine. Since the 2026-08-02 review it also includes fix regressions (immediate retry after an incomplete snapshot, snapshot validation by `level.dat`, clock-injectable retention, corrupt-backup filtering in the GUI, restore TOCTOU guard) and extra properties: stacked log prefixes, path idempotence/normalization and anti-drift consensus of the zip-slip guard across its copies. Since 2026-08-16 it adds suites for backup scheduling + watchdog, player management, SQLite history, BDS rollback and the wrapper NDJSON event channel (290 tests in total).
