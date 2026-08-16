@@ -108,7 +108,7 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
           <h1 className="text-2xl font-extrabold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-white via-emerald-200 to-cyan-300">
             <DecryptedText text="BEDROCK WRAPPER" />
           </h1>
-          <p className="text-xs text-slate-400">Minecraft Dedicated Server Control Center</p>
+          <p className="text-xs text-slate-400">{t('subtitle')}</p>
         </div>
       </div>
 

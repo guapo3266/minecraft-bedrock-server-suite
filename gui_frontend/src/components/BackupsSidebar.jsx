@@ -8,6 +8,17 @@ import { FolderArchive, RefreshCw, XCircle, Download, Trash2, ShieldCheck } from
 import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon, DotsVerticalIcon } from './hover/AnimatedStatusIcons';
 import { useI18n } from '../i18n.jsx';
 
+// Etiqueta del disparador SOLO para mostrar (la rotación usa mtime, no
+// parsea nombres): si el filename no matchea ninguno conocido, cae en
+// "Backup".
+function triggerLabel(filename, t) {
+  if (/_inicio_/.test(filename)) return t('backupTriggerInicio');
+  if (/_periodico_/.test(filename)) return t('backupTriggerPeriodico');
+  if (/_cierre_/.test(filename)) return t('backupTriggerCierre');
+  if (/_manual_/.test(filename)) return t('backupTriggerManual');
+  return t('backupTriggerAuto');
+}
+
 export default function BackupsSidebar({ backups = [], onRefresh, isRunning = false }) {
   const { t } = useI18n();
   const successIconRef = useRef(null);
@@ -187,10 +198,10 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
               <div key={b.filename} className="flex items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 transition-colors hover:border-white/10 hover:bg-white/5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-bold text-white text-xs" title={b.filename}>
-                    {b.filename}
+                    {b.date ? b.date.slice(0, 16) : b.filename}
                   </p>
-                  <p className="truncate font-mono text-[10px] text-slate-400 whitespace-nowrap">
-                    {b.date} · {b.size_mb} MB
+                  <p className="truncate font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                    {triggerLabel(b.filename, t)}{b.size_mb != null ? ` · ${b.size_mb} MB` : ''}
                   </p>
                 </div>
                 <button

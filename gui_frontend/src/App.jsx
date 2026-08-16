@@ -383,7 +383,7 @@ export default function App() {
           </aside>
         </main>
 
-        <footer className="border-t border-white/10 pt-3 pb-2 text-center text-xs text-slate-500">
+        <footer className="border-t border-white/10 pt-3 pb-2 text-center text-xs text-slate-400">
           Minecraft Bedrock Server Suite &bull; Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
         </footer>
       </div>

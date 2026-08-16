@@ -59,7 +59,7 @@ const FILTER_BUTTON_STYLES = {
 };
 
 // Filtro apagado: gris neutro, con hover sutil (parece clicable, no deshabilitado)
-const FILTER_OFF_STYLE = 'border-slate-700 bg-slate-900/50 text-slate-500 hover:bg-slate-800/70 hover:text-slate-300';
+const FILTER_OFF_STYLE = 'border-slate-700 bg-slate-900/50 text-slate-400 hover:bg-slate-800/70 hover:text-slate-200';
 
 const HISTORY_MAX = 50;
 
@@ -209,7 +209,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
   };
 
   return (
-    <section className="relative z-10 flex h-[420px] flex-col overflow-hidden rounded-2xl border border-white/10 backdrop-blur-xl shadow-2xl lg:h-[540px]">
+    <section className="relative z-10 flex h-[420px] flex-col overflow-hidden rounded-2xl border border-white/10 backdrop-blur-xl shadow-2xl lg:h-[clamp(480px,68vh,780px)]">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/10 bg-black/40 px-5 py-3">
         <div className="flex items-center gap-2">
@@ -294,7 +294,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
             log.type === 'session_start' ? (
               <div key={log.id} role="separator" aria-label={t('prevSession')} className="my-2 flex items-center gap-3 select-none">
                 <span className="h-px flex-1 bg-white/10" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{t('prevSession')}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{t('prevSession')}</span>
                 <span className="h-px flex-1 bg-white/10" />
               </div>
             ) : (
@@ -381,7 +381,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
                       <Icon className="h-4 w-4 shrink-0" />
                       <span>{t(qc.labelKey)}</span>
                     </div>
-                    <span className="font-mono text-[10px] text-slate-500">/{qc.command.split(' ')[0]}</span>
+                    <span className="font-mono text-[10px] text-slate-400">/{qc.command.split(' ')[0]}</span>
                   </button>
                 );
               })}

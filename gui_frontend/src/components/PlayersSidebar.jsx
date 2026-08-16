@@ -222,7 +222,7 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
                           )}
                         </div>
                         {p.last_seen && (
-                          <p className="text-[10px] text-slate-500 truncate">
+                          <p className="text-[11px] text-slate-400 truncate">
                             {t('playersLastSeen')}: {p.last_seen}
                             {formatPlaytime(sessionTotals[p.name]) && (
                               <> &bull; {t('histPlayed')}: {formatPlaytime(sessionTotals[p.name])}</>

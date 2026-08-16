@@ -180,11 +180,10 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                     </label>
                     <input
                       id="sched-daily-backup"
-                      type="text"
-                      placeholder="04:00"
+                      type="time"
                       value={values.daily_backup_time ?? ''}
                       onChange={(e) => setValue('daily_backup_time', e.target.value)}
-                      className={inputClass + ' w-1/2 font-mono'}
+                      className={inputClass + ' w-1/2 font-mono [color-scheme:dark]'}
                     />
                   </div>
 
@@ -213,11 +212,10 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                     </label>
                     <input
                       id="sched-daily-restart"
-                      type="text"
-                      placeholder="05:00"
+                      type="time"
                       value={values.daily_restart_time ?? ''}
                       onChange={(e) => setValue('daily_restart_time', e.target.value)}
-                      className={inputClass + ' w-1/2 font-mono'}
+                      className={inputClass + ' w-1/2 font-mono [color-scheme:dark]'}
                     />
                   </div>
                 </div>

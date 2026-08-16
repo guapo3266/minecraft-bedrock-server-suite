@@ -85,7 +85,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                     <span>{t('upToDate')}</span>
                   </div>
                   <div className="mt-2 text-xl font-extrabold text-white">
-                    {t('activeVersion')} v{updateInfo?.current_version || "1.21.XX"}
+                    {t('activeVersion')} v{updateInfo?.current_version || '—'}
                   </div>
                 </SpotlightCard>
               </TiltCard>

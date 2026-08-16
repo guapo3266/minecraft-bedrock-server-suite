@@ -245,7 +245,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                   </div>
                 )}
                 {!saved && (
-                  <p className="mt-2 text-center text-[11px] text-slate-500">{t('setupNextHint')}</p>
+                  <p className="mt-2 text-center text-[11px] text-slate-400">{t('setupNextHint')}</p>
                 )}
               </div>
             </div>
@@ -276,7 +276,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                 )}
 
                 <div className="rounded-lg border border-white/10 bg-black/60 p-2">
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">{t('setupInstallProgress')}</p>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{t('setupInstallProgress')}</p>
                   <div className="max-h-40 overflow-y-auto font-mono text-[10px] leading-relaxed text-slate-300">
                     {setupLogs.length === 0 ? (
                       <span className="text-slate-600">{installing ? t('setupInstalling') : '—'}</span>
