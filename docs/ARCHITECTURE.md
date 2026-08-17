@@ -190,7 +190,7 @@ vía `manager.add_log`.
 
 ## Arranque
 
-- `iniciar_gui.bat` → `.venv\Scripts\python.exe server_gui_server.py` (`uvicorn.run("server_gui_server:app")`). El `.bat` crea `.venv` (aislado del Python global) e instala `requirements.txt` la primera vez; si la creación falla, usa el `python` del PATH.
+- `iniciar_gui.bat` → `.venv\Scripts\python.exe server_gui_server.py` (`uvicorn.run("server_gui_server:app")`). El `.bat` crea `.venv` (aislado del Python global) e instala `requirements.txt` la primera vez; si la creación falla, usa el `python` del PATH. El bootstrap está serializado entre lanzamientos con un lock-dir efímero (`.venv_bootstrap.lock`, se borra solo; espera hasta 120 s y roba el lock si quedó abandonado): dos dobles clics simultáneos ya no pisan el venv del otro ni corren dos `pip install` en paralelo.
 - Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
 - `create_app()` monta `/assets` (build de Vite si existe) y `/static` (web/).
 - `lifespan`: fija `manager.loop`, ejecuta `recover_interrupted_updates()`,

@@ -54,7 +54,7 @@ def main():
     except (EOFError, KeyboardInterrupt):
         return 2
     answer = answer.strip().lower()
-    if answer not in ("", "s", "si", "y", "yes"):
+    if answer not in ("", "s", "si", "sí", "y", "yes"):
         print(L("Ok, sin instalar BDS. Descargalo a mano (o usa iniciar_gui.bat) y vuelve a intentarlo.",
                 "OK, BDS not installed. Download it manually (or use iniciar_gui.bat) and try again."))
         return 2

@@ -93,6 +93,10 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
       const data = await sendCommand(`${action.command} "${player}"`);
       if (data.status === 'offline') {
         setResult({ ok: false, message: t('serverOff') });
+      } else if (data.status === 'error') {
+        // El backend no pudo escribir al stdin del wrapper: reportarlo como
+        // fallo (antes se mostraba "enviado" con check de exito).
+        setResult({ ok: false, message: t('playerActionFailed', { err: data.message || 'stdin' }) });
       } else {
         setResult({ ok: true, message: t('playerActionSent', { action: action.command, player }) });
         refreshSoon();
@@ -115,7 +119,15 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
         setResult({ ok: false, message: t('serverOff') });
         return;
       }
-      await sendCommand(`kick "${player}"`);
+      if (data.status === 'error') {
+        setResult({ ok: false, message: t('playerActionFailed', { err: data.message || 'stdin' }) });
+        return;
+      }
+      const kickData = await sendCommand(`kick "${player}"`);
+      if (kickData.status === 'error') {
+        setResult({ ok: false, message: t('playerActionFailed', { err: kickData.message || 'stdin' }) });
+        return;
+      }
       setResult({ ok: true, message: t('playerBanned', { player }) });
       refreshSoon();
     } catch (e) {

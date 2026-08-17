@@ -8,6 +8,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import server_gui_server as sgs
+from gui_backend import config
 from gui_backend.services import external_probe
 import windows_process_guard as wpg
 
@@ -24,11 +25,17 @@ def test_detect_external_bds_no_detecta_cuando_no_hay_procesos(monkeypatch):
     assert reason is None
 
 
-def test_detect_external_bds_detecta_named_mutex(monkeypatch):
-    """Si el NamedMutex ya existe en el sistema, detecta wrapper_mutex."""
+def test_detect_external_bds_detecta_mutex_retenido_por_wrapper(monkeypatch):
+    """Si otro proceso RETIENE el mutex del wrapper (wrapper vivo), detecta
+    wrapper_mutex. Regresion: el sondeo por existencia (CreateMutexW +
+    ERROR_ALREADY_EXISTS) daba falsos positivos cuando otra instancia solo
+    tenia el mutex abierto un instante para sondearlo (p. ej. el loop de
+    metricas de otra GUI de la misma instalacion)."""
     sgs.manager.is_running = False
-    monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", True) or setattr(self, "handle", None))
+    monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: False)
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
 
     is_ext, reason = external_probe.detect_external_bds()
     assert is_ext is True
@@ -41,8 +48,30 @@ def test_detect_external_bds_detecta_named_mutex(monkeypatch):
     sgs.manager.is_running = False
 
 
+def test_detect_external_bds_no_confunde_probe_ajeno_con_wrapper(monkeypatch):
+    """Regresion: otro probe que retenga el mutex solo un instante (colision
+    entre dos sondeos) NO es una instancia externa: el reintento corto del
+    probe por adquisicion lo resuelve."""
+    sgs.manager.is_running = False
+    monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
+    monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    calls = {"n": 0}
+
+    def flaky_acquire(self, timeout_ms=0):
+        calls["n"] += 1
+        return calls["n"] > 1  # 1er intento: colision con el otro probe
+
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", flaky_acquire)
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
+
+    is_ext, reason = external_probe.detect_external_bds()
+    assert is_ext is False
+    assert reason is None
+
+
 def test_detect_external_bds_detecta_proceso_psutil_no_hijo(monkeypatch):
-    """Detecta proceso bedrock_server que no es hijo ni descendiente de la GUI."""
+    """Detecta proceso bedrock_server (de ESTA instalacion) que no es hijo ni
+    descendiente de la GUI."""
     sgs.manager.is_running = False
     monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
@@ -53,6 +82,8 @@ def test_detect_external_bds_detecta_proceso_psutil_no_hijo(monkeypatch):
             self.info = {"pid": pid, "name": name}
         def parent(self):
             return None
+        def exe(self):
+            return os.path.join(config.BASE_DIR, "bedrock_server.exe")
 
     fake_external = FakeProc(99999, "bedrock_server.exe")
     monkeypatch.setattr(psutil, "process_iter", lambda attrs: [fake_external])
@@ -61,6 +92,33 @@ def test_detect_external_bds_detecta_proceso_psutil_no_hijo(monkeypatch):
     is_ext, reason = external_probe.detect_external_bds()
     assert is_ext is True
     assert "bedrock_server_pid_99999" in reason
+
+
+def test_detect_external_bds_ignora_bds_de_otra_instalacion(monkeypatch):
+    """Regresion: un bedrock_server.exe cuyo ejecutable pertenece a OTRA
+    instalacion (otra ruta) no debe bloquear start/update/restore de esta:
+    el falso positivo obligaba a lifecycle.restart_wrapper a esquivar la
+    sonda tras cada stop."""
+    sgs.manager.is_running = False
+    monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
+    monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+
+    class FakeProc:
+        def __init__(self, pid, name):
+            self.pid = pid
+            self.info = {"pid": pid, "name": name}
+        def parent(self):
+            return None
+        def exe(self):
+            return r"C:\otra\instalacion\bedrock_server.exe"
+
+    fake_foreign = FakeProc(77777, "bedrock_server.exe")
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [fake_foreign])
+    monkeypatch.setattr(psutil, "Process", lambda pid: fake_foreign)
+
+    is_ext, reason = external_probe.detect_external_bds()
+    assert is_ext is False
+    assert reason is None
 
 
 def test_detect_external_bds_ignora_hijos_de_la_gui(monkeypatch):

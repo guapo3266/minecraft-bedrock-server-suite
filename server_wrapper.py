@@ -494,7 +494,7 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 else:
                     delay = _snapshot_retry_delay(snapshot_retry_count)
                     snapshot_retry_at = time.time() + delay
-                    print(L(f"[Worker] Snapshot incompleto: reintento en {delay}s (intento {snapshot_retry_count}).", f"[Worker] Incomplete snapshot: retrying in {delay}s (intento {snapshot_retry_count})."))
+                    print(L(f"[Worker] Snapshot incompleto: reintento en {delay}s (intento {snapshot_retry_count}).", f"[Worker] Incomplete snapshot: retrying in {delay}s (attempt {snapshot_retry_count})."))
                 last_backup_completed_time = time.time()
             else:
                 # Exito o fallo operativo: el patron de snapshot termina.
@@ -550,11 +550,44 @@ _schedule_cfg_cache = {"mtime": None, "cfg": dict(SCHEDULE_DEFAULTS)}
 last_daily_backup_date = None
 
 
+def _coerce_schedule_value(key, value):
+    """Coercion de tipos por clave: un schedule_config.json editado a mano no
+    debe romper el tick del scheduler (un string en backup_interval_min hacia
+    lanzar TypeError en la comparacion del intervalo y un daily_backup_time
+    numerico, AttributeError en .split: en ambos casos el tick abortaba cada
+    segundo y los backups programados dejaban de dispararse).
+    """
+    if key == "backup_interval_min":
+        if isinstance(value, bool):
+            return SCHEDULE_DEFAULTS[key]
+        try:
+            iv = int(value)
+        except (TypeError, ValueError):
+            return SCHEDULE_DEFAULTS[key]
+        return iv if iv >= 1 else SCHEDULE_DEFAULTS[key]
+    if key in ("backup_only_with_players", "auto_restart_on_crash"):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in ("true", "1", "yes", "on"):
+                return True
+            if v in ("false", "0", "no", "off"):
+                return False
+        return SCHEDULE_DEFAULTS[key]
+    if key in ("daily_backup_time", "daily_restart_time"):
+        if isinstance(value, str) and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", value.strip()):
+            return value.strip()
+        return None
+    return SCHEDULE_DEFAULTS[key]
+
+
 def _load_schedule_config():
     """Lee data/schedule_config.json; recarga solo si cambio el mtime.
 
-    Leniente: la GUI valida al escribir; ante clave ausente, JSON corrupto o
-    error de lectura se usan los defaults historicos (nunca se lanza).
+    Leniente: la GUI valida al escribir; ante clave ausente, JSON corrupto,
+    error de lectura o VALOR con tipo invalido (p. ej. edicion manual) se usan
+    los defaults historicos de esa clave (nunca se lanza).
     """
     try:
         mtime = os.stat(SCHEDULE_CONFIG_PATH).st_mtime
@@ -571,7 +604,7 @@ def _load_schedule_config():
         if isinstance(raw, dict):
             for key in SCHEDULE_DEFAULTS:
                 if key in raw:
-                    cfg[key] = raw[key]
+                    cfg[key] = _coerce_schedule_value(key, raw[key])
     except (OSError, ValueError):
         cfg = dict(SCHEDULE_DEFAULTS)
     _schedule_cfg_cache["mtime"] = mtime
@@ -841,7 +874,7 @@ def backup_scheduler():
                                     f"[Wrapper] Daily scheduled backup ({cfg['daily_backup_time']}). Starting hot backup..."))
                         elif len(players_online) > 0:
                             print(L(f"[Wrapper] Hay {len(players_online)} jugador(es) online. Iniciando backup en caliente...",
-                                    f"[Wrapper] Hay {len(players_online)} player(s) online. Starting hot backup..."))
+                                    f"[Wrapper] There are {len(players_online)} player(s) online. Starting hot backup..."))
                         else:
                             print(L("[Wrapper] Intervalo de backup vencido. Iniciando backup en caliente...",
                                     "[Wrapper] Backup interval elapsed. Starting hot backup..."))
@@ -974,7 +1007,7 @@ def read_stdin():
                     send_command("save hold")
                     print(L("[Wrapper] Backup manual solicitado; ciclo caliente iniciado.", "[Wrapper] Manual backup requested; hot cycle started."))
                 else:
-                    print(L("[Wrapper] Ya hay un backup en curso; manual request ignored.", "[Wrapper] A backup is already in progress; manual request ignored."))
+                    print(L("[Wrapper] Ya hay un backup en curso; solicitud manual ignorada.", "[Wrapper] A backup is already in progress; manual request ignored."))
             elif cmd.lower() == "stop":
                 initiate_shutdown("comando 'stop' en consola")
                 break

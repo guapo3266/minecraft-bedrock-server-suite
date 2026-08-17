@@ -9,6 +9,7 @@ import requests
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from console_lang import L
 from gui_backend import config
@@ -44,7 +45,9 @@ async def serve_index():
 @router.get("/api/status")
 async def get_status(request: Request):
     _ensure_local(request.client.host if request.client else "")
-    return build_public_status(manager)
+    # build_public_status muestrea hardware con psutil: al threadpool para no
+    # bloquear el event loop en cada poll de status.
+    return await run_in_threadpool(build_public_status, manager)
 
 
 # --- Conectividad: IP local/publica para invitar jugadores ---
@@ -101,9 +104,13 @@ def _get_public_ip_cached(force=False):
 async def get_connectivity(request: Request, refresh: bool = False):
     _ensure_local(request.client.host if request.client else "")
     props = _read_props_values()
+    # I/O de red con timeouts de segundos: fuera del event loop, o la GUI
+    # entera (WebSockets incluidos) se congela hasta ~12s sin internet.
+    lan_ip = await run_in_threadpool(_get_lan_ip)
+    public_ip = await run_in_threadpool(_get_public_ip_cached, force=refresh)
     return {
-        "lan_ip": _get_lan_ip(),
-        "public_ip": _get_public_ip_cached(force=refresh),
+        "lan_ip": lan_ip,
+        "public_ip": public_ip,
         "port": props.get("server-port", "19132"),
     }
 

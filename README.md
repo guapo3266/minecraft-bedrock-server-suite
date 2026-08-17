@@ -48,7 +48,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 - Backup al arrancar el servidor y otro al apagarlo.
 - Actualizador de BDS con marcha atrás: guardo la versión anterior en cada update y si la nueva rompe algo, volvés con un clic.
 - Menú interactivo con `.bat` para restaurar el mundo fácil (`02_restaurar_backup.bat`, `03_regresar_al_anterior.bat`).
-- Script para abrir los puertos del firewall (`configurar_firewall.bat`).
+- Script para abrir los puertos del firewall (`configurar_firewall.bat`; ejecútalo como administrador: sin permisos avisa y aborta en vez de fingir éxito).
 - Desde la GUI: consola de comandos en vivo, métricas, forzar backup, restaurar/verificar/borrar backups y una tarjeta con tu IP local/pública para invitar amigos.
 
 ### Archivos
@@ -68,7 +68,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 | `01_hacer_backup.bat` | Backup manual con robocopy |
 | `02_restaurar_backup.bat` | Menú para restaurar un backup |
 | `03_regresar_al_anterior.bat` | Vuelve al backup más reciente en un clic |
-| `configurar_firewall.bat` | Abre los puertos del firewall |
+| `configurar_firewall.bat` | Abre los puertos del firewall (como administrador) |
 | `configurar_antivirus.bat` | Añade exclusiones de Windows Defender para los backups |
 | `tools/setup_defender_exclusions.ps1` | Script PowerShell de exclusiones (pide administrador la primera vez) |
 | `server.properties.example` | Plantilla de configuración (copiar a `server.properties`) |
@@ -156,7 +156,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 - Backup on server start and on server stop.
 - BDS updater with rollback: each update keeps the previous version, and if the new one breaks something you go back with one click.
 - Interactive `.bat` menus to restore the world easily (`02_restaurar_backup.bat`, `03_regresar_al_anterior.bat`).
-- Firewall port opener (`configurar_firewall.bat`).
+- Firewall port opener (`configurar_firewall.bat`; run it as administrator: without elevation it reports the failure instead of pretending success).
 - From the GUI: live command console, metrics, forced backup, restore/verify/delete backups and a card with your local/public IP to invite friends.
 
 ### Files
@@ -176,7 +176,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 | `01_hacer_backup.bat` | Manual backup with robocopy |
 | `02_restaurar_backup.bat` | Menu to restore a zip |
 | `03_regresar_al_anterior.bat` | Reverts to the latest backup in one click |
-| `configurar_firewall.bat` | Opens firewall ports |
+| `configurar_firewall.bat` | Opens firewall ports (as administrator) |
 | `configurar_antivirus.bat` | Adds Windows Defender exclusions for the backups |
 | `tools/setup_defender_exclusions.ps1` | PowerShell exclusion script (asks for admin the first time) |
 | `server.properties.example` | Config template (copy to `server.properties`) |

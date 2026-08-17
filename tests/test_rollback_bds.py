@@ -147,6 +147,50 @@ def test_fallo_en_apply_no_pisa_resguardo_previo(env):
         assert f.read() == "RESPALDO_BUENO"
 
 
+def test_rollback_fallido_conserva_resguardo_para_reintentar(env):
+    """Regresion: un rollback que falla a mitad (p. ej. binario bloqueado por
+    antivirus) debe dejar la instalacion como estaba Y el resguardo intacto.
+    Antes, el finally borraba el staging (que EN el rollback ES el resguardo)
+    y los archivos ya aplicados se eliminaban: el rollback de un clic
+    desaparecia y la version anterior se perdia silenciosamente."""
+    base, prev = env
+    with open(os.path.join(base, "bedrock_server.exe"), "w") as f:
+        f.write("BINARIO_NUEVO")
+    with open(os.path.join(base, "a.dll"), "w") as f:
+        f.write("nuevo-a")
+    _mk_staging(prev, {"bedrock_server.exe": "BINARIO_VIEJO", "a.dll": "viejo-a"})
+    with open(os.path.join(prev, "bds_previous.json"), "w") as f:
+        json.dump({"version": "1.26.30.1", "saved_at": "x"}, f)
+
+    real_replace = os.replace
+
+    def flaky(src, dst):
+        # Falla al aplicar el segundo binario del resguardo sobre la instalacion
+        if "a.dll" in dst and dst.startswith(base) and src.startswith(prev):
+            raise OSError("binario bloqueado")
+        return real_replace(src, dst)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(bds_update.os, "replace", flaky)
+    try:
+        ok, _ver = bds_update.rollback_bds(log_fn=lambda *a, **k: None)
+    finally:
+        monkeypatch.undo()
+    assert ok is False
+
+    # Instalacion intacta (rollback del rollback)
+    with open(os.path.join(base, "bedrock_server.exe")) as f:
+        assert f.read() == "BINARIO_NUEVO"
+    with open(os.path.join(base, "a.dll")) as f:
+        assert f.read() == "nuevo-a"
+    # Resguardo integro: todos sus binarios siguen ahi y sigue siendo aplicable
+    with open(os.path.join(prev, "bedrock_server.exe")) as f:
+        assert f.read() == "BINARIO_VIEJO"
+    with open(os.path.join(prev, "a.dll")) as f:
+        assert f.read() == "viejo-a"
+    assert bds_update.read_previous_version() == (True, "1.26.30.1")
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Swap simétrico: rollback es aplicar el resguardo
 # ═══════════════════════════════════════════════════════════════════════
@@ -250,7 +294,8 @@ def test_rollback_endpoint_detiene_y_aplica(env, monkeypatch):
     monkeypatch.setattr(config, "SERVER_STOP_TIMEOUT_SEC", 2)
     monkeypatch.setattr(config, "WRAPPER_EXIT_TIMEOUT_SEC", 2)
 
-    def fake_apply(staging, base_dir, pf, pd, keep_prev_dir=None, prev_version=None):
+    def fake_apply(staging, base_dir, pf, pd, keep_prev_dir=None, prev_version=None,
+                   preserve_staging_on_failure=False):
         orden.append(("apply", "stop" in str(fake_proc.stdin.lines)))
 
     monkeypatch.setattr(bds_update, "_apply_staged_update", fake_apply)

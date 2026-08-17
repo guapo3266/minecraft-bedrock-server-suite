@@ -5,6 +5,8 @@ Permite a la GUI detectar si BDS o el wrapper están corriendo por fuera de la G
 """
 
 import os
+import time
+
 import psutil
 from console_lang import L
 import windows_process_guard as wpg
@@ -25,6 +27,31 @@ def _is_descendant(proc: psutil.Process, parent_pid: int) -> bool:
     return False
 
 
+def _wrapper_mutex_held_by_other(mutex_name: str) -> bool:
+    """True si OTRO proceso RETIENE el mutex del wrapper.
+
+    El sondeo es por ADQUISICION, no por existencia: el probe por existencia
+    (CreateMutexW + ERROR_ALREADY_EXISTS) daba falsos positivos porque
+    cualquier otra instancia sondeando el mismo mutex lo tiene abierto un
+    instante (p. ej. el loop de metricas de otra GUI de esta misma
+    instalacion) y el probe ajeno ve 'ya existe': start/update/restore
+    quedaban bloqueados con 409 sin haber wrapper real. El wrapper retiene el
+    mutex desde el arranque hasta morir, asi que solo un acquire que sigue
+    fallando tras un reintento corto (una colision entre dos probes se
+    libera en microsegundos) indica una instancia externa real.
+    """
+    probe = wpg.NamedMutex(mutex_name)
+    try:
+        for _attempt in range(2):
+            if probe.acquire(timeout_ms=0):
+                probe.release()
+                return False
+            time.sleep(0.05)
+        return True
+    finally:
+        probe.close()
+
+
 def detect_external_bds(base_dir: str = None) -> tuple[bool, str | None]:
     """Detecta si hay una instancia externa de BDS o del wrapper en ejecución.
 
@@ -36,24 +63,30 @@ def detect_external_bds(base_dir: str = None) -> tuple[bool, str | None]:
 
     target_base = base_dir or config.BASE_DIR
 
-    # 1. Comprobar si el NamedMutex del wrapper ya está tomado por otra instancia
+    # 1. Comprobar si el NamedMutex del wrapper está retenido por otra instancia
     mutex_name = f"BDS_Wrapper_{wpg.get_installation_hash(target_base)}"
-    probe_mutex = wpg.NamedMutex(mutex_name)
-    already_exists = probe_mutex.already_exists
-    probe_mutex.close()
-
-    if already_exists:
+    if _wrapper_mutex_held_by_other(mutex_name):
         return True, "wrapper_mutex"
 
-    # 2. Comprobar vía psutil procesos de bedrock_server que no sean descendientes de la GUI
+    # 2. Comprobar vía psutil procesos de bedrock_server DE ESTA INSTALACIÓN
+    #    (misma ruta del ejecutable) que no sean descendientes de la GUI.
+    #    Antes se reportaba cualquier bedrock_server.exe de la máquina: un BDS
+    #    de otra instalación bloqueaba start/update/restore de esta (falso
+    #    positivo que lifecycle.restart_wrapper ya tenía que esquivar).
     gui_pid = os.getpid()
+    target_exe = os.path.normcase(os.path.abspath(os.path.join(target_base, "bedrock_server.exe")))
     for proc in psutil.process_iter(["pid", "name"]):
         try:
             name = (proc.info.get("name") or "").lower()
             if name in ("bedrock_server.exe", "bedrock_server"):
                 p = psutil.Process(proc.info["pid"])
                 if p.pid != gui_pid and not _is_descendant(p, gui_pid):
-                    return True, f"bedrock_server_pid_{p.pid}"
+                    try:
+                        exe = os.path.normcase(os.path.abspath(p.exe()))
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                    if exe == target_exe:
+                        return True, f"bedrock_server_pid_{p.pid}"
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
 

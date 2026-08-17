@@ -2,7 +2,7 @@
 
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket
 
 from console_lang import set_lang as _set_lang
 from gui_backend.security import _is_allowed_origin
@@ -67,5 +67,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     _set_lang(msg.get("lang"))
             except Exception:
                 pass
-    except WebSocketDisconnect:
+    finally:
+        # Cualquier salida (disconnect u otro error de transporte) debe sacar
+        # el socket del registro; si no, broadcast reintenta contra un socket
+        # muerto en cada mensaje.
         manager.active_websockets.discard(websocket)

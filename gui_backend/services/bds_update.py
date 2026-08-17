@@ -212,17 +212,23 @@ def read_previous_version():
 
 
 def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
-                         keep_prev_dir=None, prev_version=None):
+                         keep_prev_dir=None, prev_version=None,
+                         preserve_staging_on_failure=False):
     """Aplica un staging extraido a base_dir con rollback ante fallo.
 
     Fase 1: mueve los archivos actuales que seran reemplazados a un dir
     temporal (mismo volumen). Fase 2: mueve los nuevos desde el staging
     (os.replace, atomico por archivo). Si algo falla en la fase 2, se restauran
-    los archivos resguardados y se eliminan los parcialmente aplicados: la
-    instalacion nunca queda con binarios de versiones mezcladas.
+    los archivos resguardados y los ya aplicados vuelven a su sitio en el
+    staging: la instalacion nunca queda con binarios de versiones mezcladas.
 
     Con `keep_prev_dir`, el resguardo de los binarios salientes se conserva
     alli como "version anterior" (rollback de un clic) en lugar de borrarse.
+
+    `preserve_staging_on_failure=True` (flujo rollback, donde el staging ES el
+    resguardo) impide que un fallo a mitad destruya el staging: los archivos
+    aplicados se devuelven a el y no se borra el directorio, de modo que el
+    rollback pueda reintentarse.
     """
     prev_dir = tempfile.mkdtemp(prefix="bds_update_prev_", dir=base_dir)
     applied = []  # rutas relativas ya movidas del staging al destino
@@ -274,11 +280,18 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
                 applied.append(rel)
     except Exception:
         failed = True
-        # Rollback: quitar lo parcialmente aplicado y restaurar lo resguardado
+        # Rollback del rollback: los aplicados vuelven AL STAGING (no se
+        # borran). En el flujo update el staging se descarta igual en el
+        # finally; en el flujo rollback el staging es el resguardo y asi
+        # conserva sus binarios para reintentar.
         for rel in applied:
             try:
-                os.remove(os.path.join(base_dir, rel))
+                staging_back = os.path.join(staging_dir, rel)
+                os.makedirs(os.path.dirname(staging_back), exist_ok=True)
+                os.replace(os.path.join(base_dir, rel), staging_back)
             except OSError:
+                # Sin poder devolverlo, la restauracion de prev_dir de abajo
+                # pisa el destino con el archivo original: base queda igual.
                 pass
         for root, _dirs, names in os.walk(prev_dir):
             for n in names:
@@ -290,7 +303,11 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
                 os.replace(os.path.join(root, n), target)
         raise
     finally:
-        shutil.rmtree(staging_dir, ignore_errors=True)
+        if failed and preserve_staging_on_failure:
+            # El staging es el resguardo anterior: conservarlo integro.
+            pass
+        else:
+            shutil.rmtree(staging_dir, ignore_errors=True)
         if keep_prev_dir and not failed:
             _save_prev_dir(prev_dir, keep_prev_dir, prev_version)
         else:
@@ -423,7 +440,8 @@ def rollback_bds(tag="[Rollback BDS]", log_fn=None):
     try:
         _apply_staged_update(PREVIOUS_VERSION_DIR, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
                              keep_prev_dir=PREVIOUS_VERSION_DIR,
-                             prev_version=manager.installed_version)
+                             prev_version=manager.installed_version,
+                             preserve_staging_on_failure=True)
     except Exception as exc:
         log_fn(L(f"{tag} Error al restaurar; la instalación quedó como estaba: {exc}", f"{tag} Error restoring; the installation was left as it was: {exc}"), "error")
         return False, None

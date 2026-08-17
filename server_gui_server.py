@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 import auto_backup
@@ -38,11 +39,13 @@ async def hardware_metrics_loop():
     tick = 0
     while True:
         try:
-            external_probe_service.update_external_instance_state()
+            # Sonda psutil (itera procesos) y muestreo de hardware: fuera del
+            # event loop para no congelar WebSockets/endpoints cada 2s.
+            await run_in_threadpool(external_probe_service.update_external_instance_state)
             manager.update_status()
             tick += 1
             if tick % 15 == 0:  # cada ~30s: persistir metricas + retencion diaria
-                hw = get_hardware_metrics()
+                hw = await run_in_threadpool(get_hardware_metrics)
                 history_service.record_metrics(hw, manager.is_running)
                 history_service.maybe_sweep()
         except Exception:

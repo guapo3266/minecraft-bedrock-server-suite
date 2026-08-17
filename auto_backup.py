@@ -452,7 +452,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             if cleanup_path and os.path.exists(cleanup_path):
                 try:
                     os.remove(cleanup_path)
-                    print(L(f"[*] Limpieza: archivo parcial '{os.path.basename(cleanup_path)}' eliminado.", f"[*] Limpieza: partial file '{os.path.basename(cleanup_path)}' eliminado."))
+                    print(L(f"[*] Limpieza: archivo parcial '{os.path.basename(cleanup_path)}' eliminado.", f"[*] Cleanup: partial file '{os.path.basename(cleanup_path)}' removed."))
                 except Exception:
                     pass
 

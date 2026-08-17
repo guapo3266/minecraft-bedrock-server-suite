@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { TriangleAlert, Download, Save } from 'lucide-react';
 import Stepper, { Step } from './reactbits/Stepper';
 import { FIELDS } from '../propsFields';
@@ -34,6 +34,13 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const [completeError, setCompleteError] = useState(null);
   const [attempt, setAttempt] = useState(0);
   const [resetStep, setResetStep] = useState(1);
+  // Watermark de ids de log: el fin de la instalacion solo se detecta por
+  // logs NUEVOS (id > marca del intento actual). Sin esto, un reintento tras
+  // un fallo re-leia el log de error del intento ANTERIOR (replayeado por el
+  // init del WS) y se marcaba como fallado al instante; si el reintento
+  // terminaba bien, 'installed' jamas pasaba a true y el wizard quedaba
+  // atascado en el paso 2.
+  const installStartIdRef = useRef(0);
 
   // Precarga de los valores actuales de server.properties (vacio en instalacion nueva).
   // Los campos sin valor toman el default de BDS (WIZARD_DEFAULTS): un valor
@@ -62,9 +69,12 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   );
 
   // El fin de la instalacion se detecta por los logs del backend ([Setup] ...)
+  // SOLO los posteriores al inicio del intento en curso (ver installStartIdRef).
   useEffect(() => {
     if (!installing) return;
-    const texts = setupLogs.map((l) => l.text);
+    const texts = setupLogs
+      .filter((l) => typeof l.id === 'number' && l.id > installStartIdRef.current)
+      .map((l) => l.text);
     if (texts.some((x) => x.includes('instalado correctamente') || x.includes('installed successfully'))) {
       setInstalled(true);
       setInstalling(false);
@@ -101,6 +111,10 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   };
 
   const handleInstall = async () => {
+    installStartIdRef.current = logs.reduce(
+      (m, l) => (typeof l.id === 'number' && l.id > m ? l.id : m),
+      0
+    );
     setInstalling(true);
     setInstallResult(null);
     try {

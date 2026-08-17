@@ -43,8 +43,17 @@ def _launch_wrapper():
             return "error", str(e)
         # FIX G2: asignado bajo el lock (el hilo lo reafirma al arrancar):
         # tras volver de start, /stop nunca ve is_running=True con proceso None.
-        manager.wrapper_process = proc
-        manager.is_running = True
+        # La apertura de sesion es atomica con el cierre del hilo lector
+        # (run_wrapper_thread usa el mismo manager.lock en su finally): sin
+        # esto, un finally concurrente de la sesion anterior podria marcar
+        # como muerta la sesion recien lanzada. _spawn_wrapper_process ya
+        # limpio los eventos; se re-limpian aqui para que el set/clear quede
+        # serializado con el cierre.
+        with manager.lock:
+            manager.wrapper_process = proc
+            manager.is_running = True
+            manager.wrapper_exit_event.clear()
+            manager.server_stopped_event.clear()
     finally:
         manager.op_lock.release()
     threading.Thread(target=supervisor.run_wrapper_thread, args=(proc,), daemon=True).start()

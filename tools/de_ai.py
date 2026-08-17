@@ -36,6 +36,10 @@ replacements = [
 repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for filename in files_to_process:
     filepath = os.path.join(repo_dir, filename)
+    if not os.path.exists(filepath):
+        # enable_beta_apis*.py viven en tools/, no en la raiz: sin este
+        # fallback se saltaban en silencio y sus reemplazos nunca aplicaban
+        filepath = os.path.join(repo_dir, "tools", filename)
     if not os.path.exists(filepath): continue
     
     with open(filepath, 'r', encoding='utf-8') as f:

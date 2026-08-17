@@ -6,6 +6,7 @@ import threading
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 import auto_backup
 from console_lang import L
@@ -204,8 +205,10 @@ async def check_update(request: Request):
     unavailable = False
     reason = None
 
-    # API oficial que usa la web de Mojang (la pagina HTML ya no expone el zip)
-    download_url, latest_ver = bds_update_service._fetch_latest_bedrock_download()
+    # API oficial que usa la web de Mojang (la pagina HTML ya no expone el zip).
+    # requests con timeout de 5s x2 fuentes: fuera del event loop para no
+    # congelar la GUI hasta ~10s cuando Mojang no responde.
+    download_url, latest_ver = await run_in_threadpool(bds_update_service._fetch_latest_bedrock_download)
     if latest_ver:
         unavailable = False
     else:

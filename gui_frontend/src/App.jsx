@@ -70,6 +70,16 @@ export default function App() {
     return { id: `client-${logSeqRef.current}`, time: new Date().toLocaleTimeString(), text, type };
   };
 
+  // Tope de logs en el cliente: el backend recorta a 500 (max_log_history);
+  // sin este tope el array crecia sin cota en sesiones de dias y el filtrado
+  // de la consola se degradaba progresivamente.
+  const MAX_CLIENT_LOGS = 600;
+  const pushLog = (entry) =>
+    setLogs((prev) => {
+      const next = [...prev, entry];
+      return next.length > MAX_CLIENT_LOGS ? next.slice(next.length - MAX_CLIENT_LOGS) : next;
+    });
+
   // Estado del setup inicial (first-run): el wizard se muestra en
   // instalaciones nuevas; las ya usadas (mundo existente) no lo ven.
   useEffect(() => {
@@ -91,8 +101,11 @@ export default function App() {
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws?lang=${langRef.current}`;
+    let disposed = false;
+    let reconnectTimer = null;
 
     const connect = () => {
+      if (disposed) return;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       let pingTimer = null;
@@ -106,7 +119,7 @@ export default function App() {
       };
 
       ws.onopen = () => {
-        setLogs((prev) => [...prev, makeLog(tRef.current('wsConnected'), 'system')]);
+        pushLog(makeLog(tRef.current('wsConnected'), 'system'));
         fetchBackups();
         sendPing();
         ws.send(JSON.stringify({ type: 'set_lang', lang: langRef.current }));
@@ -120,7 +133,7 @@ export default function App() {
             if (msg.logs) setLogs(msg.logs);
             if (msg.status) setStatus(msg.status);
           } else if (msg.type === 'log') {
-            setLogs((prev) => [...prev, msg.data]);
+            pushLog(msg.data);
           } else if (msg.type === 'status') {
             setStatus(msg.data);
           } else if (msg.type === 'pong') {
@@ -133,8 +146,9 @@ export default function App() {
 
       ws.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
-        setLogs((prev) => [...prev, makeLog(tRef.current('wsDisconnected'), 'error')]);
-        setTimeout(connect, 3000);
+        if (disposed) return; // el efecto ya se desmontó: no reagendar
+        pushLog(makeLog(tRef.current('wsDisconnected'), 'error'));
+        reconnectTimer = setTimeout(connect, 3000);
       };
     };
 
@@ -142,6 +156,11 @@ export default function App() {
     fetchBackups();
 
     return () => {
+      // Sin esto, el close() disparaba onclose -> setTimeout(connect) y la
+      // reconexión sobrevivía al cleanup (sockets huérfanos + logs
+      // duplicados; visible en el doble montaje de React StrictMode).
+      disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
@@ -232,7 +251,18 @@ export default function App() {
     setIsUpdating(true);
     setUpdateStarted(true);
     try {
-      await fetch('/api/action/update_bds', { method: 'POST' });
+      const res = await fetch('/api/action/update_bds', { method: 'POST' });
+      // Un rechazo HTTP (409 instancia externa, 400...) resuelve sin lanzar:
+      // sin este chequeo el modal quedaba en "Actualizando..." para siempre
+      // (el efecto de cierre exige haber visto update_in_progress === true,
+      // que el backend nunca setea al rechazar) y el motivo no se mostraba.
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        pushLog(makeLog(tRef.current('actionError', { action: 'update_bds', err: data.detail || res.statusText }), 'error'));
+        setIsUpdating(false);
+        setUpdateStarted(false);
+        setIsUpdateModalOpen(false);
+      }
     } catch (e) {
       console.error(e);
       setIsUpdating(false);
@@ -247,7 +277,14 @@ export default function App() {
     setIsUpdating(true);
     setUpdateStarted(true);
     try {
-      await fetch('/api/action/rollback_bds', { method: 'POST' });
+      const res = await fetch('/api/action/rollback_bds', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        pushLog(makeLog(tRef.current('actionError', { action: 'rollback_bds', err: data.detail || res.statusText }), 'error'));
+        setIsUpdating(false);
+        setUpdateStarted(false);
+        setIsUpdateModalOpen(false);
+      }
     } catch (e) {
       console.error(e);
       setIsUpdating(false);
@@ -259,21 +296,25 @@ export default function App() {
   const handleAction = async (actionName) => {
     try {
       const res = await fetch(`/api/action/${actionName}`, { method: 'POST' });
-      const data = await res.json();
-      setLogs((prev) => [...prev, makeLog(tRef.current('actionExecuted', { action: actionName, status: data.status }), 'system')]);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // El backend rechaza con HTTPException {detail} (p. ej. 409 por
+        // instancia externa): mostrarlo como error en vez de un
+        // "ejecutada (undefined)" con aspecto de éxito.
+        pushLog(makeLog(tRef.current('actionError', { action: actionName, err: data.detail || res.statusText }), 'error'));
+      } else {
+        pushLog(makeLog(tRef.current('actionExecuted', { action: actionName, status: data.status }), 'system'));
+      }
       fetchBackups();
     } catch (e) {
-      setLogs((prev) => [...prev, makeLog(tRef.current('actionError', { action: actionName, err: e }), 'error')]);
+      pushLog(makeLog(tRef.current('actionError', { action: actionName, err: e }), 'error'));
     }
   };
 
   const handleSendCommand = async (command) => {
     if (!status.running) {
-      setLogs((prev) => [
-        ...prev,
-        makeLog(`> ${command}`, 'command'),
-        makeLog(tRef.current('serverOff'), 'error')
-      ]);
+      pushLog(makeLog(`> ${command}`, 'command'));
+      pushLog(makeLog(tRef.current('serverOff'), 'error'));
       return;
     }
 
@@ -284,7 +325,7 @@ export default function App() {
         body: JSON.stringify({ command })
       });
     } catch (e) {
-      setLogs((prev) => [...prev, makeLog(tRef.current('commandError', { err: e }), 'error')]);
+      pushLog(makeLog(tRef.current('commandError', { err: e }), 'error'));
     }
   };
 

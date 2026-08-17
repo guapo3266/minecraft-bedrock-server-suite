@@ -121,10 +121,16 @@ def run_wrapper_thread(process=None):
             if not line_str:
                 continue
 
+            clean_str = _strip_log_prefix(line_str).strip()
+            is_chat = clean_str.startswith("<")
+
             # FIX F1: capturar la version instalada real desde el log de BDS
             # ("Version: 1.26.33.2"); se usa en /api/check_update. Con el canal
             # de eventos vivo, la fuente autoritativa es version_captured.
-            m_ver = re.search(r"Version:\s*(\d+\.\d+\.\d+\.\d+)", line_str) if not manager.events_alive else None
+            # H-01: mismo gate anti-spoofing que el wrapper — el patron se
+            # busca solo en la linea sin prefijo y nunca en lineas de chat
+            # (<Jugador>), para que un jugador no pueda fijar la version.
+            m_ver = re.search(r"Version:\s*(\d+\.\d+\.\d+\.\d+)", clean_str) if not (is_chat or manager.events_alive) else None
             if m_ver:
                 manager.installed_version = m_ver.group(1)
 
@@ -137,8 +143,6 @@ def run_wrapper_thread(process=None):
 
             # Determinar tipo de log para coloreado en la GUI
             log_type = classify_log_line(line_str)
-            clean_str = _strip_log_prefix(line_str).strip()
-            is_chat = clean_str.startswith("<")
             m_conn = _RE_PLAYER_CONNECT.search(clean_str) if not is_chat else None
             m_disc = _RE_PLAYER_DISCONNECT.search(clean_str) if not is_chat else None
             if m_conn and not manager.events_alive:
@@ -206,17 +210,30 @@ def run_wrapper_thread(process=None):
     except Exception as e:
         manager.add_log(L(f"[GUI Backend] Error en el wrapper: {e}", f"[GUI Backend] Error in the wrapper: {e}"), "error")
     finally:
-        manager.is_running = False
-        manager.backup_in_progress = False
-        manager.wrapper_process = None
-        manager.events_alive = False
+        # Cierre de sesion CON chequeo de propiedad: si un start gano la
+        # carrera justo tras is_running=False y ya abrio otra sesion
+        # (manager.wrapper_process apunta al proceso nuevo), este finally NO
+        # debe pisarla — antes dejaba wrapper_process=None y los eventos
+        # marcados como muertos: la GUI perdia el control de un wrapper vivo
+        # y los guards de update/restore creian el servidor detenido. El
+        # bloque va bajo manager.lock, el mismo que serializa la apertura de
+        # sesion en lifecycle._launch_wrapper. wrapper_process None (spawn
+        # fallido del flujo legacy) tambien cierra: nadie mas es dueno.
+        owns_session = False
         with manager.lock:
-            manager.players_online.clear()
-        manager.wrapper_exit_event.set()
-        # G8: respaldo: si el hilo muere, BDS ya no corre.
-        manager.server_stopped_event.set()
-        manager.add_log(L("[GUI Backend] Servidor de Minecraft detenido.", "[GUI Backend] Minecraft server stopped."), "system")
-        manager.update_status()
+            if manager.wrapper_process is process or manager.wrapper_process is None:
+                owns_session = True
+                manager.players_online.clear()
+                manager.is_running = False
+                manager.backup_in_progress = False
+                manager.wrapper_process = None
+                manager.events_alive = False
+                manager.wrapper_exit_event.set()
+                # G8: respaldo: si el hilo muere, BDS ya no corre.
+                manager.server_stopped_event.set()
+        if owns_session:
+            manager.add_log(L("[GUI Backend] Servidor de Minecraft detenido.", "[GUI Backend] Minecraft server stopped."), "system")
+            manager.update_status()
 
 
 # ═══════════════════════════════════════════════════════════════

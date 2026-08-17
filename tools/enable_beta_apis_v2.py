@@ -57,9 +57,17 @@ def enable_experiments(file_path):
         new_data += data[trailing_offset:]
         print(f"Appended trailing data of size: {len(data) - trailing_offset}")
         
-    with open(file_path, 'wb') as f:
+    # Escritura atomica: open('wb') in-place trunca el original y recien
+    # despues escribe; un corte de luz/Ctrl+C/antivirus a mitad dejaba un
+    # level.dat truncado sin recuperacion. Con tmp + os.replace el original
+    # solo se sustituye cuando el nuevo esta completo en disco.
+    tmp_path = file_path + ".tmp_" + os.urandom(4).hex()
+    with open(tmp_path, "wb") as f:
         f.write(new_data)
-        
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, file_path)
+
     print(f"Saved {file_path} successfully.")
 
 if __name__ == "__main__":

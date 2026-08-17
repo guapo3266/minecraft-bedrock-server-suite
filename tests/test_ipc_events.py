@@ -282,6 +282,69 @@ def test_fallback_sin_canal_el_parseo_registra(events_env):
     assert "Alice" in registry  # el camino regex registro al jugador
 
 
+def test_fallback_version_ignora_lineas_de_chat(events_env):
+    """Regresion (H-01): la captura de version por stdout (fallback sin canal)
+    debe aplicar el mismo gate anti-spoofing que el wrapper — una linea de
+    chat <Jugador> que contenga 'Version: X' no puede fijar installed_version
+    (afectaria a /api/check_update)."""
+    gui.manager.events_alive = False
+    gui.manager.wrapper_exit_event.clear()
+    gui.manager.installed_version = None
+    _run_wrapper_with_lines([
+        "<Alex> Version: 9.9.9.9\n",
+        "[INFO] Version: 1.26.33.2\n",
+        "",
+    ])
+    assert gui.manager.installed_version == "1.26.33.2"
+
+
+def test_finalize_de_hilo_viejo_no_pisa_sesion_nueva(events_env):
+    """Regresion (carrera de sesiones): si un start gana la carrera mientras
+    el hilo lector de la sesion anterior esta cerrando (finally), ese finally
+    NO debe pisar el estado de la sesion nueva. Antes dejaba wrapper_process=None
+    y marcaba los eventos de salida como seteados: la GUI perdia el control de
+    un wrapper vivo y los guards de update/restore creian el servidor detenido."""
+    import threading as _threading
+
+    release = _threading.Event()
+
+    class _BlockingReader:
+        def readline(self):
+            release.wait(5)
+            return ""
+
+    class _BlockingProc:
+        stdout = _BlockingReader()
+
+        def wait(self):
+            return 0
+
+    old_proc = _BlockingProc()
+    t = _threading.Thread(target=supervisor.run_wrapper_thread, args=(old_proc,), daemon=True)
+    t.start()
+    deadline = time.time() + 5
+    while gui.manager.wrapper_process is not old_proc and time.time() < deadline:
+        time.sleep(0.02)
+    assert gui.manager.wrapper_process is old_proc  # el hilo tomo la sesion
+
+    # Un start concurrente "gana" la sesion mientras el hilo viejo aun lee
+    new_proc = _BlockingProc()
+    gui.manager.wrapper_process = new_proc
+    gui.manager.is_running = True
+    gui.manager.wrapper_exit_event.clear()
+    gui.manager.server_stopped_event.clear()
+
+    release.set()  # el hilo viejo ve EOF y entra en su finally
+    t.join(5)
+    assert not t.is_alive()
+
+    # El finally del hilo viejo no piso la sesion nueva
+    assert gui.manager.wrapper_process is new_proc
+    assert gui.manager.is_running is True
+    assert gui.manager.wrapper_exit_event.is_set() is False
+    assert gui.manager.server_stopped_event.is_set() is False
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Spawn: env del canal sin efectos en disco
 # ═══════════════════════════════════════════════════════════════════════

@@ -118,6 +118,35 @@ def test_defaults_wrapper_y_gui_coinciden():
     assert dict(sw.SCHEDULE_DEFAULTS) == dict(schedule_config.DEFAULTS)
 
 
+def test_load_schedule_config_coerciona_tipos_invalidos(monkeypatch, tmp_path):
+    """Regresion: una edicion manual con tipos invalidos no debe romper el
+    tick del scheduler (string en backup_interval_min hacia lanzar TypeError
+    en la comparacion del intervalo; daily_backup_time numerico, AttributeError
+    en .split): en ambos casos el tick abortaba cada segundo y los backups
+    programados dejaban de dispararse."""
+    cfg_path = os.path.join(str(tmp_path), "schedule_config.json")
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "backup_interval_min": "45",            # numerica como string: coercer
+            "backup_only_with_players": "false",    # bool como string: coercer
+            "auto_restart_on_crash": "true",        # bool como string: coercer
+            "daily_backup_time": 5,                 # tipo invalido: default (None)
+            "daily_restart_time": "25:99",          # hora invalida: default (None)
+        }, f)
+    monkeypatch.setattr(sw, "SCHEDULE_CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(sw, "_schedule_cfg_cache", {"mtime": None, "cfg": dict(sw.SCHEDULE_DEFAULTS)})
+    cfg = sw._load_schedule_config()
+    assert cfg["backup_interval_min"] == 45
+    assert cfg["backup_only_with_players"] is False
+    assert cfg["auto_restart_on_crash"] is True
+    assert cfg["daily_backup_time"] is None
+    assert cfg["daily_restart_time"] is None
+    # el tick del scheduler ya no lanza con estos valores
+    interval_due = (time.time() - 0) > (cfg["backup_interval_min"] * 60)
+    assert interval_due is True
+    assert sw._crossed_daily_time(time.localtime(), cfg["daily_backup_time"], None) is False
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Helpers puros del wrapper
 # ═══════════════════════════════════════════════════════════════════════
