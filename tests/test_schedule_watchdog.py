@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import server_wrapper as sw
+import wrapper_schedule
 import server_gui_server as gui
 import gui_backend.config as config
 import gui_backend.supervisor as supervisor
@@ -133,8 +134,12 @@ def test_load_schedule_config_coerciona_tipos_invalidos(monkeypatch, tmp_path):
             "daily_backup_time": 5,                 # tipo invalido: default (None)
             "daily_restart_time": "25:99",          # hora invalida: default (None)
         }, f)
-    monkeypatch.setattr(sw, "SCHEDULE_CONFIG_PATH", cfg_path)
-    monkeypatch.setattr(sw, "_schedule_cfg_cache", {"mtime": None, "cfg": dict(sw.SCHEDULE_DEFAULTS)})
+    monkeypatch.setattr(wrapper_schedule, "SCHEDULE_CONFIG_PATH", cfg_path)
+    monkeypatch.setattr(
+        wrapper_schedule,
+        "_schedule_cfg_cache",
+        {"mtime": None, "cfg": dict(sw.SCHEDULE_DEFAULTS)},
+    )
     cfg = sw._load_schedule_config()
     assert cfg["backup_interval_min"] == 45
     assert cfg["backup_only_with_players"] is False

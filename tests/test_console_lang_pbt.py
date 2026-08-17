@@ -164,6 +164,7 @@ def _find_L_calls(path):
 
 L_PY_FILES = [
     "server_wrapper.py",
+    "wrapper_backup.py",
     "server_gui_server.py",
     "auto_backup.py",
     "backup_worker.py",

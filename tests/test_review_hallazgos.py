@@ -15,6 +15,7 @@ import datetime
 import glob
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import auto_backup
+import wrapper_backup
+import wrapper_state as wstate
 import server_gui_server as gui
 import gui_backend.config as config
 import gui_backend.supervisor as supervisor
@@ -190,7 +193,7 @@ def test_gui_busca_la_cadena_exacta_del_wrapper():
     """CORREGIDO (F2): la GUI busca la cadena EXACTA que imprime el wrapper
     ('Iniciando compresion', sin acento), y la condicion EXTERNA de la rama
     no excluye la linea del worker (sin 'backup' y sin 'compresión')."""
-    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
+    src = open(os.path.join(BASE_DIR, "wrapper_backup.py"), encoding="utf-8").read()
     gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
     gui_thread = gui_src.split("def run_wrapper_thread")[1]
     assert "Starting compression in a separate process" in src
@@ -550,8 +553,10 @@ def test_trigger_name_no_escapa_de_backup_dir(monkeypatch, tmp_path):
 def test_run_backup_process_eliminado():
     """CORREGIDO: _run_backup_process (legacy del enfoque multiprocessing)
     fue eliminado de server_wrapper.py; el worker real es backup_worker.py."""
-    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
-    assert "_run_backup_process" not in src
+    wrapper_src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
+    backup_src = open(os.path.join(BASE_DIR, "wrapper_backup.py"), encoding="utf-8").read()
+    assert "_run_backup_process" not in wrapper_src
+    assert "_run_backup_process" not in backup_src
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -896,8 +901,8 @@ def test_kill_worker_limpia_tmp_huerfanos(monkeypatch, tmp_path):
             pass
 
     fp = FakeProc()
-    monkeypatch.setattr(sw, "active_compress_process", fp)
-    monkeypatch.setattr(sw, "backup_ipc_lock", sw.multiprocessing.Lock())
+    monkeypatch.setattr(wstate, "active_compress_process", fp)
+    monkeypatch.setattr(wstate, "backup_ipc_lock", wstate.multiprocessing.Lock())
 
     sw._force_kill_compress_process(fp)
     assert not os.path.exists(orphan), "el .tmp huerfano debio eliminarse"
@@ -1195,8 +1200,8 @@ def test_wrapper_marca_fin_de_ciclo_en_finally():
     finalizado' en un finally, asi TODOS los caminos (exito, fallo, timeout,
     watchdog y excepcion) emiten el marcador, incluidos los `return`
     tempranos del watchdog y del timeout."""
-    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
-    worker = src.split("def execute_backup_worker")[1].split("def read_stdout")[0]
+    src = open(os.path.join(BASE_DIR, "wrapper_backup.py"), encoding="utf-8").read()
+    worker = src.split("def execute_backup_worker")[1].split("\ndef _begin_manual_hot_backup")[0]
     assert "finally:" in worker
     assert '"[Worker] Backup finalizado"' in worker
     assert '"[Worker] Backup finished"' in worker
@@ -1262,38 +1267,38 @@ def test_worker_timeout_compresion_mata_proceso_y_libera_estado(monkeypatch, tmp
             killed["n"] += 1
 
     fake = FakeCompProc()
-    monkeypatch.setattr(sw.subprocess, "Popen", lambda *a, **k: fake)
+    monkeypatch.setattr(wrapper_backup.subprocess, "Popen", lambda *a, **k: fake)
 
     # estado de un ciclo caliente en plena compresion
-    with sw.state_lock:
-        prev = (sw.backup_in_progress, sw.backup_dispatched, sw.watchdog_fired,
-                sw.save_query_ready_seen, sw.backup_cancel_event,
-                sw.snapshot_retry_count, sw.snapshot_retry_at)
-        sw.backup_in_progress = True
-        sw.backup_dispatched = True
-        sw.watchdog_fired = False
-        sw.save_query_ready_seen = True
-        sw.backup_cancel_event = None
-        sw.snapshot_retry_count = 0
-        sw.snapshot_retry_at = 0.0
+    with wstate.state_lock:
+        prev = (wstate.backup_in_progress, wstate.backup_dispatched, wstate.watchdog_fired,
+                wstate.save_query_ready_seen, wstate.backup_cancel_event,
+                wstate.snapshot_retry_count, wstate.snapshot_retry_at)
+        wstate.backup_in_progress = True
+        wstate.backup_dispatched = True
+        wstate.watchdog_fired = False
+        wstate.save_query_ready_seen = True
+        wstate.backup_cancel_event = None
+        wstate.snapshot_retry_count = 0
+        wstate.snapshot_retry_at = 0.0
     try:
         sw.execute_backup_worker(file_snapshot=[("level.dat", 10)], cancel_event=None)
         assert killed["n"] == 1, "CASO A no mato el proceso de compresion"
-        with sw.state_lock:
-            assert sw.backup_in_progress is False
-            assert sw.backup_dispatched is False
-            assert sw.save_query_ready_seen is False
-            assert sw.watchdog_fired is True
-            assert sw.active_compress_process is None
-            assert sw.last_backup_completed_time != 0
+        with wstate.state_lock:
+            assert wstate.backup_in_progress is False
+            assert wstate.backup_dispatched is False
+            assert wstate.save_query_ready_seen is False
+            assert wstate.watchdog_fired is True
+            assert wstate.active_compress_process is None
+            assert wstate.last_backup_completed_time != 0
         assert not os.path.exists(orphan_tmp), (
             "el .tmp huerfano debio limpiarse tras el kill"
         )
     finally:
-        with sw.state_lock:
-            (sw.backup_in_progress, sw.backup_dispatched, sw.watchdog_fired,
-             sw.save_query_ready_seen, sw.backup_cancel_event,
-             sw.snapshot_retry_count, sw.snapshot_retry_at) = prev
+        with wstate.state_lock:
+            (wstate.backup_in_progress, wstate.backup_dispatched, wstate.watchdog_fired,
+             wstate.save_query_ready_seen, wstate.backup_cancel_event,
+             wstate.snapshot_retry_count, wstate.snapshot_retry_at) = prev
 
 
 def test_gui_players_online_bajo_manager_lock():
@@ -1352,3 +1357,25 @@ def test_gui_stdin_bajo_stdin_lock():
     assert locks == writes, (
         "hay %d escrituras a stdin pero %d bloques con manager.stdin_lock" % (writes, locks)
     )
+
+
+def test_estado_del_wrapper_no_se_rebindea_fuera_de_wrapper_state():
+    """Los escalares compartidos deben escribirse siempre como wstate.X."""
+    state_names = (
+        "players_online", "backup_in_progress", "backup_dispatched",
+        "watchdog_fired", "shutting_down", "shutdown_requested_at",
+        "last_backup_completed_time", "save_hold_timestamp", "backup_thread",
+        "active_compress_process", "last_save_snapshot", "save_query_ready_seen",
+        "backup_cancel_event", "expecting_list_names", "last_snapshot_update_time",
+        "snapshot_retry_count", "snapshot_retry_at", "server_process",
+    )
+    paths = [os.path.join(BASE_DIR, "server_wrapper.py")]
+    wrapper_backup = os.path.join(BASE_DIR, "wrapper_backup.py")
+    if os.path.exists(wrapper_backup):
+        paths.append(wrapper_backup)
+    for path in paths:
+        source = open(path, encoding="utf-8").read()
+        for name in state_names:
+            assert not re.search(r"(?m)^\s*%s\s*(?:\+|-)?=" % re.escape(name), source), (
+                "%s se rebindea fuera de wrapper_state en %s" % (name, path)
+            )

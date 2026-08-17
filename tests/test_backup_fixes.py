@@ -26,6 +26,7 @@ import pytest
 import auto_backup
 import backup_worker
 import server_wrapper as sw
+import wrapper_state as wstate
 import server_gui_server as sgs
 import gui_backend.supervisor as supervisor
 import gui_backend.services.backups as backups_service
@@ -435,17 +436,17 @@ def test_worker_lectura_snapshot_fallida_programa_reintento():
         except OSError:
             pass
 
-    with sw.state_lock:
-        assert sw.snapshot_retry_count == 1, (
+    with wstate.state_lock:
+        assert wstate.snapshot_retry_count == 1, (
             "el fallo de lectura del snapshot no incremento el contador de reintentos"
         )
-        assert sw.snapshot_retry_at > time.time(), (
+        assert wstate.snapshot_retry_at > time.time(), (
             "el fallo de lectura del snapshot no programo un reintento con backoff"
         )
-        assert sw.last_backup_completed_time != 0, (
+        assert wstate.last_backup_completed_time != 0, (
             "el ultimo ciclo no quedo registrado"
         )
-        assert not sw.backup_in_progress and not sw.backup_dispatched, (
+        assert not wstate.backup_in_progress and not wstate.backup_dispatched, (
             "estado colgado tras el ciclo del worker"
         )
 
@@ -457,7 +458,7 @@ def test_snapshot_retry_delay_backoff():
     for attempt, want in enumerate(expected, start=1):
         got = sw._snapshot_retry_delay(attempt)
         assert got == want, f"intento {attempt}: esperado {want}s, got {got}s"
-        assert got <= sw.RETRY_BACKOFF_MAX_SEC
+        assert got <= wstate.RETRY_BACKOFF_MAX_SEC
 
 
 def test_snapshot_retry_limite_abandona_hasta_intervalo_normal():
@@ -465,9 +466,9 @@ def test_snapshot_retry_limite_abandona_hasta_intervalo_normal():
     mas reintento: se espera el proximo intervalo normal de 30 min."""
     ev = sw._FileCancelEvent(os.path.join(
         tempfile.gettempdir(), "e2e_%s.mark" % os.urandom(4).hex()))
-    with sw.state_lock:
-        sw.snapshot_retry_count = sw.MAX_CONSECUTIVE_SNAPSHOT_RETRIES - 1
-        sw.snapshot_retry_at = 0.0
+    with wstate.state_lock:
+        wstate.snapshot_retry_count = wstate.MAX_CONSECUTIVE_SNAPSHOT_RETRIES - 1
+        wstate.snapshot_retry_at = 0.0
     try:
         sw.execute_backup_worker(file_snapshot=[], cancel_event=ev)
     finally:
@@ -476,11 +477,11 @@ def test_snapshot_retry_limite_abandona_hasta_intervalo_normal():
         except OSError:
             pass
 
-    with sw.state_lock:
-        assert sw.snapshot_retry_count == 0, (
+    with wstate.state_lock:
+        assert wstate.snapshot_retry_count == 0, (
             "el contador no se reinicio al abandonar el reintento"
         )
-        assert sw.snapshot_retry_at == 0.0, (
+        assert wstate.snapshot_retry_at == 0.0, (
             "se programo un reintento tras el limite; debe esperar 30 min"
         )
 
@@ -1167,13 +1168,13 @@ def test_chat_spoofing_defense_no_altera_estado():
     import server_wrapper as sw
     from gui_backend import supervisor
 
-    with sw.state_lock:
-        prev_players = set(sw.players_online)
+    with wstate.state_lock:
+        prev_players = set(wstate.players_online)
     try:
         # 1. Spoofing de desconexión
-        with sw.state_lock:
-            sw.players_online.clear()
-            sw.players_online.add("Steve")
+        with wstate.state_lock:
+            wstate.players_online.clear()
+            wstate.players_online.add("Steve")
 
         chat_disconnect = "[2026-08-15 12:00:00:001 INFO] <Griefer> Player disconnected: Steve, xuid: 12345"
         clean_line = sw._strip_log_prefix(chat_disconnect).strip()
@@ -1195,9 +1196,9 @@ def test_chat_spoofing_defense_no_altera_estado():
         assert supervisor.classify_log_line(chat_compress) == "info"
         assert supervisor.classify_log_line(chat_finished) == "info"
     finally:
-        with sw.state_lock:
-            sw.players_online.clear()
-            sw.players_online.update(prev_players)
+        with wstate.state_lock:
+            wstate.players_online.clear()
+            wstate.players_online.update(prev_players)
 
 
 # ── 25) Validación estructural LevelDB con condición OR para descriptores ───
@@ -1308,5 +1309,3 @@ def test_recover_interrupted_restores_rollback_y_huerfanos(tmp_path):
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v", "--tb=short"])
-
-

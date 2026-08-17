@@ -9,13 +9,14 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import server_wrapper as sw
+import wrapper_state as wstate
 import gui_backend.supervisor as supervisor
 import console_lang as cl
 
 
 def test_should_run_initial_backup_default_true(monkeypatch, tmp_path):
     """Por defecto (sin server.properties o sin clave), el backup inicial se ejecuta."""
-    monkeypatch.setattr(sw, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(wstate, "BASE_DIR", str(tmp_path))
     assert sw.should_run_initial_backup() is True
 
     # Con server.properties sin backup-inicio
@@ -26,7 +27,7 @@ def test_should_run_initial_backup_default_true(monkeypatch, tmp_path):
 
 def test_should_run_initial_backup_configuraciones(monkeypatch, tmp_path):
     """backup-inicio=false/0/no/off lo desactiva; true/1/yes/on lo mantiene activo."""
-    monkeypatch.setattr(sw, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(wstate, "BASE_DIR", str(tmp_path))
     props = tmp_path / "server.properties"
 
     for val in ("false", "0", "no", "off", "FALSE", "False"):

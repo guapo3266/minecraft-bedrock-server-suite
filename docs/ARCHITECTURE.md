@@ -1,4 +1,4 @@
-# Arquitectura del backend de la GUI
+# Arquitectura del backend de la GUI y del wrapper
 
 Mapa de módulos tras el refactor de `server_gui_server.py` (1.635 líneas) al
 paquete `gui_backend/`. El contrato HTTP/WS está en `docs/API_CONTRACT.md`.
@@ -6,6 +6,13 @@ paquete `gui_backend/`. El contrato HTTP/WS está en `docs/API_CONTRACT.md`.
 ## Mapa de módulos
 
 ```text
+server_wrapper.py                # Entry point de consola + fachada de
+                                 #   compatibilidad/re-exports
+wrapper_state.py                 # Estado mutable unico, locks y timeouts
+wrapper_console.py               # Regex D5, prefijos y parser save query
+wrapper_events.py                # Emisor/rotacion del canal IPC NDJSON
+wrapper_schedule.py              # Configuracion, persistencia y helpers diarios
+wrapper_backup.py                # Worker subprocess, hot backup y cancelacion
 server_gui_server.py            # Punto de entrada: create_app(), lifespan,
                                 #   estáticos, uvicorn, re-exports mínimos
 gui_backend/
@@ -44,6 +51,32 @@ gui_backend/
     history.py                  # /api/history/{metrics,logs,sessions} (GET)
     websocket.py                # /ws
 ```
+
+## Wrapper de consola
+
+`server_wrapper.py` sigue siendo el archivo que lanzan los `.bat` y la GUI,
+pero funciona como fachada. Su logica propia queda limitada a `send_command`,
+`read_stdout`, `backup_scheduler`, `initiate_shutdown`, `read_stdin`, el backup
+final y el bloque `__main__`.
+
+- `wrapper_state.py` es el dueño de `state_lock`, `stdin_lock`,
+  `backup_ipc_lock`, los timeouts y todo el estado mutable. No se rebindean
+  escalares en la fachada; se usa `import wrapper_state as wstate`.
+- `wrapper_console.py` es la fuente unica de regex y parsers puros. La fachada
+  los re-exporta porque `gui_backend.supervisor` y tests los importan desde
+  `server_wrapper`.
+- `wrapper_events.py` posee el handle y el lock NDJSON. `EVENTS_DIR` se parchea
+  en ese modulo, aunque el emisor se invoque por la fachada.
+- `wrapper_schedule.py` posee la cache de configuracion y
+  `last_daily_backup_date`; el scheduler accede a sus atributos de modulo.
+- `wrapper_backup.py` posee el worker y sus helpers. `subprocess.Popen` se
+  parchea en ese modulo; el emisor de comandos se inyecta desde la fachada
+  para no crear un ciclo al ejecutar el archivo como `__main__`.
+
+La fachada conserva los re-exports de compatibilidad, pero los nombres de
+estado movidos no son targets de escritura: producción y tests usan el módulo
+dueño. El detalle de acoplamientos y el inventario del movimiento están en
+`docs/INFORME_REFACTOR_WRAPPER_2026-08-16.md`.
 
 ## Dirección de dependencias (sin ciclos)
 

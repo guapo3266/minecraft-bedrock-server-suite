@@ -14,6 +14,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import server_wrapper as sw
+import wrapper_events
+import wrapper_state as wstate
 import server_gui_server as gui
 import gui_backend.config as config
 import gui_backend.supervisor as supervisor
@@ -46,7 +48,7 @@ def events_env(monkeypatch, tmp_path):
     yield path
     sw._reset_events_for_tests()
     _reset_manager_state()
-    sw.players_online.clear()
+    wstate.players_online.clear()
 
 
 def _read_events(path):
@@ -92,7 +94,7 @@ def test_rotate_old_events(events_env, tmp_path):
     old_ts = time.time() - 8 * 86400
     os.utime(viejo, (old_ts, old_ts))
     monkeypatch_inner = pytest.MonkeyPatch()
-    monkeypatch_inner.setattr(sw, "EVENTS_DIR", str(tmp_path))
+    monkeypatch_inner.setattr(wrapper_events, "EVENTS_DIR", str(tmp_path))
     try:
         sw._rotate_old_events()
     finally:
@@ -118,7 +120,7 @@ class _FakeReader:
 
 
 def test_read_stdout_emite_eventos_de_jugadores_y_version(events_env):
-    sw.server_process = _FakeServerProc([
+    wstate.server_process = _FakeServerProc([
         "Version: 1.26.33.2\n",
         "[INFO] Player connected: Alice, xuid: 111\n",
         "[INFO] <Impostor> Player connected: Malo, xuid: 666\n",
@@ -128,8 +130,8 @@ def test_read_stdout_emite_eventos_de_jugadores_y_version(events_env):
     try:
         sw.read_stdout()
     finally:
-        sw.server_process = None
-        sw.players_online.clear()
+        wstate.server_process = None
+        wstate.players_online.clear()
 
     events = _read_events(events_env)
     names = [(e["event"], e.get("name")) for e in events]

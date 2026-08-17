@@ -1,14 +1,16 @@
-"""
-server_wrapper.py — Wrapper para Bedrock Dedicated Server con backups en caliente
-==================================================================
-Wrapper de consola para Bedrock Dedicated Server con backups en caliente.
+"""Entry point y fachada de compatibilidad del wrapper de BDS.
 
-Que hace:
-  - Protocolo Nativo Bedrock: Extrae la lista de archivos y truncados de bytes de `save query`.
-  - Estado protegido con lock para evitar race conditions.
-  - try/except en hilos principales para evitar que un fallo silencioso cuelgue el wrapper.
-  - Intenta cerrar limpiamente incluso con multiples Ctrl+C.
-  - Redireccion de logs con manejo de errores de encoding.
+Mapa de responsabilidades:
+  - wrapper_state.py: constantes, locks y estado mutable unico.
+  - wrapper_console.py: patrones y parsers puros del log de BDS.
+  - wrapper_events.py: canal IPC NDJSON wrapper -> GUI.
+  - wrapper_schedule.py: configuracion y helpers de programacion.
+  - wrapper_backup.py: ciclo caliente, worker y backup manual.
+  - server_wrapper.py: entry point, consola, scheduler, apagado y backup final.
+
+Este archivo sigue siendo el nombre que lanzan los .bat y la GUI. Sus
+re-exports son superficie publica de facto para tests y gui_backend; los
+accesos canonicos al estado y a los nombres movidos viven en sus modulos.
 """
 
 import json
@@ -25,6 +27,88 @@ import windows_process_guard as wpg
 
 from console_lang import L
 
+# Superficie publica de facto: tests y gui_backend importan desde aqui.
+# No eliminar estos re-exports al reorganizar el wrapper.
+from wrapper_console import (
+    BDS_PLAYER_CONNECTED,
+    BDS_PLAYER_DISCONNECTED,
+    BDS_SAVE_READY,
+    BDS_PLAYERS_LIST_HEAD,
+    _RE_PLAYER_CONNECT,
+    _RE_PLAYER_DISCONNECT,
+    _RE_PLAYERS_LIST,
+    _RE_VERSION,
+    _strip_log_prefix,
+    parse_save_query_files,
+)
+from wrapper_events import (
+    EVENTS_DIR,
+    EVENTS_RETENTION_DAYS,
+    _emit_event,
+    _reset_events_for_tests,
+    _rotate_old_events,
+)
+import wrapper_schedule
+from wrapper_schedule import (
+    SCHEDULE_CONFIG_PATH,
+    SCHEDULE_STATE_PATH,
+    SCHEDULE_DEFAULTS,
+    _schedule_cfg_cache,
+    last_daily_backup_date,
+    _coerce_schedule_value,
+    _load_schedule_config,
+    _load_last_daily_backup_date,
+    _save_last_daily_backup_date,
+    _should_start_backup,
+    _crossed_daily_time,
+)
+import wrapper_state as wstate
+import wrapper_backup
+from wrapper_backup import (
+    mark_corrupt_zip,
+    _is_snapshot_failure,
+    _snapshot_retry_delay,
+    _FileCancelEvent,
+    _force_kill_compress_process,
+    execute_backup_worker,
+    _begin_manual_hot_backup,
+)
+from wrapper_state import (
+    BASE_DIR,
+    SERVER_EXE,
+    WATCHDOG_HOLDING_TIMEOUT_SEC,
+    LIST_SYNC_INTERVAL_SEC,
+    FINAL_BACKUP_LOCK_WAIT_SEC,
+    FINAL_BACKUP_TIMEOUT_SEC,
+    WORKER_COMPRESSION_TIMEOUT_SEC,
+    WORKER_JOIN_ON_SHUTDOWN_SEC,
+    RETRY_BACKOFF_BASE_SEC,
+    RETRY_BACKOFF_MAX_SEC,
+    MAX_CONSECUTIVE_SNAPSHOT_RETRIES,
+    BDS_STOP_TIMEOUT_SEC,
+    state_lock,
+    stdin_lock,
+    backup_ipc_lock,
+    players_online,
+    backup_in_progress,
+    backup_dispatched,
+    watchdog_fired,
+    shutting_down,
+    shutdown_requested_at,
+    last_backup_completed_time,
+    save_hold_timestamp,
+    backup_thread,
+    active_compress_process,
+    last_save_snapshot,
+    save_query_ready_seen,
+    backup_cancel_event,
+    expecting_list_names,
+    last_snapshot_update_time,
+    snapshot_retry_count,
+    snapshot_retry_at,
+    server_process,
+)
+
 # ═══════════════════════════════════════════════════════════════
 # ADVERTENCIA: Las detecciones de jugadores y save query dependen de
 # strings literales en ingles. Si BDS cambia el formato de log o el
@@ -36,647 +120,34 @@ from console_lang import L
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURACIÓN
 # ═══════════════════════════════════════════════════════════════
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
-WATCHDOG_HOLDING_TIMEOUT_SEC = 60       # Max segundos esperando respuesta de save query
-LIST_SYNC_INTERVAL_SEC = 60             # Cada 60s (modo prueba)
-FINAL_BACKUP_LOCK_WAIT_SEC = 5          # Espera mínima por el lock (ya no hay proceso activo)
-FINAL_BACKUP_TIMEOUT_SEC = 240          # Max segundos para el backup de cierre (espera + compresión)
-WORKER_COMPRESSION_TIMEOUT_SEC = 120    # Tiempo máximo para la compresión del backup
-WORKER_JOIN_ON_SHUTDOWN_SEC = 135       # Mayor que el timeout del worker para evitar colisión
-RETRY_BACKOFF_BASE_SEC = 5              # Backoff inicial entre reintentos de snapshot
-RETRY_BACKOFF_MAX_SEC = 60              # Tope del backoff exponencial
-MAX_CONSECUTIVE_SNAPSHOT_RETRIES = 10   # Abandono del reintento hasta el proximo intervalo normal
-BDS_STOP_TIMEOUT_SEC = 60               # H1: max segundos que BDS tiene para cerrar tras 'stop'
-                                        # antes de forzar su terminacion. La GUI espera
-                                        # SERVER_STOP_TIMEOUT_SEC (75s) en su fase 1: el
-                                        # wrapper siempre actua primero y ella solo observa.
-
-# ═══════════════════════════════════════════════════════════════
-# PATRONES DE DETECCION DEL LOG DE BDS (D5)
-# ───────────────────────────────────────────────────────────────
-# Strings ingleses que BDS imprime en el log. Si Mojang cambia el formato,
-# la deteccion falla SILENCIOSAMENTE: se pierden jugadores online y el save
-# query (los backups frios siguen funcionando). Centralizados aqui para
-# revisarlos en un solo lugar; la GUI los importa de este modulo.
-# ═══════════════════════════════════════════════════════════════
-BDS_PLAYER_CONNECTED = "Player connected:"
-BDS_PLAYER_DISCONNECTED = "Player disconnected:"
-BDS_SAVE_READY = "Data saved. Files are now ready to be copied."
-BDS_PLAYERS_LIST_HEAD = "players online:"
-_RE_PLAYER_CONNECT = re.compile(r"^Player\s+connected\s*:\s*(.+?),\s*xuid\s*:\s*(\d+)", re.IGNORECASE)
-_RE_PLAYER_DISCONNECT = re.compile(r"^Player\s+disconnected\s*:\s*(.+?),\s*xuid\s*:\s*(\d+)", re.IGNORECASE)
-_RE_PLAYERS_LIST = re.compile(r"^There are (\d+)/\d+ players online:(.*)")
-_RE_VERSION = re.compile(r"Version:\s*(\d+\.\d+\.\d+\.\d+)")
-
-# ═══════════════════════════════════════════════════════════════
-# Canal de eventos NDJSON (IPC wrapper -> GUI)
-# ───────────────────────────────────────────────────────────────
-# Dual-write: cada senal de maquina se emite ADEMAS como linea JSON en
-# data/wrapper_events/ (los marcadores bilingues de consola siguen
-# intactos como fallback de la GUI). Path por env WRAPPER_EVENTS_FILE
-# (la GUI lo pasa al spawn); sin env, se genera uno por boot del
-# wrapper. Un fallo del canal jamas afecta al wrapper.
-# Esquema y contrato: docs/INFORME_IPC_EVENTOS_NDJSON.md
-# ═══════════════════════════════════════════════════════════════
-EVENTS_DIR = os.path.join(BASE_DIR, "data", "wrapper_events")
-EVENTS_RETENTION_DAYS = 7
-_events_lock = threading.Lock()
-_events_handle = None
-_events_file_path = None
-
-
-def _events_path():
-    return os.environ.get("WRAPPER_EVENTS_FILE") or os.path.join(
-        EVENTS_DIR, "be_%d_%s.ndjson" % (int(time.time()), os.urandom(4).hex())
-    )
-
-
-def _rotate_old_events():
-    """Borra logs de eventos con mas de EVENTS_RETENTION_DAYS dias."""
-    try:
-        cutoff = time.time() - EVENTS_RETENTION_DAYS * 86400
-        for name in os.listdir(EVENTS_DIR):
-            path = os.path.join(EVENTS_DIR, name)
-            try:
-                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
-                    os.remove(path)
-            except OSError:
-                pass
-    except OSError:
-        pass
-
-
-def _emit_event(event, **data):
-    """Escribe un evento JSON de una linea (append + flush, bajo lock)."""
-    global _events_handle, _events_file_path
-    try:
-        with _events_lock:
-            if _events_handle is None:
-                _events_file_path = _events_path()
-                os.makedirs(os.path.dirname(_events_file_path), exist_ok=True)
-                _events_handle = open(_events_file_path, "a", encoding="utf-8")
-            payload = {"ts": int(time.time() * 1000), "event": event}
-            payload.update(data)
-            _events_handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-            _events_handle.flush()
-    except Exception:
-        try:
-            if _events_handle is not None:
-                _events_handle.close()
-        except Exception:
-            pass
-        _events_handle = None
-
-
-def _reset_events_for_tests():
-    global _events_handle, _events_file_path
-    with _events_lock:
-        if _events_handle is not None:
-            try:
-                _events_handle.close()
-            except Exception:
-                pass
-        _events_handle = None
-        _events_file_path = None
-
-def _strip_log_prefix(line):
-    """Elimina prefijos estándar de timestamp/nivel de log de BDS ([YYYY-MM-DD HH:MM:SS:mmm LEVEL] o [LEVEL])."""
-    if not line:
-        return ""
-    return re.sub(
-        r'^(?:(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3} (?:INFO|WARN|ERROR|DEBUG|LOG)\]|\[(?:INFO|WARN|ERROR|DEBUG|LOG)\]) +)+',
-        '', line,
-    )
-
-# ═══════════════════════════════════════════════════════════════
-# ESTADO GLOBAL (protegido por state_lock)
-# ═══════════════════════════════════════════════════════════════
-state_lock = threading.Lock()           # Protege TODAS las variables de estado
-stdin_lock = threading.Lock()           # Protege escrituras al pipe de stdin del servidor
-
-players_online = set()
-backup_in_progress = False
-backup_dispatched = False
-watchdog_fired = False                  # True si el watchdog mandó resume antes que el worker
-shutting_down = False
-shutdown_requested_at = 0.0             # H1: timestamp del inicio del apagado (tope del stop)
-last_backup_completed_time = 0          # Cuándo terminó el último ciclo de backup
-save_hold_timestamp = 0                 # Cuándo se envió save hold (para el watchdog)
-backup_thread = None                    # Referencia al hilo worker actual
-active_compress_process = None          # Referencia al proceso de compresión para aniquilación
-backup_ipc_lock = multiprocessing.Lock() # Lock IPC para backups frios del propio wrapper (inicio/cierre);
-# el worker subprocess NO lo comparte (usa el lock interno de auto_backup)
-last_save_snapshot = []                 # Lista de tuplas (rel_path, byte_length) parseadas de save query
-save_query_ready_seen = False           # True si llegó "Data saved" y falta capturar la lista de archivos
-backup_cancel_event = None              # Señal cooperativa para cancelar la compresión actual
-expecting_list_names = False            # True si se recibió encabezado 'There are X players' y falta leer nombres
-last_snapshot_update_time = 0.0         # Timestamp de la última adición a last_save_snapshot
-snapshot_retry_count = 0                # Reintentos consecutivos por snapshot incompleto
-snapshot_retry_at = 0.0                 # Timestamp del proximo reintento permitido (0 = no programado)
-
-server_process = None
-
 # ═══════════════════════════════════════════════════════════════
 # Envio de comandos al servidor
 # ═══════════════════════════════════════════════════════════════
 def send_command(cmd):
     """Envía un comando al servidor de forma segura ignorando tuberías rotas o stdin cerrado."""
     try:
-        with stdin_lock:
-            if server_process and server_process.poll() is None and server_process.stdin:
-                server_process.stdin.write(cmd + "\n")
-                server_process.stdin.flush()
+        with wstate.stdin_lock:
+            if wstate.server_process and wstate.server_process.poll() is None and wstate.server_process.stdin:
+                wstate.server_process.stdin.write(cmd + "\n")
+                wstate.server_process.stdin.flush()
     except (BrokenPipeError, OSError, ValueError):
         pass
     except Exception as e:
         print(L(f"[Wrapper] Error enviando comando '{cmd}': {e}", f"[Wrapper] Error sending command '{cmd}': {e}"))
 
-def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
-    """Renombra un archivo .zip a _POSIBLEMENTE_CORRUPTO si ocurrió una anomalia.
 
-    Idempotente: si el archivo ya lleva el marcador `reason`, no se renombra de
-    nuevo (evita nombres _CORRUPTO_CORRUPTO.zip en dobles marcados).
-    """
-    if zip_filepath and isinstance(zip_filepath, str) and os.path.exists(zip_filepath):
-        # Usar rsplit para reemplazar solo la extension final, no .zip intermedios
-        base = zip_filepath.rsplit(".zip", 1)[0]
-        if base.endswith("_" + reason):
-            return
-        corrupt_name = f"{base}_{reason}.zip"
-        try:
-            os.rename(zip_filepath, corrupt_name)
-            print(L(f"[Worker] Backup marcado por desincronización: {os.path.basename(corrupt_name)}", f"[Worker] Backup flagged for desync: {os.path.basename(corrupt_name)}"))
-        except Exception as e:
-            print(L(f"[Worker] No se pudo renombrar el backup {zip_filepath}: {e}", f"[Worker] Could not rename backup {zip_filepath}: {e}"))
-
-def parse_save_query_files(line):
-    """Extrae pares (ruta_relativa, bytes) de una línea de save query."""
-    stripped = _strip_log_prefix(line).strip()
-    if not stripped or stripped.startswith("<") or ":" not in stripped:
-        return []
-
-    parsed = []
-    for rel_path, size_str in re.findall(r"([^,\r\n]+?):(\d+)", stripped):
-        clean_rel = rel_path.strip()
-        if clean_rel:
-            parsed.append((clean_rel, int(size_str)))
-    return parsed
-
-def _is_snapshot_failure(error_msg):
-    """True si el error del worker merece reintento inmediato del ciclo caliente.
-
-    El worker anota los fallos del modo snapshot con el prefijo "Snapshot:"
-    (create_backup en modo snapshot siempre lanza). Se excluyen los fallos
-    operativos que un reintento no va a resolver: cancelacion (shutdown en
-    curso) y exceso del limite de tamano. El resto de errores (E/S, lock,
-    disco) esperan el intervalo normal de backup.
-    """
-    msg = (error_msg or "").lower()
-    if "snapshot" not in msg:
-        return False
-    if "cancelled" in msg or "cancelado" in msg:
-        return False
-    if "exceeds the" in msg or "excede el limite" in msg:
-        return False
-    return True
-
-def _snapshot_retry_delay(attempt):
-    """Backoff exponencial entre reintentos de snapshot: 5, 10, 20, ... 60 s tope.
-
-    `attempt` es el numero de reintentos consecutivos ya fallidos (1-based).
-    Acota el ciclo cuando BDS responde con snapshots incompletos de forma
-    sostenida (el watchdog solo limita cuando BDS NO responde).
-    """
-    return min(RETRY_BACKOFF_MAX_SEC, RETRY_BACKOFF_BASE_SEC * (2 ** (attempt - 1)))
-
-# ═══════════════════════════════════════════════════════════════
-# PROCESO WORKER: Compresión en E/S aislada
-# ═══════════════════════════════════════════════════════════════
-class _FileCancelEvent:
-    """Sustituto de multiprocessing.Event para la senal de cancelacion.
-
-    La senal via ARCHIVO (no via semaforo compartido): el worker de compresion
-    ahora se lanza con subprocess (el spawn de multiprocessing se colgaba
-    50-120s en el bootstrap con el wrapper + BDS), y un hijo subprocess no
-    puede compartir un Event de multiprocessing. La API es identica a
-    multiprocessing.Event (is_set/set/clear), asi que los puntos de
-    cancelacion existentes no cambian.
-    """
-    def __init__(self, path):
-        self.path = path
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
-
-    def is_set(self):
-        return os.path.exists(self.path)
-
-    def set(self):
-        try:
-            open(self.path, "w").close()
-        except Exception:
-            pass
-
-    def clear(self):
-        try:
-            os.remove(self.path)
-        except Exception:
-            pass
-
-# ═══════════════════════════════════════════════════════════════
-# Forzar terminacion del proceso de compresion
-# ═══════════════════════════════════════════════════════════════
-def _force_kill_compress_process(proc):
-    """Fuerza la terminacion de un proceso de compresion y reemplaza el lock IPC por uno nuevo."""
-    global backup_ipc_lock, active_compress_process
-    if not proc or not proc.is_alive():
-        return
-        
-    with state_lock:
-        if active_compress_process is not proc:
-            return # Ya fue terminado por otro hilo
-            
-        try:
-            proc.kill()
-            proc.join()
-        except Exception as e:
-            print(L(f"[Wrapper] Error forzando kill del proceso de compresión: {e}", f"[Wrapper] Error forcing kill of compression process: {e}"))
-            
-        # Reemplazar el lock IPC (puede quedar en mal estado tras kill)
-        backup_ipc_lock = multiprocessing.Lock()
-        active_compress_process = None
-
-        # FIX D4: el worker muerto pudo dejar un .tmp a medias; se limpia ya
-        # (antes quedaba huerfano hasta el siguiente backup). Bajo state_lock:
-        # no puede haber otro backup escribiendo al mismo tiempo.
-        try:
-            import glob as _glob
-            for orphan in _glob.glob(os.path.join(auto_backup.BACKUP_DIR, "*.tmp")):
-                try:
-                    os.remove(orphan)
-                    print(L(f"[Wrapper] Limpieza: eliminado {os.path.basename(orphan)} tras kill.", f"[Wrapper] Cleanup: removed {os.path.basename(orphan)} after kill."))
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-# ═══════════════════════════════════════════════════════════════
-# Hilo worker de compresion
-# ═══════════════════════════════════════════════════════════════
-def execute_backup_worker(file_snapshot=None, cancel_event=None):
-    """Hilo efímero que orquesta el proceso de compresión de Bedrock."""
-    global backup_in_progress, backup_dispatched, watchdog_fired, last_backup_completed_time, save_query_ready_seen, backup_cancel_event, active_compress_process, backup_ipc_lock, snapshot_retry_count, snapshot_retry_at
-    outcome = "exception"  # desenlace real del ciclo (se emite en el finally)
-    try:
-
-        print(L("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...", "[Worker] Starting compression in a separate process (subprocess)..."))
-        _emit_event("backup_compress_started", files=len(file_snapshot) if file_snapshot else 0)
-
-        import json as _json
-        _base = os.path.dirname(os.path.abspath(__file__))
-        _stamp = int(time.time() * 1000)
-        _nonce = os.urandom(4).hex()
-        _tmpdir = os.environ.get("TEMP", ".")
-        _snap_path = os.path.join(_tmpdir, "bw_snap_%d_%s.json" % (_stamp, _nonce))
-        _marker = os.path.join(_tmpdir, "bw_cancel_%d_%s.mark" % (_stamp, _nonce))
-        _result = os.path.join(_tmpdir, "bw_result_%d_%s.json" % (_stamp, _nonce))
-        _worker = os.path.join(_base, "backup_worker.py")
-
-        try:
-            with open(_snap_path, "w", encoding="utf-8") as _f:
-                _json.dump(file_snapshot, _f, ensure_ascii=False)
-            # Si el evento de cancelacion es el nuevo _FileCancelEvent, usar SU
-            # archivo como marker (asi los puntos de cancelacion existentes,
-            # que llaman a .set(), cancelan de verdad al worker).
-            if cancel_event is not None and hasattr(cancel_event, "path"):
-                _marker = cancel_event.path
-            comp_proc = subprocess.Popen(
-                [sys.executable, "-u", _worker, _snap_path, _marker, _result],
-                cwd=_base,
-                stdin=subprocess.DEVNULL,
-            )
-            # Shims para compatibilidad con el codigo existente
-            # (_force_kill_compress_process usa is_alive/kill/join).
-            comp_proc.is_alive = lambda: comp_proc.poll() is None
-            # R2-HIGH: Popen.wait(timeout) LANZA TimeoutExpired al vencer,
-            # mientras Process.join(timeout) devuelve None. El shim anterior
-            # propagaba la excepcion: el CASO A (timeout) era inalcanzable y
-            # el except generico huerfanaba el proceso vivo sin matarlo,
-            # dejando el lock de backups retenido hasta su fin (o para
-            # siempre, si el huerfano colgaba).
-            def _join(timeout=None):
-                try:
-                    comp_proc.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    pass
-            comp_proc.join = _join
-        except Exception as e:
-            print(L(f"[Worker] [WARN] No se pudo lanzar el worker: {e}", f"[Worker] [WARN] Could not launch the worker: {e}"))
-            for _p in (_snap_path, _marker, _result):
-                try:
-                    os.remove(_p)
-                except Exception:
-                    pass
-            with state_lock:
-                backup_in_progress = False
-                backup_dispatched = False
-                save_query_ready_seen = False
-                backup_cancel_event = None
-                watchdog_fired = True
-                last_backup_completed_time = time.time()
-                snapshot_retry_count = 0
-                snapshot_retry_at = 0.0
-            send_command("save resume")
-            outcome = "launch_error"
-            return
-
-        with state_lock:
-            active_compress_process = comp_proc
-
-        comp_proc.join(timeout=WORKER_COMPRESSION_TIMEOUT_SEC)
-
-        # --- CASO A: Compresión excedió el tiempo máximo (Timeout interno) ---
-        if comp_proc.is_alive():
-            print(L(f"[Worker] [WARN] Timeout de compresion ({WORKER_COMPRESSION_TIMEOUT_SEC}s).", f"[Worker] [WARN] Compression timeout ({WORKER_COMPRESSION_TIMEOUT_SEC}s)."))
-            print(L("[Worker]          Terminando proceso de compresion...", "[Worker]          Terminating compression process..."))
-        
-            _force_kill_compress_process(comp_proc)
-
-            with state_lock:
-                was_watchdog = watchdog_fired
-                watchdog_fired = True
-
-            if cancel_event:
-                cancel_event.set()
-
-            if not was_watchdog:
-                send_command("save resume")
-
-            with state_lock:
-                backup_in_progress = False
-                backup_dispatched = False
-                save_query_ready_seen = False
-                backup_cancel_event = None
-                last_backup_completed_time = time.time()
-                snapshot_retry_count = 0
-                snapshot_retry_at = 0.0
-
-            for _p in (_snap_path, _marker, _result):
-                try:
-                    os.remove(_p)
-                except Exception:
-                    pass
-            outcome = "timeout"
-            return
-
-        # --- CASO B: Compresión terminó a tiempo ---
-        with state_lock:
-            active_compress_process = None
-
-        try:
-            with open(_result, "r", encoding="utf-8") as _f:
-                result = _json.load(_f)
-        except Exception:
-            result = {"zip": None, "error": L("El proceso termino sin devolver un resultado", "The process exited without returning a result")}
-        for _p in (_snap_path, _marker, _result):
-            try:
-                os.remove(_p)
-            except Exception:
-                pass
-        retry_soon = _is_snapshot_failure(result.get("error"))
-        if result["error"]:
-            print(L(f"[Worker] [ERROR] Falló la compresión: {result['error']}", f"[Worker] [ERROR] Compression failed: {result['error']}"))
-        elif not result["zip"]:
-            print(L("[Worker] [ERROR] El backup no produjo un ZIP válido.", "[Worker] [ERROR] The backup did not produce a valid ZIP."))
-
-        with state_lock:
-            was_watchdog = watchdog_fired
-
-        if was_watchdog:
-            print(L("[Worker] El watchdog ya había reanudado escrituras previamente.", "[Worker] The watchdog had already resumed writes earlier."))
-            outcome = "watchdog"
-            if result["zip"]:
-                mark_corrupt_zip(result["zip"], "POSIBLEMENTE_CORRUPTO")
-        else:
-            if result["zip"]:
-                print(L("[Worker] Compresión exitosa. Reanudando escritura (save resume)...", "[Worker] Compression successful. Resuming writes (save resume)..."))
-                outcome = "success"
-                _emit_event("backup_ok", zip=result["zip"])
-            else:
-                print(L("[Worker] Reanudando escritura tras fallo de backup (save resume)...", "[Worker] Resuming writes after failed backup (save resume)..."))
-                outcome = "failed"
-            send_command("save resume")
-
-        with state_lock:
-            backup_in_progress = False
-            backup_dispatched = False
-            watchdog_fired = False
-            save_query_ready_seen = False
-            backup_cancel_event = None
-            if retry_soon:
-                # Snapshot incompleto: reintentar con backoff exponencial
-                # (5, 10, 20, ... 60 s). Sin backoff, un BDS que responde
-                # continuamente con snapshots incompletos repetiria el ciclo
-                # cada ~10 s indefinidamente; el watchdog solo limita cuando
-                # BDS NO responde. Tras MAX intentos consecutivos se abandona
-                # hasta el proximo intervalo normal de 30 min.
-                snapshot_retry_count += 1
-                if snapshot_retry_count >= MAX_CONSECUTIVE_SNAPSHOT_RETRIES:
-                    print(L(f"[Worker] {snapshot_retry_count} reintentos consecutivos de snapshot fallidos; "
-                          "se espera el proximo intervalo normal de backup.",
-                          f"[Worker] {snapshot_retry_count} consecutive snapshot retries failed; "
-                          "waiting for the next normal backup interval."))
-                    snapshot_retry_count = 0
-                    snapshot_retry_at = 0.0
-                else:
-                    delay = _snapshot_retry_delay(snapshot_retry_count)
-                    snapshot_retry_at = time.time() + delay
-                    print(L(f"[Worker] Snapshot incompleto: reintento en {delay}s (intento {snapshot_retry_count}).", f"[Worker] Incomplete snapshot: retrying in {delay}s (attempt {snapshot_retry_count})."))
-                last_backup_completed_time = time.time()
-            else:
-                # Exito o fallo operativo: el patron de snapshot termina.
-                snapshot_retry_count = 0
-                snapshot_retry_at = 0.0
-                last_backup_completed_time = time.time()
-
-    except Exception as e:
-        print(L(f"[Worker] [WARN] Excepcion en worker de backup: {type(e).__name__}: {e}", f"[Worker] [WARN] Exception in backup worker: {type(e).__name__}: {e}"))
-        print(L("[Worker]          Limpiando estado del worker...", "[Worker]          Cleaning up worker state..."))
-        outcome = "exception"
-        with state_lock:
-            backup_in_progress = False
-            backup_dispatched = False
-            save_query_ready_seen = False
-            backup_cancel_event = None
-            watchdog_fired = True
-            last_backup_completed_time = time.time()
-            snapshot_retry_count = 0
-            snapshot_retry_at = 0.0
-        send_command("save resume")
-
-        with state_lock:
-            active_compress_process = None
-    finally:
-        # H3: marcador de FIN incondicional del ciclo de compresion (exito,
-        # fallo, timeout, watchdog o excepcion). La GUI resetea su flag
-        # backup_in_progress con esta linea; sin el, un backup fallido dejaba
-        # el boton de backup en frio bloqueado ("Ya hay un backup en curso")
-        # hasta reiniciar la GUI.
-        print(L("[Worker] Backup finalizado", "[Worker] Backup finished"))
-        _emit_event("backup_finished", outcome=outcome)
-# ═══════════════════════════════════════════════════════════════
-# Config de programacion (data/schedule_config.json, escrita por la GUI)
-# ═════════════════════════════════════════════════════════════════
-SCHEDULE_CONFIG_PATH = os.path.join(BASE_DIR, "data", "schedule_config.json")
-SCHEDULE_STATE_PATH = os.path.join(BASE_DIR, "data", "schedule_state_wrapper.json")
-
-# Defaults = comportamiento historico. Deben coincidir con DEFAULTS de
-# gui_backend/services/schedule_config.py (test anti-drift en tests/).
-SCHEDULE_DEFAULTS = {
-    "backup_interval_min": 30,
-    "backup_only_with_players": True,
-    "daily_backup_time": None,
-    "auto_restart_on_crash": False,
-    "daily_restart_time": None,
-}
-
-_schedule_cfg_cache = {"mtime": None, "cfg": dict(SCHEDULE_DEFAULTS)}
-
-# Fecha (YYYY-MM-DD) del ultimo backup diario disparado; persistida para que
-# un reinicio del wrapper (p. ej. el reinicio diario) no lo re-dispare.
-last_daily_backup_date = None
-
-
-def _coerce_schedule_value(key, value):
-    """Coercion de tipos por clave: un schedule_config.json editado a mano no
-    debe romper el tick del scheduler (un string en backup_interval_min hacia
-    lanzar TypeError en la comparacion del intervalo y un daily_backup_time
-    numerico, AttributeError en .split: en ambos casos el tick abortaba cada
-    segundo y los backups programados dejaban de dispararse).
-    """
-    if key == "backup_interval_min":
-        if isinstance(value, bool):
-            return SCHEDULE_DEFAULTS[key]
-        try:
-            iv = int(value)
-        except (TypeError, ValueError):
-            return SCHEDULE_DEFAULTS[key]
-        return iv if iv >= 1 else SCHEDULE_DEFAULTS[key]
-    if key in ("backup_only_with_players", "auto_restart_on_crash"):
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            v = value.strip().lower()
-            if v in ("true", "1", "yes", "on"):
-                return True
-            if v in ("false", "0", "no", "off"):
-                return False
-        return SCHEDULE_DEFAULTS[key]
-    if key in ("daily_backup_time", "daily_restart_time"):
-        if isinstance(value, str) and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", value.strip()):
-            return value.strip()
-        return None
-    return SCHEDULE_DEFAULTS[key]
-
-
-def _load_schedule_config():
-    """Lee data/schedule_config.json; recarga solo si cambio el mtime.
-
-    Leniente: la GUI valida al escribir; ante clave ausente, JSON corrupto,
-    error de lectura o VALOR con tipo invalido (p. ej. edicion manual) se usan
-    los defaults historicos de esa clave (nunca se lanza).
-    """
-    try:
-        mtime = os.stat(SCHEDULE_CONFIG_PATH).st_mtime
-    except OSError:
-        _schedule_cfg_cache["mtime"] = None
-        _schedule_cfg_cache["cfg"] = dict(SCHEDULE_DEFAULTS)
-        return dict(SCHEDULE_DEFAULTS)
-    if _schedule_cfg_cache["mtime"] == mtime:
-        return dict(_schedule_cfg_cache["cfg"])
-    cfg = dict(SCHEDULE_DEFAULTS)
-    try:
-        with open(SCHEDULE_CONFIG_PATH, encoding="utf-8") as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            for key in SCHEDULE_DEFAULTS:
-                if key in raw:
-                    cfg[key] = _coerce_schedule_value(key, raw[key])
-    except (OSError, ValueError):
-        cfg = dict(SCHEDULE_DEFAULTS)
-    _schedule_cfg_cache["mtime"] = mtime
-    _schedule_cfg_cache["cfg"] = cfg
-    return dict(cfg)
-
-
-def _load_last_daily_backup_date():
-    try:
-        with open(SCHEDULE_STATE_PATH, encoding="utf-8") as f:
-            value = json.load(f).get("last_daily_backup_date")
-        return value if isinstance(value, str) else None
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
-def _save_last_daily_backup_date(date_str):
-    try:
-        os.makedirs(os.path.dirname(SCHEDULE_STATE_PATH), exist_ok=True)
-        tmp_path = SCHEDULE_STATE_PATH + ".tmp_" + os.urandom(4).hex()
-        with open(tmp_path, "w", encoding="utf-8", newline="") as f:
-            json.dump({"last_daily_backup_date": date_str}, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, SCHEDULE_STATE_PATH)
-    except OSError:
-        pass
-
-
-def _should_start_backup(interval_due, retry_due, daily_due, players_count, cfg):
-    """Decision del ciclo periodico en IDLE. Devuelve 'start', 'skip' o 'no'.
-
-    'skip' = intervalo vencido pero sin jugadores (y con requisito activo):
-    se resetea el timer, como hacia el scheduler historico.
-    """
-    if daily_due:
-        return "start"
-    if not (interval_due or retry_due):
-        return "no"
-    if players_count > 0 or not cfg["backup_only_with_players"]:
-        return "start"
-    return "skip"
-
-
-def _crossed_daily_time(localtime, hhmm, fired_date_str):
-    """True si la hora local ya alcanzo 'hhmm' y hoy no se disparo.
-
-    localtime: time.localtime() (usa .tm_hour/.tm_min/.tm_year/...).
-    """
-    if not hhmm:
-        return False
-    today_str = time.strftime("%Y-%m-%d", localtime)
-    if fired_date_str == today_str:
-        return False
-    try:
-        fire_h, fire_m = (int(x) for x in hhmm.split(":"))
-    except ValueError:
-        return False
-    return (localtime.tm_hour, localtime.tm_min) >= (fire_h, fire_m)
+wrapper_backup.set_command_sender(lambda cmd: send_command(cmd))
 
 # ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdout del servidor
 # ═══════════════════════════════════════════════════════════════
 def read_stdout():
     """Lee la salida del servidor, detecta eventos, parsea save query y despacha worker."""
-    global players_online, backup_dispatched, backup_thread, last_save_snapshot, save_query_ready_seen, backup_cancel_event, expecting_list_names, last_snapshot_update_time
-
     lines_waited_for_list = 0
 
     while True:
         try:
-            line = server_process.stdout.readline()
+            line = wstate.server_process.stdout.readline()
             if not line:
                 break
 
@@ -704,45 +175,47 @@ def read_stdout():
                 match_conn = _RE_PLAYER_CONNECT.search(clean_line)
                 if match_conn:
                     name = match_conn.group(1).strip()
-                    with state_lock:
-                        players_online.add(name)
+                    with wstate.state_lock:
+                        wstate.players_online.add(name)
                     _emit_event("player_connected", name=name, xuid=match_conn.group(2))
 
                 # --- Detectar desconexión de jugador ---
                 match_disc = _RE_PLAYER_DISCONNECT.search(clean_line)
                 if match_disc:
                     name = match_disc.group(1).strip()
-                    with state_lock:
-                        players_online.discard(name)
+                    with wstate.state_lock:
+                        wstate.players_online.discard(name)
                     _emit_event("player_disconnected", name=name, xuid=match_disc.group(2))
 
                 # --- Sincronización con comando 'list' ---
-                with state_lock:
-                    is_expecting_list = expecting_list_names and not backup_in_progress
+                with wstate.state_lock:
+                    is_expecting_list = (
+                        wstate.expecting_list_names and not wstate.backup_in_progress
+                    )
 
                 match_list = _RE_PLAYERS_LIST.search(clean_line)
                 if match_list:
                     count = int(match_list.group(1))
                     names_str = match_list.group(2).strip()
-                    with state_lock:
+                    with wstate.state_lock:
                         if count == 0:
-                            players_online.clear()
-                            expecting_list_names = False
+                            wstate.players_online.clear()
+                            wstate.expecting_list_names = False
                         elif names_str:
                             parsed_names = {n.strip() for n in names_str.split(",") if n.strip()}
                             if parsed_names:
-                                players_online.clear()
-                                players_online.update(parsed_names)
+                                wstate.players_online.clear()
+                                wstate.players_online.update(parsed_names)
                                 lines_waited_for_list = 0
-                            expecting_list_names = False
+                            wstate.expecting_list_names = False
                         else:
-                            expecting_list_names = True
+                            wstate.expecting_list_names = True
                             lines_waited_for_list = 0
                 elif is_expecting_list:
                     lines_waited_for_list += 1
                     if lines_waited_for_list > 10:
-                        with state_lock:
-                            expecting_list_names = False
+                        with wstate.state_lock:
+                            wstate.expecting_list_names = False
                     else:
                         if line.strip().startswith("["):
                             pass
@@ -751,10 +224,10 @@ def read_stdout():
                             if stripped and stripped.lower() not in ("quit correctly",):
                                 parsed_names = {n.strip() for n in stripped.split(",") if n.strip()}
                                 if parsed_names:
-                                    with state_lock:
-                                        players_online.clear()
-                                        players_online.update(parsed_names)
-                                        expecting_list_names = False
+                                    with wstate.state_lock:
+                                        wstate.players_online.clear()
+                                        wstate.players_online.update(parsed_names)
+                                        wstate.expecting_list_names = False
                                     lines_waited_for_list = 0
 
             # --- Detectar respuesta exitosa de save query ---
@@ -763,26 +236,26 @@ def read_stdout():
             # --- Parsear líneas de respuesta de 'save query' (Archivos y truncado de bytes) ---
             parsed_files = parse_save_query_files(clean_line) if not is_chat else []
 
-            if save_ready_in_line or parsed_files or save_query_ready_seen:
-                with state_lock:
-                    is_waiting = backup_in_progress and not backup_dispatched
+            if save_ready_in_line or parsed_files or wstate.save_query_ready_seen:
+                with wstate.state_lock:
+                    is_waiting = wstate.backup_in_progress and not wstate.backup_dispatched
 
                     if is_waiting and save_ready_in_line:
-                        save_query_ready_seen = True
-                        last_save_snapshot = []
-                        last_snapshot_update_time = time.time()
+                        wstate.save_query_ready_seen = True
+                        wstate.last_save_snapshot = []
+                        wstate.last_snapshot_update_time = time.time()
 
                     # Fix: nunca tratar una línea de conexión/desconexión de jugador
                     # como parte del listado de archivos de 'save query' (puede
                     # coincidir con el patrón "texto:numero" si el log no trae
                     # espacio tras "xuid:").
-                    if is_waiting and parsed_files and save_query_ready_seen and not match_conn and not match_disc:
-                        existing_paths = {path for path, _ in last_save_snapshot}
+                    if is_waiting and parsed_files and wstate.save_query_ready_seen and not match_conn and not match_disc:
+                        existing_paths = {path for path, _ in wstate.last_save_snapshot}
                         for item in parsed_files:
                             if item[0] not in existing_paths:
-                                last_save_snapshot.append(item)
+                                wstate.last_save_snapshot.append(item)
                                 existing_paths.add(item[0])
-                        last_snapshot_update_time = time.time()
+                        wstate.last_snapshot_update_time = time.time()
 
         except Exception as e:
             try:
@@ -795,17 +268,15 @@ def read_stdout():
 # ═══════════════════════════════════════════════════════════════
 def backup_scheduler():
     """Reloj maestro defensivo con evaluación e intervenciones de estado 100% atómicas."""
-    global backup_in_progress, backup_dispatched, save_hold_timestamp, watchdog_fired, last_backup_completed_time, last_save_snapshot, save_query_ready_seen, backup_cancel_event, backup_thread, expecting_list_names, snapshot_retry_count, snapshot_retry_at, last_daily_backup_date
-
     last_list_sync = time.time()
     last_save_query = 0.0
-    last_daily_backup_date = _load_last_daily_backup_date()
+    wrapper_schedule.last_daily_backup_date = wrapper_schedule._load_last_daily_backup_date()
 
     while True:
         try:
             time.sleep(1)
 
-            if server_process and server_process.poll() is not None:
+            if wstate.server_process and wstate.server_process.poll() is not None:
                 break
 
             should_send_list = False
@@ -816,44 +287,44 @@ def backup_scheduler():
             now = time.time()
 
             # --- EVALUACIÓN DE ESTADO 100% ATÓMICA ---
-            with state_lock:
-                if shutting_down:
+            with wstate.state_lock:
+                if wstate.shutting_down:
                     break
 
                 # Sincronización de jugadores (solo en IDLE)
-                if (now - last_list_sync) > LIST_SYNC_INTERVAL_SEC and not backup_in_progress:
+                if (now - last_list_sync) > wstate.LIST_SYNC_INTERVAL_SEC and not wstate.backup_in_progress:
                     should_send_list = True
                     last_list_sync = now
 
-                if backup_in_progress:
-                    if not backup_dispatched:
+                if wstate.backup_in_progress:
+                    if not wstate.backup_dispatched:
                         # Si tenemos archivos recolectados y pasaron >1.5s sin nuevas líneas, despachar worker
-                        if save_query_ready_seen and len(last_save_snapshot) > 0 and (now - last_snapshot_update_time) >= 5.0:  # Aumentado de 1.5s a 5s para evitar snapshots incompletos bajo carga
-                            snapshot_copy = list(last_save_snapshot)
-                            backup_dispatched = True
-                            save_query_ready_seen = False
-                            backup_cancel_event = _FileCancelEvent(os.path.join(os.environ.get("TEMP", "."), "bw_cancel_%d_%s.mark" % (int(time.time() * 1000), os.urandom(4).hex())))
+                        if wstate.save_query_ready_seen and len(wstate.last_save_snapshot) > 0 and (now - wstate.last_snapshot_update_time) >= 5.0:  # Aumentado de 1.5s a 5s para evitar snapshots incompletos bajo carga
+                            snapshot_copy = list(wstate.last_save_snapshot)
+                            wstate.backup_dispatched = True
+                            wstate.save_query_ready_seen = False
+                            wstate.backup_cancel_event = wrapper_backup._FileCancelEvent(os.path.join(os.environ.get("TEMP", "."), "bw_cancel_%d_%s.mark" % (int(time.time() * 1000), os.urandom(4).hex())))
                             snapshot_len = len(snapshot_copy)
                             worker_to_start = threading.Thread(
-                                target=execute_backup_worker,
-                                args=(snapshot_copy, backup_cancel_event),
+                                target=wrapper_backup.execute_backup_worker,
+                                args=(snapshot_copy, wstate.backup_cancel_event),
                                 daemon=True
                             )
-                            backup_thread = worker_to_start
+                            wstate.backup_thread = worker_to_start
                             print(L(f"[Wrapper] Despachando worker (vía timeout de resguardo) con snapshot ({snapshot_len} archivos)...", f"[Wrapper] Dispatching worker (via fallback timeout) with snapshot ({snapshot_len} files)..."))
                             worker_to_start.start()
                         # Estado HOLDING: verificar Watchdog de 60s
-                        elif (now - save_hold_timestamp) > WATCHDOG_HOLDING_TIMEOUT_SEC:
+                        elif (now - wstate.save_hold_timestamp) > wstate.WATCHDOG_HOLDING_TIMEOUT_SEC:
                             print(L("[Wrapper] [WARN] Servidor no respondio a save query en 60s.", "[Wrapper] [WARN] Server did not respond to save query in 60s."))
                             print(L("[Wrapper]          Forzando save resume.", "[Wrapper]          Forcing save resume."))
-                            backup_in_progress = False
-                            backup_dispatched = False
-                            save_query_ready_seen = False
-                            watchdog_fired = True
-                            last_backup_completed_time = now
+                            wstate.backup_in_progress = False
+                            wstate.backup_dispatched = False
+                            wstate.save_query_ready_seen = False
+                            wstate.watchdog_fired = True
+                            wstate.last_backup_completed_time = now
                             should_send_resume = True
                         else:
-                            if not save_query_ready_seen and (now - last_save_query) >= 3:
+                            if not wstate.save_query_ready_seen and (now - last_save_query) >= 3:
                                 should_send_query = True
                                 last_save_query = now
                 else:
@@ -861,35 +332,43 @@ def backup_scheduler():
                     # Intervalo configurable (data/schedule_config.json), reintento
                     # por snapshot incompleto (backoff: snapshot_retry_at) y hora
                     # fija diaria (dispara aunque no haya jugadores).
-                    cfg = _load_schedule_config()
-                    interval_due = (now - last_backup_completed_time) > (cfg["backup_interval_min"] * 60)
-                    retry_due = snapshot_retry_at > 0 and now >= snapshot_retry_at
-                    daily_due = _crossed_daily_time(time.localtime(now), cfg["daily_backup_time"], last_daily_backup_date)
-                    accion = _should_start_backup(interval_due, retry_due, daily_due, len(players_online), cfg)
+                    cfg = wrapper_schedule._load_schedule_config()
+                    interval_due = (now - wstate.last_backup_completed_time) > (cfg["backup_interval_min"] * 60)
+                    retry_due = wstate.snapshot_retry_at > 0 and now >= wstate.snapshot_retry_at
+                    daily_due = wrapper_schedule._crossed_daily_time(
+                        time.localtime(now),
+                        cfg["daily_backup_time"],
+                        wrapper_schedule.last_daily_backup_date,
+                    )
+                    accion = wrapper_schedule._should_start_backup(
+                        interval_due, retry_due, daily_due, len(wstate.players_online), cfg
+                    )
                     if accion == "start":
                         if daily_due:
-                            last_daily_backup_date = time.strftime("%Y-%m-%d")
-                            _save_last_daily_backup_date(last_daily_backup_date)
+                            wrapper_schedule.last_daily_backup_date = time.strftime("%Y-%m-%d")
+                            wrapper_schedule._save_last_daily_backup_date(
+                                wrapper_schedule.last_daily_backup_date
+                            )
                             print(L(f"[Wrapper] Backup diario programado ({cfg['daily_backup_time']}). Iniciando backup en caliente...",
                                     f"[Wrapper] Daily scheduled backup ({cfg['daily_backup_time']}). Starting hot backup..."))
-                        elif len(players_online) > 0:
-                            print(L(f"[Wrapper] Hay {len(players_online)} jugador(es) online. Iniciando backup en caliente...",
-                                    f"[Wrapper] There are {len(players_online)} player(s) online. Starting hot backup..."))
+                        elif len(wstate.players_online) > 0:
+                            print(L(f"[Wrapper] Hay {len(wstate.players_online)} jugador(es) online. Iniciando backup en caliente...",
+                                    f"[Wrapper] There are {len(wstate.players_online)} player(s) online. Starting hot backup..."))
                         else:
                             print(L("[Wrapper] Intervalo de backup vencido. Iniciando backup en caliente...",
                                     "[Wrapper] Backup interval elapsed. Starting hot backup..."))
-                        backup_in_progress = True
-                        backup_dispatched = False
-                        watchdog_fired = False
-                        save_query_ready_seen = False
-                        backup_cancel_event = None
-                        save_hold_timestamp = now
-                        last_save_snapshot = []
-                        expecting_list_names = False  # Fix: no dejar una continuación de 'list' pendiente
-                        snapshot_retry_at = 0.0  # consumir el disparador del reintento
+                        wstate.backup_in_progress = True
+                        wstate.backup_dispatched = False
+                        wstate.watchdog_fired = False
+                        wstate.save_query_ready_seen = False
+                        wstate.backup_cancel_event = None
+                        wstate.save_hold_timestamp = now
+                        wstate.last_save_snapshot = []
+                        wstate.expecting_list_names = False  # Fix: no dejar una continuación de 'list' pendiente
+                        wstate.snapshot_retry_at = 0.0  # consumir el disparador del reintento
                         should_send_hold = True
                     elif accion == "skip":
-                        last_backup_completed_time = now
+                        wstate.last_backup_completed_time = now
 
             # --- EJECUCIÓN DE COMANDOS FUERA DEL LOCK ---
             # Sin deadlock: los comandos se ejecutan sin retener state_lock.
@@ -924,27 +403,25 @@ def initiate_shutdown(reason="shutdown"):
     2. Cancela cualquier backup caliente en curso y libera save hold (save resume).
     3. Envía el comando 'stop' al proceso del servidor si aún sigue vivo.
     """
-    global shutting_down, backup_in_progress, backup_dispatched, save_query_ready_seen, backup_cancel_event, watchdog_fired, shutdown_requested_at
-
     cancel_worker = None
     should_send_resume = False
     should_send_stop = False
 
-    with state_lock:
-        if not shutting_down:
-            shutting_down = True
-            shutdown_requested_at = time.time()  # H1: arranca el reloj del tope de stop
+    with wstate.state_lock:
+        if not wstate.shutting_down:
+            wstate.shutting_down = True
+            wstate.shutdown_requested_at = time.time()  # H1: arranca el reloj del tope de stop
             print(L(f"\n[Wrapper] Apagado iniciado ({reason}).", f"\n[Wrapper] Shutdown initiated ({reason})."))
             _emit_event("shutdown_initiated", reason=str(reason))
-            if backup_in_progress:
+            if wstate.backup_in_progress:
                 print(L("[Wrapper] Cancelando backup caliente en curso antes de detener el servidor...", "[Wrapper] Cancelling running hot backup before stopping the server..."))
-                cancel_worker = backup_cancel_event
+                cancel_worker = wstate.backup_cancel_event
                 should_send_resume = True
-                backup_in_progress = False
-                backup_dispatched = False
-                save_query_ready_seen = False
-                backup_cancel_event = None
-                watchdog_fired = True
+                wstate.backup_in_progress = False
+                wstate.backup_dispatched = False
+                wstate.save_query_ready_seen = False
+                wstate.backup_cancel_event = None
+                wstate.watchdog_fired = True
             should_send_stop = True
         else:
             print(L(f"\n[Wrapper] Apagado ya en progreso, ignorando ({reason})...", f"\n[Wrapper] Shutdown already in progress, ignoring ({reason})..."))
@@ -962,30 +439,6 @@ def initiate_shutdown(reason="shutdown"):
 # ═══════════════════════════════════════════════════════════════
 # Hilo lector de stdin (comandos del usuario)
 # ═══════════════════════════════════════════════════════════════
-def _begin_manual_hot_backup():
-    """Inicia un ciclo de backup en caliente manual (comando 'backup' por stdin).
-
-    Replica EXACTAMENTE el arranque del ciclo periodico de backup_scheduler():
-    misma maquina de estados y mismo lock, para que el scheduler tome el relevo
-    sin cambios. Devuelve True si el ciclo arranco, False si ya hay uno en curso.
-    """
-    global backup_in_progress, backup_dispatched, watchdog_fired, save_query_ready_seen
-    global backup_cancel_event, save_hold_timestamp, last_save_snapshot, expecting_list_names
-    global snapshot_retry_at
-    with state_lock:
-        if backup_in_progress:
-            return False
-        backup_in_progress = True
-        backup_dispatched = False
-        watchdog_fired = False
-        save_query_ready_seen = False
-        backup_cancel_event = None
-        save_hold_timestamp = time.time()
-        last_save_snapshot = []
-        expecting_list_names = False
-        snapshot_retry_at = 0.0  # el ciclo manual consume cualquier reintento pendiente
-    return True
-
 def read_stdin():
     """Lee comandos del usuario y los reenvía al servidor."""
     while True:
@@ -997,12 +450,12 @@ def read_stdin():
             if not cmd:
                 continue
 
-            with state_lock:
-                if shutting_down:
+            with wstate.state_lock:
+                if wstate.shutting_down:
                     break
 
             if cmd.lower() == "backup":
-                started = _begin_manual_hot_backup()
+                started = wrapper_backup._begin_manual_hot_backup()
                 if started:
                     send_command("save hold")
                     print(L("[Wrapper] Backup manual solicitado; ciclo caliente iniciado.", "[Wrapper] Manual backup requested; hot cycle started."))
@@ -1022,7 +475,7 @@ def read_stdin():
 def execute_final_backup():
     """Hilo efímero para el backup de cierre."""
     try:
-        result = auto_backup.create_backup("cierre", file_snapshot=None, wait_lock_timeout_sec=FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=backup_ipc_lock)
+        result = auto_backup.create_backup("cierre", file_snapshot=None, wait_lock_timeout_sec=wstate.FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=wstate.backup_ipc_lock)
         if not result:
             print(L("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.", "[Wrapper] The final backup did not produce a valid ZIP or was aborted by timeout."))
     except Exception as e:
@@ -1034,7 +487,7 @@ def should_run_initial_backup():
     Permite desactivar el backup inicial en entornos con políticas restrictivas
     donde no sea posible aplicar exclusiones de antivirus.
     """
-    props_path = os.path.join(BASE_DIR, "server.properties")
+    props_path = os.path.join(wstate.BASE_DIR, "server.properties")
     if os.path.exists(props_path):
         try:
             with open(props_path, "r", encoding="utf-8") as f:
@@ -1051,7 +504,7 @@ def should_run_initial_backup():
 # PUNTO DE ENTRADA PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    wrapper_mutex = wpg.NamedMutex(f"BDS_Wrapper_{wpg.get_installation_hash(BASE_DIR)}")
+    wrapper_mutex = wpg.NamedMutex(f"BDS_Wrapper_{wpg.get_installation_hash(wstate.BASE_DIR)}")
     if wrapper_mutex.already_exists or not wrapper_mutex.acquire(timeout_ms=100):
         print(L("[Wrapper] [ERROR] Ya hay una instancia del wrapper en ejecución para este servidor. Abortando.",
                 "[Wrapper] [ERROR] An instance of the wrapper is already running for this server. Aborting."))
@@ -1065,7 +518,7 @@ if __name__ == "__main__":
 
     # Recuperación de restauraciones interrumpidas (.bak o .restore_staging_*)
     try:
-        auto_backup.recover_interrupted_restores(BASE_DIR)
+        auto_backup.recover_interrupted_restores(wstate.BASE_DIR)
     except Exception as e:
         print(L(f"[Wrapper] [WARN] Error en recuperación de restauraciones: {e}", f"[Wrapper] [WARN] Error in restore recovery: {e}"))
 
@@ -1079,7 +532,7 @@ if __name__ == "__main__":
     if should_run_initial_backup():
         t_start_initial_backup = time.time()
         try:
-            auto_backup.create_backup("inicio", file_snapshot=None, external_lock=backup_ipc_lock)
+            auto_backup.create_backup("inicio", file_snapshot=None, external_lock=wstate.backup_ipc_lock)
         except Exception as e:
             print(L(f"[Wrapper] Error en backup inicial: {e}", f"[Wrapper] Error in initial backup: {e}"))
         initial_backup_duration = time.time() - t_start_initial_backup
@@ -1099,30 +552,30 @@ if __name__ == "__main__":
     else:
         print(L("[Wrapper] Backup inicial omitido por configuración (backup-inicio=false).", "[Wrapper] Initial backup skipped by configuration (backup-inicio=false)."))
 
-    with state_lock:
-        last_backup_completed_time = time.time()
+    with wstate.state_lock:
+        wstate.last_backup_completed_time = time.time()
 
     # Iniciar BDS con aislamiento de señales (CREATE_NEW_PROCESS_GROUP)
     try:
-        server_process = subprocess.Popen(
-            [SERVER_EXE],
+        wstate.server_process = subprocess.Popen(
+            [wstate.SERVER_EXE],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             encoding="utf-8",
             errors="replace",
             bufsize=1,
-            cwd=BASE_DIR,
+            cwd=wstate.BASE_DIR,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
         if sys.platform == "win32":
-            bds_job = wpg.create_job_object_for_process(server_process.pid)
+            bds_job = wpg.create_job_object_for_process(wstate.server_process.pid)
             if not bds_job:
                 print(L("[Wrapper] [ERROR] No se pudo configurar el Job Object de Windows para BDS. Abortando.",
                         "[Wrapper] [ERROR] Could not configure Windows Job Object for BDS. Aborting."))
                 try:
-                    server_process.kill()
-                    server_process.wait()
+                    wstate.server_process.kill()
+                    wstate.server_process.wait()
                 except Exception:
                     pass
                 wrapper_mutex.close()
@@ -1139,15 +592,15 @@ if __name__ == "__main__":
 
     # --- Loop principal de espera ---
     try:
-        while server_process and server_process.poll() is None:
+        while wstate.server_process and wstate.server_process.poll() is None:
             # H1: la ruta normal de 'stop' tambien tiene tope: si BDS cuelga en
             # el apagado, el wrapper no se queda esperandolo para siempre
             # (antes solo la ruta Ctrl+C forzaba la terminacion). El kill
             # efectivo ocurre en el finally, antes del backup final.
-            with state_lock:
+            with wstate.state_lock:
                 stop_timeout_exceeded = (
-                    shutting_down
-                    and (time.time() - shutdown_requested_at) > BDS_STOP_TIMEOUT_SEC
+                    wstate.shutting_down
+                    and (time.time() - wstate.shutdown_requested_at) > wstate.BDS_STOP_TIMEOUT_SEC
                 )
             if stop_timeout_exceeded:
                 break
@@ -1158,21 +611,21 @@ if __name__ == "__main__":
 
         # Esperar cierre del servidor con protección contra doble Ctrl+C
         try:
-            if server_process:
-                server_process.wait(timeout=15)
+            if wstate.server_process:
+                wstate.server_process.wait(timeout=15)
         except subprocess.TimeoutExpired:
             print(L("[Wrapper] [WARN] Servidor no respondio al cierre. Forzando terminacion...", "[Wrapper] [WARN] Server did not respond to shutdown. Forcing termination..."))
             try:
-                server_process.kill()
-                server_process.wait()
+                wstate.server_process.kill()
+                wstate.server_process.wait()
             except Exception:
                 pass
         except KeyboardInterrupt:
             print(L("[Wrapper] Terminando proceso del servidor...", "[Wrapper] Terminating server process..."))
             try:
-                if server_process:
-                    server_process.kill()
-                    server_process.wait()
+                if wstate.server_process:
+                    wstate.server_process.kill()
+                    wstate.server_process.wait()
             except Exception:
                 pass
 
@@ -1181,11 +634,11 @@ if __name__ == "__main__":
         # ruta Ctrl+C), forzarlo ANTES de la limpieza: el backup final de
         # cierre debe correr sobre un mundo quieto. Idempotente: si BDS ya
         # cerro, poll() no es None y no se toca nada.
-        if server_process is not None and server_process.poll() is None:
+        if wstate.server_process is not None and wstate.server_process.poll() is None:
             print(L("[Wrapper] [WARN] BDS no cerro tras el tope de apagado; forzando terminacion...", "[Wrapper] [WARN] BDS did not close after the shutdown timeout; forcing termination..."))
             try:
-                server_process.kill()
-                server_process.wait()
+                wstate.server_process.kill()
+                wstate.server_process.wait()
             except Exception:
                 pass
 
@@ -1195,37 +648,37 @@ if __name__ == "__main__":
         # el mundo quedo quieto; NO espera la salida del proceso (que tarda el
         # backup final de cierre, hasta 240s).
         print(L("[Wrapper] BDS detenido. Iniciando limpieza final de cierre...", "[Wrapper] BDS stopped. Starting final shutdown cleanup..."))
-        _emit_event("server_stopped", returncode=(server_process.returncode if server_process else None))
+        _emit_event("server_stopped", returncode=(wstate.server_process.returncode if wstate.server_process else None))
         try:
-            with state_lock:
-                shutting_down = True
-                current_worker = backup_thread
+            with wstate.state_lock:
+                wstate.shutting_down = True
+                current_worker = wstate.backup_thread
 
             # ── Paso 1: Esperar al worker de backup si está activo ──
             if current_worker and current_worker.is_alive():
-                print(L(f"[Wrapper] Esperando a que termine el backup en curso (Max {WORKER_JOIN_ON_SHUTDOWN_SEC}s)...", f"[Wrapper] Waiting for the running backup to finish (Max {WORKER_JOIN_ON_SHUTDOWN_SEC}s)..."))
+                print(L(f"[Wrapper] Esperando a que termine el backup en curso (Max {wstate.WORKER_JOIN_ON_SHUTDOWN_SEC}s)...", f"[Wrapper] Waiting for the running backup to finish (Max {wstate.WORKER_JOIN_ON_SHUTDOWN_SEC}s)..."))
                 try:
-                    current_worker.join(timeout=WORKER_JOIN_ON_SHUTDOWN_SEC)
+                    current_worker.join(timeout=wstate.WORKER_JOIN_ON_SHUTDOWN_SEC)
                 except KeyboardInterrupt:
                     print(L("[Wrapper] Interrupción por teclado durante join del worker.", "[Wrapper] Keyboard interrupt during worker join."))
 
                 if current_worker.is_alive():
                     print(L("[Wrapper] Worker de compresion no termino a tiempo. forzando terminacion del proceso de compresion...", "[Wrapper] Compression worker did not finish in time. Forcing termination of the compression process..."))
                     
-                    with state_lock:
-                        proc_to_kill = active_compress_process
+                    with wstate.state_lock:
+                        proc_to_kill = wstate.active_compress_process
                     if proc_to_kill:
-                        _force_kill_compress_process(proc_to_kill)
+                        wrapper_backup._force_kill_compress_process(proc_to_kill)
                             
                     should_send_resume = False
                     cancel_worker = None
-                    with state_lock:
-                        if backup_in_progress:
-                            cancel_worker = backup_cancel_event
-                            backup_in_progress = False
-                            backup_dispatched = False
-                            save_query_ready_seen = False
-                            backup_cancel_event = None
+                    with wstate.state_lock:
+                        if wstate.backup_in_progress:
+                            cancel_worker = wstate.backup_cancel_event
+                            wstate.backup_in_progress = False
+                            wstate.backup_dispatched = False
+                            wstate.save_query_ready_seen = False
+                            wstate.backup_cancel_event = None
                             should_send_resume = True
 
                     if cancel_worker:
@@ -1236,14 +689,14 @@ if __name__ == "__main__":
             else:
                 should_send_resume = False
                 cancel_worker = None
-                with state_lock:
-                    if backup_in_progress:
+                with wstate.state_lock:
+                    if wstate.backup_in_progress:
                         print(L("[Wrapper] Recuperación: enviando save resume residual...", "[Wrapper] Recovery: sending residual save resume..."))
-                        cancel_worker = backup_cancel_event
-                        backup_in_progress = False
-                        backup_dispatched = False
-                        save_query_ready_seen = False
-                        backup_cancel_event = None
+                        cancel_worker = wstate.backup_cancel_event
+                        wstate.backup_in_progress = False
+                        wstate.backup_dispatched = False
+                        wstate.save_query_ready_seen = False
+                        wstate.backup_cancel_event = None
                         should_send_resume = True
 
                 if cancel_worker:
@@ -1253,9 +706,9 @@ if __name__ == "__main__":
                     send_command("save resume")
 
             # ── Paso 2: Backup final de cierre ──
-            if server_process and server_process.returncode is not None and server_process.returncode != 0:
-                print(L(f"[Wrapper] ADVERTENCIA: BDS finalizó con código {server_process.returncode} (crash/anormal). Creando backup de emergencia...",
-                        f"[Wrapper] WARNING: BDS exited with code {server_process.returncode} (crash/abnormal). Creating emergency backup..."))
+            if wstate.server_process and wstate.server_process.returncode is not None and wstate.server_process.returncode != 0:
+                print(L(f"[Wrapper] ADVERTENCIA: BDS finalizó con código {wstate.server_process.returncode} (crash/anormal). Creando backup de emergencia...",
+                        f"[Wrapper] WARNING: BDS exited with code {wstate.server_process.returncode} (crash/abnormal). Creating emergency backup..."))
                 final_thread = threading.Thread(target=lambda: auto_backup.create_backup("cierre_crash"), daemon=True)
             else:
                 print(L("[Wrapper] Creando backup final de cierre...", "[Wrapper] Creating final shutdown backup..."))
@@ -1263,12 +716,12 @@ if __name__ == "__main__":
 
             final_thread.start()
             try:
-                final_thread.join(timeout=FINAL_BACKUP_TIMEOUT_SEC)
+                final_thread.join(timeout=wstate.FINAL_BACKUP_TIMEOUT_SEC)
             except KeyboardInterrupt:
                 print(L("[Wrapper] Interrupción por teclado durante backup final.", "[Wrapper] Keyboard interrupt during final backup."))
 
             if final_thread.is_alive():
-                print(L(f"[Wrapper] [WARN] Backup de cierre excedio los {FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.", f"[Wrapper] [WARN] Shutdown backup exceeded {FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso."))
+                print(L(f"[Wrapper] [WARN] Backup de cierre excedio los {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.", f"[Wrapper] [WARN] Shutdown backup exceeded {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso."))
 
             print(L("[Wrapper] Servidor finalizado limpiamente. Adiós.", "[Wrapper] Server finished cleanly. Goodbye."))
         except BaseException as e:
