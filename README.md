@@ -23,7 +23,7 @@ iniciar_gui.bat     ← doble clic en Windows (crea un entorno virtual .venv ais
 Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola en vivo, botones de iniciar/detener/reiniciar, backups, jugadores online (con permisos, allowlist y kick/ban), medidores de RAM/CPU/disco con gráficas de las últimas 24 horas, la versión instalada de BDS, programación de backups y watchdog, actualizador oficial de Mojang con vuelta atrás a la versión anterior y una tarjeta con tu IP para invitar amigos. Frontend animado con fondo fluido WebGL.
 
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
-- Requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global).
+- Requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global). Si no se puede crear el `.venv`, usa el Python global.
 - Solo Windows: el servidor BDS oficial de Mojang únicamente existe para Windows.
 - El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008).
 
@@ -131,7 +131,7 @@ iniciar_gui.bat     ← double-click on Windows (creates an isolated .venv virtu
 Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, start/stop/restart buttons, backups, online players (with permissions, allowlist and kick/ban), RAM/CPU/disk meters with 24-hour charts, the installed BDS version, backup scheduling and watchdog, an official Mojang updater with rollback to the previous version and a card with your IP to invite friends. Animated frontend with a WebGL fluid background.
 
 - **No Node.js needed**: the frontend ships prebuilt in `gui_frontend/dist/`.
-- Requires **Python 3.10+**. The `.bat` creates a `.venv` virtual environment isolated from your machine's Python and installs `requirements.txt` there on first run (nothing goes into the global Python).
+- Requires **Python 3.10+**. The `.bat` creates a `.venv` virtual environment isolated from your machine's Python and installs `requirements.txt` there on first run (nothing goes into the global Python). If `.venv` cannot be created, it falls back to the global Python.
 - Windows only: Mojang's official BDS server exists for Windows only.
 - The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008).
 
