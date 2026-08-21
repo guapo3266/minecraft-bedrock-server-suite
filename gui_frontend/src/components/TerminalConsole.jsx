@@ -226,7 +226,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
 
         <button
           onClick={onClearLogs}
-          className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-400 hover:border-emerald-500/50 hover:text-white transition-all"
+          className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-400 hover:border-emerald-500/50 hover:text-white transition"
         >
           <Trash2 className="h-3.5 w-3.5" />
           {t('clear')}
@@ -259,7 +259,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.94 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                    className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all duration-200 ${
+                    className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition duration-200 ${
                       active
                         ? `${style.variant} ring-1 ring-inset ring-white/40 brightness-125`
                         : allActive
@@ -311,7 +311,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
       {!autoScroll && (
         <button
           onClick={jumpToLatest}
-          className="absolute bottom-24 right-4 z-20 flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-bold text-emerald-300 shadow-lg backdrop-blur-xl hover:bg-emerald-500/25 transition-all"
+          className="absolute bottom-24 right-4 z-20 flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-bold text-emerald-300 shadow-lg backdrop-blur-xl hover:bg-emerald-500/25 transition"
         >
           <ArrowDown className="h-3.5 w-3.5" />
           {t('jumpToLatest')}
@@ -334,8 +334,9 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
           type="button"
           onClick={toggleQuickMenu}
           data-quick-menu-trigger="true"
+          aria-label={t('quickCommands')}
           title={t('quickCommands')}
-          className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white transition-all active:scale-95 shadow-sm"
+          className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white transition active:scale-95 shadow-sm"
         >
           <DotsVerticalIcon size={18} />
         </button>

@@ -18,7 +18,7 @@ const WIZARD_DEFAULTS = {
 };
 
 const inputClass =
-  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition-all';
+  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition';
 
 export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const { t, lang, setLang } = useI18n();
@@ -198,7 +198,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                       key={code}
                       type="button"
                       onClick={() => setLang(code)}
-                      className={`rounded-lg px-3 py-1 text-xs font-bold transition-all ${
+                      className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
                         lang === code
                           ? 'bg-[#5227FF] text-white shadow-[0_0_14px_rgba(82,39,255,0.45)]'
                           : 'bg-white/5 text-slate-300 hover:bg-white/10'
@@ -231,7 +231,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                   ) : (
                     <input
                       id={`setup-${f.key}`}
-                      type={f.type === 'number' ? 'number' : 'text'}
+                      type={f.type === 'number' ? 'number' : 'text'} autoComplete="off"
                       min={f.min}
                       max={f.max}
                       value={values[f.key] || ''}
@@ -253,7 +253,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                   {saving ? t('saving') : t('setupSaveConfig')}
                 </button>
                 {saveResult && (
-                  <div className={`mt-2 rounded-lg border px-3 py-2 text-xs font-semibold ${saveResult.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/40 bg-rose-500/10 text-rose-300'}`}>
+                  <div aria-live="polite" className={`mt-2 rounded-lg border px-3 py-2 text-xs font-semibold ${saveResult.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/40 bg-rose-500/10 text-rose-300'}`}>
                     {!saveResult.ok && <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />}
                     {saveResult.message}
                   </div>
@@ -283,7 +283,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                 </button>
 
                 {installResult && (
-                  <div className={`rounded-lg border px-3 py-2 text-xs font-semibold ${installResult.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/40 bg-rose-500/10 text-rose-300'}`}>
+                  <div aria-live="polite" className={`rounded-lg border px-3 py-2 text-xs font-semibold ${installResult.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/40 bg-rose-500/10 text-rose-300'}`}>
                     {!installResult.ok && <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />}
                     {installResult.message}
                   </div>
@@ -308,7 +308,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
             <div className="space-y-3 text-center">
               <p className="text-xs text-slate-300">{t('setupFinalText')}</p>
               {completeError && (
-                <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300">
+                <div aria-live="polite" className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300">
                   <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />
                   {completeError}
                 </div>
@@ -319,7 +319,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
       </div>
 
       {completing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md">
+        <div role="status" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md">
           <p className="animate-pulse text-sm font-bold text-white">{t('setupCompleting')}</p>
         </div>
       )}

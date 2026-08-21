@@ -30,7 +30,7 @@ export default function SidebarTabs({ players, playersData, backups, onRefreshBa
       <ChipTabs tabs={tabs} selected={activeTab} setSelected={setActiveTab} />
 
       {/* Contenido de Pestaña */}
-      <div className="transition-all duration-300">
+      <div className="transition duration-300">
         {activeTab === 'players' ? (
           <PlayersSidebar
             players={players}

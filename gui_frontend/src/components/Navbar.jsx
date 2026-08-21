@@ -119,8 +119,9 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
           data-nav-menu-trigger="true"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
+          aria-label={t('moreActions')}
           title={t('moreActions')}
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-slate-300 hover:bg-white/15 hover:text-white transition-all"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-slate-300 hover:bg-white/15 hover:text-white transition"
         >
           <DotsVerticalIcon size={18} />
         </button>
@@ -129,13 +130,13 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
         <div className="flex items-center rounded-xl border border-white/10 bg-black/40 p-0.5 font-mono text-xs font-bold">
           <button
             onClick={() => setLang('es')}
-            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition-all ${lang === 'es' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
+            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition ${lang === 'es' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
           >
             ES
           </button>
           <button
             onClick={() => setLang('en')}
-            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition-all ${lang === 'en' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
+            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition ${lang === 'en' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
           >
             EN
           </button>
@@ -145,7 +146,7 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
             de estado basta (antes se veian juntos DISCONNECTED + OFFLINE) */}
         {isOnline && <PingIndicator status={status} latency={latency} />}
 
-        <div className={`flex items-center gap-2.5 rounded-full border px-4 py-2 text-sm font-bold tracking-wider transition-all duration-300 ${badgeStyle}`}>
+        <div className={`flex items-center gap-2.5 rounded-full border px-4 py-2 text-sm font-bold tracking-wider transition duration-300 ${badgeStyle}`}>
           <span className={`h-2.5 w-2.5 rounded-full animate-pulse ${dotStyle}`} />
           <ShinyText text={statusText} />
           {isOnline && typeof status.uptime === 'number' && status.uptime > 0 && (

@@ -61,7 +61,7 @@ export default function ConfirmButton({
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
         onClick={handleClick}
         disabled={isBtnDisabled}
-        className={`relative flex items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-bold transition-all duration-200 ${
+        className={`relative flex items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-bold transition duration-200 ${
           isBtnDisabled
             ? 'opacity-60 cursor-not-allowed border-slate-700 bg-slate-900/50 text-slate-400'
             : variantStyles[variant] || variantStyles.emerald
@@ -70,7 +70,7 @@ export default function ConfirmButton({
       >
         {isCoolingDown ? (
           <span className="flex items-center gap-2 text-slate-300 animate-pulse">
-            <svg className="h-4 w-4 animate-spin text-current" viewBox="0 0 24 24" fill="none">
+            <svg className="h-4 w-4 animate-spin text-current" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path
                 className="opacity-75"

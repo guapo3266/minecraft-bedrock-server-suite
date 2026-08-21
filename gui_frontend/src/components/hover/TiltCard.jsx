@@ -48,7 +48,7 @@ export default function TiltCard({ children, className = "" }) {
         rotateX,
         transformStyle: "preserve-3d",
       }}
-      className={`relative transform-gpu transition-all duration-200 ease-out ${className}`}
+      className={`relative transform-gpu transition duration-200 ease-out ${className}`}
     >
       <div style={{ transform: "translateZ(30px)", transformStyle: "preserve-3d" }}>
         {children}

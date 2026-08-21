@@ -19,7 +19,7 @@ function CopyButton({ value, label, copiedLabel }) {
     <button
       onClick={copy}
       title={label}
-      className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold text-slate-300 hover:bg-white/10 hover:text-white transition-all"
+      className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold text-slate-300 hover:bg-white/10 hover:text-white transition"
     >
       {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
       {copied ? copiedLabel : label}
@@ -77,7 +77,8 @@ export default function ConnectivityCard({ connectivity, running, onRefresh }) {
               <button
                 onClick={onRefresh}
                 title={t('refresh')}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold text-slate-300 hover:bg-white/10 hover:text-white transition-all"
+                aria-label={t('refresh')}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold text-slate-300 hover:bg-white/10 hover:text-white transition"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </button>

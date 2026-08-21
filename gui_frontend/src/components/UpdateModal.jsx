@@ -1,39 +1,23 @@
-import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState } from 'react';
 import DecryptedText from './reactbits/DecryptedText';
 import ShinyText from './reactbits/ShinyText';
 import Magnet from './reactbits/Magnet';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
+import Modal from './Modal';
 import { DownloadMotionIcon, ShieldMotionIcon } from './hover/HardwareMotionIcons';
-import { X, CheckCircle, History } from 'lucide-react';
+import { X, CheckCircle, History, TriangleAlert } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
 export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpdate, onRollback, isUpdating }) {
   const { t } = useI18n();
+  const [confirmRollback, setConfirmRollback] = useState(false);
   if (!isOpen) return null;
   const versionUnavailable = !updateInfo || updateInfo.has_update == null || updateInfo.unavailable;
 
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        {/* Backdrop Blur Overlay */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-          className="absolute inset-0 bg-black/75 backdrop-blur-md"
-        />
-
-        {/* Hover.dev Spring Modal Card */}
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0, y: 20 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.8, opacity: 0, y: 20 }}
-          transition={{ type: "spring", stiffness: 300, damping: 20 }}
-          className="relative z-10 w-full max-w-lg rounded-2xl border border-emerald-500/40 bg-slate-950 p-6 shadow-2xl overflow-hidden"
-        >
+    <div>
+      <Modal onClose={onClose} label={t('updaterTitle')} className="max-w-lg border-emerald-500/40 overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
             <div className="flex items-center gap-3">
@@ -45,7 +29,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                 <p className="text-xs text-slate-400">{t('updaterSubtitle')}</p>
               </div>
             </div>
-            <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white">
+            <button onClick={onClose} aria-label={t('close')} className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white">
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -124,9 +108,9 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
                       </p>
                     </div>
                     <button
-                      onClick={onRollback}
+                      onClick={() => setConfirmRollback(true)}
                       disabled={isUpdating}
-                      className="flex min-h-[44px] shrink-0 items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition-all hover:bg-rose-500/25 hover:border-rose-500/70 disabled:opacity-50"
+                      className="flex min-h-[44px] shrink-0 items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-300 transition hover:bg-rose-500/25 hover:border-rose-500/70 disabled:opacity-50"
                     >
                       <History className="h-4 w-4" />
                       <ShinyText text={t('rollbackNow')} />
@@ -141,7 +125,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
           <div className="flex justify-end gap-3 border-t border-white/10 pt-4">
             <button
               onClick={onClose}
-              className="flex min-h-[44px] items-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition-all duration-200 hover:border-white/25 hover:bg-white/15 hover:text-white active:scale-95 active:bg-white/25"
+              className="flex min-h-[44px] items-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition duration-200 hover:border-white/25 hover:bg-white/15 hover:text-white active:scale-95 active:bg-white/25"
             >
               {t('cancel')}
             </button>
@@ -159,8 +143,46 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
               </Magnet>
             )}
           </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>
+      </Modal>
+
+      {/* Confirmación de rollback: reemplaza el BDS actual (destructivo) */}
+      {confirmRollback && (
+        <Modal onClose={() => setConfirmRollback(false)} label={t('rollbackConfirmTitle')} className="max-w-sm border-rose-500/40">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
+              <TriangleAlert className="h-5 w-5 text-rose-400" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">{t('rollbackConfirmTitle')}</h3>
+              <p className="font-mono text-[11px] text-rose-300 truncate max-w-[240px]">
+                {updateInfo?.previous_version ? `v${updateInfo.previous_version}` : t('rollbackUnknown')}
+              </p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-slate-300 leading-relaxed">
+            {t('rollbackConfirmMsg')}
+          </p>
+          <div className="mt-5 flex justify-end gap-3">
+            <button
+              onClick={() => setConfirmRollback(false)}
+              className="flex min-h-[44px] items-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition duration-200 hover:border-white/25 hover:bg-white/15 hover:text-white active:scale-95"
+            >
+              {t('cancel')}
+            </button>
+            <button
+              onClick={() => {
+                setConfirmRollback(false);
+                onRollback();
+              }}
+              disabled={isUpdating}
+              className="flex min-h-[44px] items-center gap-2 rounded-xl bg-gradient-to-r from-rose-500 to-orange-500 px-5 py-2 text-xs font-bold text-black shadow-[0_0_20px_rgba(244,63,94,0.4)] transition duration-200 hover:brightness-110 active:scale-95 disabled:opacity-50"
+            >
+              <History className="h-4 w-4" />
+              {t('rollbackNow')}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
   );
 }

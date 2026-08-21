@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { X, Save, TriangleAlert, CalendarClock } from 'lucide-react';
 import { FilledCheckedIcon } from './hover/AnimatedStatusIcons';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import ShinyText from './reactbits/ShinyText';
 import Magnet from './reactbits/Magnet';
+import Modal from './Modal';
 import { useI18n } from '../i18n.jsx';
 
 const inputClass =
-  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition-all';
+  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition';
 
 function SectionTitle({ children }) {
   return (
@@ -24,6 +25,8 @@ function Toggle({ id, on, onClick }) {
     <button
       type="button"
       id={id}
+      role="switch"
+      aria-checked={on === true}
       onClick={onClick}
       className={`relative h-6 w-11 shrink-0 rounded-full transition-colors duration-300 ${
         on
@@ -98,23 +101,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
   };
 
   return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-          className="absolute inset-0 bg-black/75 backdrop-blur-md"
-        />
-
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0, y: 20 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.8, opacity: 0, y: 20 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-          className="relative z-10 flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl border border-cyan-500/40 bg-slate-950 p-6 shadow-2xl"
-        >
+    <Modal onClose={onClose} label={t('schedTitle')} className="max-w-lg border-cyan-500/40 flex max-h-[85vh] flex-col">
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/20 border border-cyan-500/40 shadow-[0_0_20px_rgba(6,182,212,0.3)]">
@@ -127,13 +114,14 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
             </div>
             <button
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 transition-all hover:bg-white/10 hover:text-white"
+              aria-label={t('close')}
+              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
 
-          <div className="my-4 flex-1 space-y-3 overflow-y-auto pr-1">
+          <div className="my-4 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             <TiltCard>
               <SpotlightCard spotlightColor="rgba(6, 182, 212, 0.12)">
                 <div className="grid grid-cols-1 gap-3">
@@ -148,7 +136,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                     </label>
                     <input
                       id="sched-interval"
-                      type="number"
+                      type="number" autoComplete="off"
                       min={5}
                       max={1440}
                       value={values.backup_interval_min ?? ''}
@@ -180,7 +168,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                     </label>
                     <input
                       id="sched-daily-backup"
-                      type="time"
+                      type="time" autoComplete="off"
                       value={values.daily_backup_time ?? ''}
                       onChange={(e) => setValue('daily_backup_time', e.target.value)}
                       className={inputClass + ' w-1/2 font-mono [color-scheme:dark]'}
@@ -212,7 +200,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                     </label>
                     <input
                       id="sched-daily-restart"
-                      type="time"
+                      type="time" autoComplete="off"
                       value={values.daily_restart_time ?? ''}
                       onChange={(e) => setValue('daily_restart_time', e.target.value)}
                       className={inputClass + ' w-1/2 font-mono [color-scheme:dark]'}
@@ -224,6 +212,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
 
             {result && (
               <div
+                aria-live="polite"
                 className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
                   result.ok
                     ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
@@ -248,7 +237,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
           <div className="flex justify-end gap-3 border-t border-white/10 pt-4">
             <button
               onClick={onClose}
-              className="flex min-h-[44px] items-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition-all duration-200 hover:border-white/25 hover:bg-white/15 hover:text-white active:scale-95 active:bg-white/25"
+              className="flex min-h-[44px] items-center rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold text-slate-300 transition duration-200 hover:border-white/25 hover:bg-white/15 hover:text-white active:scale-95 active:bg-white/25"
             >
               {t('cancel')}
             </button>
@@ -263,8 +252,6 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
               </button>
             </Magnet>
           </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>
+    </Modal>
   );
 }

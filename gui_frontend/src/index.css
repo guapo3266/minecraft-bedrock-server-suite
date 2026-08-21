@@ -2,6 +2,8 @@
 
 @layer base {
   :root {
+    /* Tema oscuro: scrollbars, inputs nativos y UI del navegador acorde */
+    color-scheme: dark;
     --bg-dark: #070a12;
     --bg-card: rgba(17, 24, 39, 0.65);
     --border-color: rgba(255, 255, 255, 0.08);
@@ -15,7 +17,9 @@
   body {
     background-color: var(--bg-dark);
     color: #f3f4f6;
-    font-family: 'Outfit', sans-serif;
+    /* 'Outfit' se declaraba pero nunca se cargo (sin link/@font-face): la GUI
+       siempre uso el fallback. Se retira para no fingir una fuente inexistente. */
+    font-family: sans-serif;
     min-height: 100vh;
     overflow-x: hidden;
   }

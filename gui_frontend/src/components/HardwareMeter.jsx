@@ -15,7 +15,7 @@ export default function HardwareMeter({ hardware, running, version }) {
   const totalRamGb = hardware?.total_ram_gb || 23.6;
   const availGb = hardware?.system_available_gb || 0;
   // RAM disponible de la maquina: en GB si >= 1, en MB si es menos
-  const availLabel = availGb >= 1 ? `${availGb} GB` : `${Math.round(availGb * 1024)} MB`;
+  const availLabel = availGb >= 1 ? `${availGb}\u00A0GB` : `${Math.round(availGb * 1024)}\u00A0MB`;
   // Disco: el volumen del servidor y los backups
   const diskFreeGb = hardware?.disk_free_gb ?? 0;
   const diskTotalGb = hardware?.disk_total_gb ?? 0;
@@ -63,7 +63,7 @@ export default function HardwareMeter({ hardware, running, version }) {
             <button
               key={h}
               onClick={() => setRange(h)}
-              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border px-3 font-mono text-xs font-bold transition-all ${
+              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border px-3 font-mono text-xs font-bold transition ${
                 range === h
                   ? 'border-cyan-500/40 bg-cyan-500/20 text-cyan-300'
                   : 'border-white/10 bg-black/30 text-slate-400 hover:text-slate-200'
@@ -83,7 +83,7 @@ export default function HardwareMeter({ hardware, running, version }) {
               <span>{t('ram')}</span>
             </div>
             <span className="font-mono text-emerald-400 text-xs font-bold">
-              {isServerRunning ? `${ramMb} MB` : t('off')}
+              {isServerRunning ? `${ramMb}\u00A0MB` : t('off')}
             </span>
           </div>
 
@@ -97,7 +97,7 @@ export default function HardwareMeter({ hardware, running, version }) {
           {/* Barra de Nivel Minimalista */}
           <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-950 border border-white/10">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-cyan-400 to-emerald-300 transition-all duration-500 shadow-[0_0_10px_#10b981]"
+              className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-cyan-400 to-emerald-300 transition-[width] duration-500 shadow-[0_0_10px_#10b981]"
               style={{ width: `${isServerRunning ? Math.max(Math.min((ramMb / (totalRamGb * 1024)) * 100, 100), 3) : 0}%` }}
             />
           </div>
@@ -131,7 +131,7 @@ export default function HardwareMeter({ hardware, running, version }) {
           {/* Barra de Nivel Minimalista */}
           <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-950 border border-white/10">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-400 to-purple-400 transition-all duration-500 shadow-[0_0_10px_#06b6d4]"
+              className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-blue-400 to-purple-400 transition-[width] duration-500 shadow-[0_0_10px_#06b6d4]"
               style={{ width: `${isServerRunning ? Math.max(Math.min(cpuPct, 100), 3) : 0}%` }}
             />
           </div>
@@ -151,7 +151,7 @@ export default function HardwareMeter({ hardware, running, version }) {
               <span>{t('disk')}</span>
             </div>
             <span className={`font-mono text-xs font-bold ${diskLow ? 'text-rose-400' : 'text-amber-400'}`}>
-              {diskLow ? t('diskLow') : `${diskFreeGb} GB`}
+              {diskLow ? t('diskLow') : `${diskFreeGb}\u00A0GB`}
             </span>
           </div>
 
@@ -165,7 +165,7 @@ export default function HardwareMeter({ hardware, running, version }) {
           {/* Barra de Nivel Minimalista */}
           <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-950 border border-white/10">
             <div
-              className={`h-full rounded-full bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-300 transition-all duration-500 shadow-[0_0_10px_#f59e0b] ${
+              className={`h-full rounded-full bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-300 transition-[width] duration-500 shadow-[0_0_10px_#f59e0b] ${
                 diskLow ? 'from-rose-500 via-rose-400 to-rose-300 shadow-[0_0_10px_#f43f5e]' : ''
               }`}
               style={{ width: `${Math.max(Math.min(diskUsedPct, 100), 3)}%` }}

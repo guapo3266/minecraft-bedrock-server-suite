@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
+import Modal from './Modal';
 import { FolderArchive, RefreshCw, XCircle, Download, Trash2, ShieldCheck } from 'lucide-react';
 import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon, DotsVerticalIcon } from './hover/AnimatedStatusIcons';
 import { useI18n } from '../i18n.jsx';
@@ -183,7 +184,8 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
         </div>
         <button
           onClick={onRefresh}
-          className="rounded-md border border-white/10 bg-white/5 p-1.5 text-xs text-slate-400 hover:border-amber-500/50 hover:text-white transition-all"
+          aria-label={t('refresh')}
+          className="rounded-md border border-white/10 bg-white/5 p-1.5 text-xs text-slate-400 hover:border-amber-500/50 hover:text-white transition"
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
@@ -201,7 +203,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                     {b.date ? b.date.slice(0, 16) : b.filename}
                   </p>
                   <p className="truncate font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                    {triggerLabel(b.filename, t)}{b.size_mb != null ? ` · ${b.size_mb} MB` : ''}
+                    {triggerLabel(b.filename, t)}{b.size_mb != null ? ` · ${b.size_mb}\u00A0MB` : ''}
                   </p>
                 </div>
                 <button
@@ -209,7 +211,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                   onClick={(e) => (menuFor === b.filename ? closeMenu() : openMenu(b, e))}
                   title={t('actions')}
                   aria-label={t('actions')}
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all ${
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition ${
                     menuFor === b.filename
                       ? 'border-amber-500/70 bg-amber-500/25 text-amber-300'
                       : 'border-white/10 bg-white/5 text-slate-400 hover:border-amber-500/50 hover:text-white'
@@ -295,6 +297,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
       {/* Feedback transitorio de verificacion (mismo patron que PlayersSidebar) */}
       {verifyResult && (
         <div
+          aria-live="polite"
           className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
             verifyResult.ok
               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
@@ -313,159 +316,116 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
       {/* Alerta: el servidor está encendido */}
       <AnimatePresence>
         {alertOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setAlertOpen(false)}
-              className="absolute inset-0 bg-black/75 backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0, y: 20 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              className="relative z-10 w-full max-w-sm rounded-2xl border border-rose-500/40 bg-slate-950 p-6 shadow-2xl"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
-                  <TriangleAlertIcon ref={alertIconRef} size={28} color="#fb7185" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">{t('restoreServerOn')}</h3>
-                  <p className="text-xs text-slate-400">{t('restoreServerOnMsg')}</p>
-                </div>
+          <Modal onClose={() => setAlertOpen(false)} label={t('restoreServerOn')} className="max-w-sm border-rose-500/40">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
+                <TriangleAlertIcon ref={alertIconRef} size={28} color="#fb7185" />
               </div>
-              <div className="mt-5 flex justify-end">
-                <ConfirmButton variant="rose" onClick={() => setAlertOpen(false)} className="px-4 py-2">
-                  {t('cancel')}
-                </ConfirmButton>
+              <div>
+                <h3 className="text-base font-bold text-white">{t('restoreServerOn')}</h3>
+                <p className="text-xs text-slate-400">{t('restoreServerOnMsg')}</p>
               </div>
-            </motion.div>
-          </div>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <ConfirmButton variant="rose" onClick={() => setAlertOpen(false)} className="px-4 py-2">
+                {t('cancel')}
+              </ConfirmButton>
+            </div>
+          </Modal>
         )}
       </AnimatePresence>
 
       {/* Confirmación de eliminación */}
       <AnimatePresence>
         {deleteTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setDeleteTarget(null)}
-              className="absolute inset-0 bg-black/75 backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0, y: 20 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              className="relative z-10 w-full max-w-sm rounded-2xl border border-rose-500/40 bg-slate-950 p-6 shadow-2xl"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
-                  <Trash2 className="h-5 w-5 text-rose-400" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">{t('deleteConfirm')}</h3>
-                  <p className="font-mono text-[11px] text-rose-300 truncate max-w-[240px]">{deleteTarget.filename}</p>
-                </div>
+          <Modal onClose={() => setDeleteTarget(null)} label={t('deleteConfirm')} className="max-w-sm border-rose-500/40">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
+                <Trash2 className="h-5 w-5 text-rose-400" />
               </div>
-              <p className="mt-4 text-xs text-slate-300 leading-relaxed">
-                {t('deleteWarning')}
-              </p>
-              <p className="mt-2 text-[11px] text-slate-400">
-                {deleteTarget.date} · {deleteTarget.size_mb} MB
-              </p>
-
-              {result && (
-                <div
-                  className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
-                    result.ok
-                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                      : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
-                  }`}
-                >
-                  {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
-                  <span className="break-all">{result.message}</span>
-                </div>
-              )}
-
-              <div className="mt-5 flex justify-end gap-3">
-                <ConfirmButton variant="amber" onClick={() => setDeleteTarget(null)} className="px-4 py-2">
-                  {t('cancel')}
-                </ConfirmButton>
-                <ConfirmButton variant="rose" onClick={handleConfirmDelete} className="px-4 py-2">
-                  <Trash2 className="h-4 w-4" />
-                  <span>{t('delete')}</span>
-                </ConfirmButton>
+              <div>
+                <h3 className="text-base font-bold text-white">{t('deleteConfirm')}</h3>
+                <p className="font-mono text-[11px] text-rose-300 truncate max-w-[240px]">{deleteTarget.filename}</p>
               </div>
-            </motion.div>
-          </div>
+            </div>
+            <p className="mt-4 text-xs text-slate-300 leading-relaxed">
+              {t('deleteWarning')}
+            </p>
+            <p className="mt-2 text-[11px] text-slate-400">
+              {deleteTarget.date} · {deleteTarget.size_mb}&nbsp;MB
+            </p>
+
+            {result && (
+              <div
+                aria-live="polite"
+                className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  result.ok
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                }`}
+              >
+                {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                <span className="break-all">{result.message}</span>
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-3">
+              <ConfirmButton variant="amber" onClick={() => setDeleteTarget(null)} className="px-4 py-2">
+                {t('cancel')}
+              </ConfirmButton>
+              <ConfirmButton variant="rose" onClick={handleConfirmDelete} className="px-4 py-2">
+                <Trash2 className="h-4 w-4" />
+                <span>{t('delete')}</span>
+              </ConfirmButton>
+            </div>
+          </Modal>
         )}
       </AnimatePresence>
 
       {/* Confirmación de restauración */}
       <AnimatePresence>
         {restoreTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setRestoreTarget(null)}
-              className="absolute inset-0 bg-black/75 backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0, y: 20 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              className="relative z-10 w-full max-w-sm rounded-2xl border border-amber-500/40 bg-slate-950 p-6 shadow-2xl"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/20 border border-amber-500/50">
-                  <HistoryCircleIcon size={26} color="#fbbf24" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">{t('restoreConfirm')}</h3>
-                  <p className="font-mono text-[11px] text-amber-300 truncate max-w-[240px]">{restoreTarget.filename}</p>
-                </div>
+          <Modal onClose={() => setRestoreTarget(null)} label={t('restoreConfirm')} className="max-w-sm border-amber-500/40">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/20 border border-amber-500/50">
+                <HistoryCircleIcon size={26} color="#fbbf24" />
               </div>
-              <p className="mt-4 text-xs text-slate-300 leading-relaxed">
-                {t('restoreWarning')}
-              </p>
-              <p className="mt-2 text-[11px] text-slate-400">
-                {restoreTarget.date} · {restoreTarget.size_mb} MB
-              </p>
-
-              {result && (
-                <div
-                  className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
-                    result.ok
-                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                      : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
-                  }`}
-                >
-                  {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
-                  <span className="break-all">{result.message}</span>
-                </div>
-              )}
-
-              <div className="mt-5 flex justify-end gap-3">
-                <ConfirmButton variant="amber" onClick={() => setRestoreTarget(null)} className="px-4 py-2">
-                  {t('cancel')}
-                </ConfirmButton>
-                <ConfirmButton variant="rose" onClick={handleConfirmRestore} className="px-4 py-2">
-                  <HistoryCircleIcon size={16} />
-                  <span>{t('restore')}</span>
-                </ConfirmButton>
+              <div>
+                <h3 className="text-base font-bold text-white">{t('restoreConfirm')}</h3>
+                <p className="font-mono text-[11px] text-amber-300 truncate max-w-[240px]">{restoreTarget.filename}</p>
               </div>
-            </motion.div>
-          </div>
+            </div>
+            <p className="mt-4 text-xs text-slate-300 leading-relaxed">
+              {t('restoreWarning')}
+            </p>
+            <p className="mt-2 text-[11px] text-slate-400">
+              {restoreTarget.date} · {restoreTarget.size_mb}&nbsp;MB
+            </p>
+
+            {result && (
+              <div
+                aria-live="polite"
+                className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  result.ok
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                    : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                }`}
+              >
+                {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                <span className="break-all">{result.message}</span>
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-3">
+              <ConfirmButton variant="amber" onClick={() => setRestoreTarget(null)} className="px-4 py-2">
+                {t('cancel')}
+              </ConfirmButton>
+              <ConfirmButton variant="rose" onClick={handleConfirmRestore} className="px-4 py-2">
+                <HistoryCircleIcon size={16} />
+                <span>{t('restore')}</span>
+              </ConfirmButton>
+            </div>
+          </Modal>
         )}
       </AnimatePresence>
     </SpotlightCard>

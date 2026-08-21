@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
+import ConfirmButton from './hover/ConfirmButton';
+import Modal from './Modal';
 import { Gamepad2, UserX, Ban, UserCog, ListPlus, ListX, TriangleAlert, XCircle } from 'lucide-react';
 import { FilledCheckedIcon } from './hover/AnimatedStatusIcons';
 import { useI18n } from '../i18n.jsx';
@@ -26,6 +29,7 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
   const { t } = useI18n();
   const [result, setResult] = useState(null);
   const [busyKey, setBusyKey] = useState(null); // `${actionId}:${player}` en curso
+  const [banTarget, setBanTarget] = useState(null); // jugador a banear (confirm)
   const [sessionTotals, setSessionTotals] = useState({}); // name -> segundos jugados (7d)
   const successIconRef = useRef(null);
   const timerRef = useRef(null);
@@ -147,7 +151,7 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
         disabled={busy}
         title={t(action.titleKey)}
         aria-label={t(action.titleKey)}
-        className={`flex h-6 w-6 items-center justify-center rounded-md border transition-all disabled:opacity-50 ${actionStyles[action.color]} ${extraClass}`}
+        className={`flex h-6 w-6 items-center justify-center rounded-md border transition disabled:opacity-50 ${actionStyles[action.color]} ${extraClass}`}
       >
         {busy ? (
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -264,11 +268,11 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
                             : { id: 'al-add', command: 'allowlist add', icon: ListPlus, color: 'cyan', titleKey: 'playersAllowAdd' }
                         )}
                         <button
-                          onClick={() => runBan(p.name)}
-                          disabled={banBusy}
+                          onClick={() => setBanTarget(p.name)}
+                          disabled={banBusy || banTarget !== null}
                           title={t('ban')}
                           aria-label={t('ban')}
-                          className={`flex h-6 w-6 items-center justify-center rounded-md border transition-all disabled:opacity-50 ${actionStyles.rose}`}
+                          className={`flex h-6 w-6 items-center justify-center rounded-md border transition disabled:opacity-50 ${actionStyles.rose}`}
                         >
                           {banBusy ? (
                             <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -291,6 +295,7 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
 
       {result && (
         <div
+          aria-live="polite"
           className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
             result.ok
               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
@@ -301,6 +306,43 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
           <span className="break-all">{result.message}</span>
         </div>
       )}
+
+      {/* Confirmación de ban: allowlist remove + kick (destructivo) */}
+      <AnimatePresence>
+        {banTarget && (
+          <Modal onClose={() => setBanTarget(null)} label={t('banConfirmTitle', { player: banTarget })} className="max-w-sm border-rose-500/40">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
+                <Ban className="h-5 w-5 text-rose-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">{t('banConfirmTitle', { player: banTarget })}</h3>
+                <p className="font-mono text-[11px] text-rose-300 truncate max-w-[240px]">{banTarget}</p>
+              </div>
+            </div>
+            <p className="mt-4 text-xs text-slate-300 leading-relaxed">
+              {t('banConfirmMsg')}
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <ConfirmButton variant="amber" onClick={() => setBanTarget(null)} className="px-4 py-2">
+                {t('cancel')}
+              </ConfirmButton>
+              <ConfirmButton
+                variant="rose"
+                onClick={() => {
+                  const target = banTarget;
+                  setBanTarget(null);
+                  runBan(target);
+                }}
+                className="px-4 py-2"
+              >
+                <Ban className="h-4 w-4" />
+                <span>{t('ban')}</span>
+              </ConfirmButton>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
