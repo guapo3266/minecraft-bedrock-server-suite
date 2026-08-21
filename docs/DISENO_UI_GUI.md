@@ -83,7 +83,7 @@ Excepción: el tipo `session_start` no es una línea — se renderiza como divis
 - **Botones:** `whileHover scale 1.03`, `whileTap 0.94`, spring `{stiffness:400, damping:17}` + `ClickSpark` del color semántico.
 - **Modales:** entrada `{scale:0.8, opacity:0, y:20}` → `{1,1,0}` spring `{stiffness:300, damping:20}`; overlay fade; cierre inverso (`AnimatePresence`).
 - **Toggles:** knob con spring `{stiffness:500, damping:30}` + glow emerald cuando activo.
-- **Decorativos (reactbits):** `ShinyText` en labels de acción/estado, `DecryptedText` en títulos, `CountUp` en métricas, `PixelSnow` en fondo (sutil: density 0.22), `Magnet` en CTA.
+- **Decorativos (reactbits):** `ShinyText` en labels de acción/estado, `DecryptedText` en títulos, `CountUp` en métricas, `SideRays` (OGL) en fondo `top-right` intensidad 2 (`#EAB308`→`#96c8ff`), `Magnet` en CTA.
 - **Tarjetas de dato:** `TiltCard` + `SpotlightCard`.
 - **Reglas:** duraciones 200–500 ms; `transition-all duration-200/300` para hover de Tailwind; **respetar `prefers-reduced-motion`** (ya cubierto en `index.css`).
 - **Iconos:** `lucide-react` para UI estática + `motion` animados propios (`hover/AnimatedIcons`, `HardwareMotionIcons`, `AnimatedStatusIcons`) con color semántico (`text-<c>-400`).

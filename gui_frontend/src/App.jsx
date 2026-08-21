@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import PixelSnow from './components/reactbits/PixelSnow';
+import SideRays from './components/reactbits/SideRays';
 import Navbar from './components/Navbar';
 import HardwareMeter from './components/HardwareMeter';
 import ConnectivityCard from './components/ConnectivityCard';
@@ -357,34 +357,30 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen text-slate-100 p-5 font-sans">
-      {/* Capa de nieve sutil (ReactBits PixelSnow): entre el fondo y el contenido,
-          sin bloquear clics, con caída diagonal natural y baja densidad/brillo
-          para no competir con las tarjetas del dashboard.
-          IMPORTANTE: el posicionamiento va por style inline porque
-          .pixel-snow-container define position:relative sin @layer, y en la
-          cascada CSS eso pisa las utilities de Tailwind (fixed inset-0). */}
-      <PixelSnow
+      {/* Fondo SideRays (ReactBits OGL): haces volumétricos desde top-right.
+          Intensidad del ejemplo (intensity 2, speed 2.5) para efecto marcado
+          sin tapar las tarjetas (blend/falloff calibrados en oscuro #070a12). */}
+      <SideRays
         style={{
           position: 'fixed',
           top: 0,
           left: 0,
           width: '100vw',
           height: '100vh',
-          zIndex: 1,
+          zIndex: 0,
           pointerEvents: 'none'
         }}
-        color="#e2e8f0"
-        flakeSize={0.008}
-        minFlakeSize={1.1}
-        pixelResolution={220}
-        speed={0.85}
-        density={0.22}
-        depthFade={9}
-        farPlane={22}
-        brightness={0.55}
-        gamma={0.4545}
-        variant="round"
-        direction={125}
+        speed={2.5}
+        rayColor1="#EAB308"
+        rayColor2="#96c8ff"
+        intensity={2}
+        spread={2}
+        origin="top-right"
+        tilt={0}
+        saturation={1.5}
+        blend={0.75}
+        falloff={1.6}
+        opacity={1.0}
       />
 
       <div className="relative z-10 mx-auto max-w-7xl space-y-5">

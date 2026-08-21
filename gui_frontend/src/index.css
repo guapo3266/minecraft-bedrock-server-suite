@@ -37,6 +37,9 @@
   .animate-ping {
     animation: none !important;
   }
+  .side-rays-container canvas {
+    display: none !important;
+  }
 }
 
 /* ReactBits ShinyText Keyframe Animation */
