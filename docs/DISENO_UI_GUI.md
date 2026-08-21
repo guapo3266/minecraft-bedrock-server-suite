@@ -1,6 +1,6 @@
 # Guía de coherencia visual y general de la GUI
 
-**Fecha:** 2026-08-12 · **Actualizado:** 2026-08-16 (botón primario sólido, menú de acciones del header, separador de sesión en consola)
+**Fecha:** 2026-08-12 · **Actualizado:** 2026-08-21 (Modal compartido `components/Modal.jsx` + reglas de accesibilidad, retirada de la fuente Outfit, `transition` explícito en vez de `transition-all`; antes: 2026-08-16 botón primario sólido, menú de acciones del header, separador de sesión en consola)
 **Alcance:** definición canónica del sistema de diseño de `gui_frontend/` — para que componentes nuevos (y los vendored) mantengan el mismo lenguaje visual
 **Estado:** VIGENTE — referenciar antes de crear o modificar cualquier componente
 
@@ -10,7 +10,7 @@
 
 > Dashboard oscuro "slate-950" con acentos de **esmeralda → cian** (gradiente
 > tecnológico), semántica de color por función (emerald=éxito, rose=peligro,
-> amber=aviso, purple=comando), tipografía **Outfit** + **mono** para datos,
+> amber=aviso, purple=comando), tipografía sans del sistema + **mono** para datos,
 > micro-animaciones *spring* suaves (framer-motion) y efectos decorativos
 > ReactBits/Hover.dev con moderación.
 
@@ -37,7 +37,7 @@ sobre el fondo.
 
 ## 3. Tipografía
 
-- **Sans:** `Outfit` (body). Títulos `font-extrabold`, labels `font-semibold uppercase tracking-wider`.
+- **Sans:** sans-serif del sistema (body). `Outfit` fue retirada el 2026-08-21: se declaraba en `index.css` pero nunca se cargó (sin `<link>` ni `@font-face`), así que la GUI siempre usó el fallback. Si algún día se quiere una fuente propia, bundlearla con `@fontsource` (la GUI corre en loopback y puede estar sin internet: nada de CDN).
 - **Mono:** `font-mono` para *datos*: métricas (RAM/CPU/disco), timestamps de log, comandos, valores numéricos, prompt `>`.
 - Escalas en uso:
   - H1 hero: `text-2xl font-extrabold` + gradiente `from-white via-emerald-200 to-cyan-300` (text-transparent bg-clip-text).
@@ -52,7 +52,7 @@ sobre el fondo.
 |---|---|
 | Card principal | `rounded-2xl border border-white/10 bg-slate-900/65 backdrop-blur-xl shadow-2xl` |
 | Tarjeta de dato | `TiltCard` > `SpotlightCard` (spotlightColor = color semántico `rgba(c,0.18..0.2)`) |
-| Modal | overlay `fixed inset-0 z-50 bg-black/75 backdrop-blur-md` + card `rounded-2xl border border-<c>-500/40 bg-slate-950 p-6 shadow-2xl` |
+| Modal | implementación canónica: `components/Modal.jsx` (portal a body) — overlay `fixed inset-0 z-50 bg-black/75 backdrop-blur-md` + card `rounded-2xl border border-<c>-500/40 bg-slate-950 p-6 shadow-2xl` |
 | Input | `rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs ... focus:border-cyan-500/50` |
 | Botón ghost | `rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:bg-white/15` |
 | Botón primario sólido | `bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400` + glow emerald — la acción principal de una botonera ("Iniciar", "Enviar" de la consola); texto plano, sin `ShinyText` (blanco no da contraste sobre el relleno) |
@@ -62,7 +62,7 @@ sobre el fondo.
 | Badge estado | `rounded-full border px-4 py-2 text-sm font-bold` + dot `h-2.5 w-2.5 rounded-full animate-pulse` con glow |
 | Barra de progreso | `h-2 rounded-full bg-slate-950 border border-white/10` + relleno gradiente del color semántico |
 
-**Estructura de modal (obligatoria):** header con `border-b border-white/10 pb-4` (icono en caja `rounded-xl bg-<c>-500/20 border-<c>-500/40` + título bold + subtítulo `text-xs text-slate-400`), body con `space-y-*`, footer `border-t border-white/10 pt-4 flex justify-end gap-3`.
+**Estructura de modal (obligatoria):** usar `components/Modal.jsx`, que ya aporta la base (portal a body, `role="dialog"` + `aria-modal` + `aria-label`, cierre con Escape, foco inicial + restauración al cerrar, trampa de Tab, `overscroll-contain` y las animaciones de §6). El consumidor solo aporta el contenido: header con `border-b border-white/10 pb-4` (icono en caja `rounded-xl bg-<c>-500/20 border-<c>-500/40` + título bold + subtítulo `text-xs text-slate-400`), body con `space-y-*`, footer `border-t border-white/10 pt-4 flex justify-end gap-3`. No crear modales copia-pega fuera del componente.
 
 ## 5. Semántica por estado
 
@@ -85,7 +85,7 @@ Excepción: el tipo `session_start` no es una línea — se renderiza como divis
 - **Toggles:** knob con spring `{stiffness:500, damping:30}` + glow emerald cuando activo.
 - **Decorativos (reactbits):** `ShinyText` en labels de acción/estado, `DecryptedText` en títulos, `CountUp` en métricas, `SideRays` (OGL) en fondo `top-right` intensidad 2 (`#EAB308`→`#96c8ff`), `Magnet` en CTA.
 - **Tarjetas de dato:** `TiltCard` + `SpotlightCard`.
-- **Reglas:** duraciones 200–500 ms; `transition-all duration-200/300` para hover de Tailwind; **respetar `prefers-reduced-motion`** (ya cubierto en `index.css`).
+- **Reglas:** duraciones 200–500 ms; `transition duration-200/300` para hover de Tailwind (lista explícita de propiedades — **nunca `transition-all`**; para animar solo el ancho, `transition-[width]`); **respetar `prefers-reduced-motion`** (ya cubierto en `index.css`).
 - **Iconos:** `lucide-react` para UI estática + `motion` animados propios (`hover/AnimatedIcons`, `HardwareMotionIcons`, `AnimatedStatusIcons`) con color semántico (`text-<c>-400`).
 
 ## 7. Excepción deliberada: Stepper del wizard (morado `#5227FF`)
@@ -108,7 +108,7 @@ Reglas para convivir con él:
 3. **Sin colores planos:** siempre `bg-<c>-500/xx` + borde + glow.
 4. **Componentes vendored** (reactbits/hover.dev): adaptar a esta guía (import `framer-motion`, clases del tema) **salvo excepción explícita**; documentar la excepción aquí.
 5. **Campos editables de server.properties:** definidos UNA vez en `propsFields.js`; backend valida con `PROPS_FIELDS` (mismas claves).
-6. **Modal = patrón de §4**; botón primario a la derecha, cancelar ghost.
-7. **Accesibilidad:** focus visible 2px emerald (`:focus-visible` ya global), targets ≥44px en formularios, `aria-live="polite"` en regiones que se actualizan solas (terminal).
+6. **Modal = `components/Modal.jsx`** (patrón de §4); botón primario a la derecha, cancelar ghost.
+7. **Accesibilidad:** focus visible 2px emerald (`:focus-visible` ya global), targets ≥44px en formularios, `aria-label` en todo botón solo-icono (`title` no cuenta como nombre accesible), toggles con `role="switch"` + `aria-checked`, `aria-live="polite"` en regiones que se actualizan solas (terminal y banners de resultado/errores), spinners decorativos con `aria-hidden="true"`, y **confirmación obligatoria** (modal) para toda acción destructiva: stop, restart, restore, delete de backup, ban y rollback.
 8. **Responsive:** dashboard `grid lg:grid-cols-[1fr_340px]`; sidebar colapsa a una columna en móvil; nada de scroll horizontal. La botonera de control es `grid grid-cols-2` en móvil y `lg:flex` a partir de desktop.
 9. **Header:** las acciones secundarias (Configuración, Programación, Actualización BDS) viven en el menú "⋯ Más acciones" con trigger ghost neutro — el color del header queda reservado al estado del servidor. El indicador de latencia solo se muestra con el servidor corriendo.
