@@ -78,9 +78,8 @@ class ServerManager:
             if len(self.log_history) > self.max_log_history:
                 self.log_history.pop(0)
         
-        # Broadcast vía WebSocket en asyncio
-        if self.loop and self.active_websockets:
-            asyncio.run_coroutine_threadsafe(self.broadcast({"type": "log", "data": entry}), self.loop)
+        # Broadcast vía WebSocket en asyncio (best-effort: ver _schedule_broadcast)
+        self._schedule_broadcast({"type": "log", "data": entry})
         # Persistencia (history) y otros suscriptores: fuera del lock, y un
         # sink que falle jamas rompe el logging en vivo.
         for sink in list(self.log_sinks):
@@ -94,8 +93,29 @@ class ServerManager:
             "type": "status",
             "data": build_public_status(self)
         }
-        if self.loop and self.active_websockets:
-            asyncio.run_coroutine_threadsafe(self.broadcast(status_payload), self.loop)
+        self._schedule_broadcast(status_payload)
+
+    def _schedule_broadcast(self, message: dict):
+        """Agenda el broadcast en el loop vivo (best-effort: NUNCA lanza).
+
+        El loop referenciado puede estar CERRADO (apagado de la GUI, teardown
+        de un TestClient que dejo el global stale): run_coroutine_threadsafe
+        lanza entonces un RuntimeError SINCRONICO — sin guardia propagaria a
+        todo llamante de add_log/update_status desde hilos de fondo (watchdog,
+        lectores del wrapper) y dejaria la corrutina huerfana (RuntimeWarning
+        "never awaited" al pasar el GC). Ni el logging ni el estado publico
+        dependen del broadcast en vivo (la fuente autoritativa es history y
+        los eventos NDJSON): el fallo de agendado se descarta cerrando la
+        corrutina.
+        """
+        loop = self.loop
+        if loop is None or not self.active_websockets:
+            return
+        coro = self.broadcast(message)
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        except Exception:
+            coro.close()
 
     async def broadcast(self, message: dict):
         disconnected = set()

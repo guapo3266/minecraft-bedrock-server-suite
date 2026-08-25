@@ -8,6 +8,12 @@ import re
 
 import windows_process_guard as wpg
 from console_lang import L
+from zip_safety import _is_safe_zip_entry, _pack_dest
+import zip_safety as _zip_safety
+
+# Constantes centralizadas en zip_safety (fuente unica anti-drift)
+SERVER_PACK_DIRS = _zip_safety.SERVER_PACK_DIRS
+_PACK_ZIP_PREFIX = _zip_safety.PACK_ZIP_PREFIX
 
 # Lock por defecto (multiprocessing safe)
 _backup_lock = multiprocessing.Lock()
@@ -108,6 +114,10 @@ def _cancelled(cancel_event):
 
 
 def _resolve_snapshot_path(rel_path):
+    if not isinstance(rel_path, str) or not rel_path.strip():
+        raise ValueError(L(f"Ruta vacia o invalida en snapshot: {rel_path!r}", f"Empty or invalid path in snapshot: {rel_path!r}"))
+    if "\x00" in rel_path:
+        raise ValueError(L(f"Ruta con null byte rechazada: {rel_path!r}", f"Path with null byte rejected: {rel_path!r}"))
     clean_rel_path = rel_path.replace("/", os.sep).replace("\\", os.sep)
     active_world_dir = get_world_dir()
     world_name = os.path.basename(os.path.abspath(active_world_dir))
@@ -149,13 +159,8 @@ def _resolve_snapshot_path(rel_path):
     return clean_rel_path, full_path
 
 
-# Carpetas de nivel servidor que se incluyen en los backups junto al mundo:
-# contienen los mods/addons (resource_packs y behavior_packs). Se guardan con
-# prefijo propio ("server_resource_packs/...", "server_behavior_packs/...")
-# para que la restauracion las devuelva a su ubicacion de servidor y no se
-# confundan con packs embebidos dentro de la carpeta del mundo.
-SERVER_PACK_DIRS = ("resource_packs", "behavior_packs")
-_PACK_ZIP_PREFIX = "server_"
+# Carpetas de nivel servidor: ver zip_safety.SERVER_PACK_DIRS / PACK_ZIP_PREFIX
+# (centralizadas para anti-drift; re-exportadas arriba).
 
 
 def _write_server_packs(zipf, total_bytes, cancel_event):
@@ -197,7 +202,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
     ipc_mutex = wpg.NamedMutex(f"BDS_Backup_{inst_hash}")
     timeout_ms = int(wait_lock_timeout_sec * 1000) if wait_lock_timeout_sec > 0 else 0
     if not ipc_mutex.acquire(timeout_ms=timeout_ms):
-        print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] Ya hay un backup ejecutandose; cancelling this request."))
+        print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] A backup is already running; cancelling this request."))
         return False
 
     lock_to_use = external_lock if external_lock is not None else _backup_lock
@@ -214,7 +219,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         if not lock_to_use.acquire(False):
             ipc_mutex.release()
             ipc_mutex.close()
-            print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] Ya hay un backup ejecutandose; cancelling this request."))
+            print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] A backup is already running; cancelling this request."))
             return False
         acquired_lock = True
 
@@ -548,48 +553,7 @@ def rotate_backups(now=None):
     if deleted_count > 0:
         print(L(f"[*] Limpieza completada. Backups retenidos: {len(keepers)}.", f"[*] Cleanup complete. Backups kept: {len(keepers)}."))
 
-def _is_safe_zip_entry(filename: str) -> bool:
-    """True si la entrada del zip es segura para extraer (anti zip-slip).
-
-    Rechaza rutas absolutas, cualquier segmento '..' (traversal) y prefijos
-    de unidad/ADS tipo 'C:'.
-    """
-    norm = filename.replace("\\", "/")
-    if norm.startswith("/") or os.path.isabs(norm):
-        return False
-    segs = norm.split("/")
-    if any(s == ".." for s in segs):
-        return False
-    if ":" in segs[0]:
-        return False
-    return True
-
-
-def _pack_dest(entry_filename):
-    """Clasifica una entrada del ZIP.
-
-    Si pertenece a un pack de nivel servidor devuelve (kind, folder, rel_path),
-    con kind en SERVER_PACK_DIRS, folder = carpeta del pack y rel_path relativo
-    a esa carpeta. Devuelve None para entradas del mundo (o entradas de pack
-    sin archivo, como directorios vacios).
-    """
-    norm = entry_filename.replace("\\", "/")
-    for kind in SERVER_PACK_DIRS:
-        prefix = _PACK_ZIP_PREFIX + kind + "/"
-        if norm.startswith(prefix):
-            rest = norm[len(prefix):]
-            if rest.endswith("/") or not rest:
-                return None  # entrada de directorio: no se restaura
-            parts = rest.split("/")
-            if not parts[0]:
-                return None
-            if len(parts) >= 2:
-                return kind, parts[0], "/".join(parts[1:])
-            # H3: archivo suelto en la raiz del pack dir (p.ej.
-            # server_resource_packs/foo.txt): se restaura a BASE_DIR/<kind>,
-            # no al mundo.
-            return kind, "", parts[0]
-    return None
+# _is_safe_zip_entry y _pack_dest centralizados en zip_safety (importados arriba)
 
 
 def _extract_pack_entry(zipf, entry, base_dir, rel_path):

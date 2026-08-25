@@ -113,7 +113,7 @@ def test_backup_simultaneo_rechazado_sin_espera(capsys):
             lock.release()
         out = capsys.readouterr().out
         assert result is False
-        assert "Ya hay un backup ejecutandose" in out
+        assert "A backup is already running" in out
     finally:
         _teardown(tmp, old)
 

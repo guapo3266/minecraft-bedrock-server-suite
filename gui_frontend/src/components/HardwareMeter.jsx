@@ -58,11 +58,12 @@ export default function HardwareMeter({ hardware, running, version }) {
         <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
           {t('historyLabel')}
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" role="group" aria-label={t('historyLabel')}>
           {RANGES.map((h) => (
             <button
               key={h}
               onClick={() => setRange(h)}
+              aria-pressed={range === h}
               className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border px-3 font-mono text-xs font-bold transition ${
                 range === h
                   ? 'border-cyan-500/40 bg-cyan-500/20 text-cyan-300'

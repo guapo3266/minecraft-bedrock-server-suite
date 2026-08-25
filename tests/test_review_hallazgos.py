@@ -34,6 +34,7 @@ import server_gui_server as gui
 import gui_backend.config as config
 import gui_backend.supervisor as supervisor
 import gui_backend.services.bds_update as bds_update
+from gui_backend.services import external_probe
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BACKUP_DIR_REAL = auto_backup.BACKUP_DIR
@@ -608,6 +609,12 @@ def test_update_bds_detiene_servidor_antes_de_aplicar(monkeypatch):
     release = threading.Event()
     fake_proc = _FakeProc(release)
     monkeypatch.setattr(supervisor, "_spawn_wrapper_process", lambda: fake_proc)
+    # Hermetico: un BDS REAL de esta instalacion corriendo en la maquina
+    # (p. ej. el usuario con el servidor arrancado fuera del test) hace que
+    # la sonda devuelva externo y /start responda 409 — falso positivo
+    # ambiental, ajeno al camino G1 bajo prueba (misma tecnica que
+    # test_watchdog_simulacion.py).
+    monkeypatch.setattr(external_probe, "detect_external_bds", lambda: (False, ""))
 
     zip_bytes = io.BytesIO()
     with zipfile.ZipFile(zip_bytes, "w") as z:
@@ -681,6 +688,9 @@ def test_stop_durante_arranque_ahora_es_efectivo(monkeypatch):
     release = threading.Event()
     fake_proc = _FakeProc(release)
     monkeypatch.setattr(supervisor, "_spawn_wrapper_process", lambda: fake_proc)
+    # Hermetico: misma razon que test_update_bds_detiene_servidor_antes_de_
+    # aplicar — la sonda no debe vetar /start por un BDS real ajeno al test.
+    monkeypatch.setattr(external_probe, "detect_external_bds", lambda: (False, ""))
 
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:

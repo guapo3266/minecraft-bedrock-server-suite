@@ -36,6 +36,13 @@ archivo de eventos; solo el wrapper lo hace, tras su propio gate de chat.
 - El lector de la GUI (`_tail_events`) es tolerante: espera el archivo si
   aún no existe, salta líneas corruptas, ignora eventos desconocidos
   (compatibilidad futura) y drena lo pendiente tras la muerte del wrapper.
+  La tolerancia incluye el nivel BYTES (2026-08-24): abre con
+  `errors="replace"` — una escritura truncada del wrapper (crash a mitad de
+  un `write`, corte de luz) puede dejar UTF-8 inválido en el archivo; con
+  decode estricto `readline()` lanzaba `UnicodeDecodeError`, el hilo moría y
+  la GUI perdía la fuente autoritativa del estado hasta reiniciarla. Tests:
+  `tests/test_supervisor_pbt.py` (regresión determinista + PBT de basura
+  binaria).
 
 ## 3. Esquema de eventos (v1)
 

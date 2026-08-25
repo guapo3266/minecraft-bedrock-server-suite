@@ -6,7 +6,6 @@ Los routers/servicios nunca lanzan procesos directamente.
 
 import json
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -14,7 +13,7 @@ import time
 
 from console_lang import L
 # D5: patrones de deteccion del log de BDS centralizados en server_wrapper
-from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT, _strip_log_prefix
+from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT, _RE_VERSION, _strip_log_prefix
 
 from gui_backend import config
 from gui_backend.state import manager
@@ -130,7 +129,9 @@ def run_wrapper_thread(process=None):
             # H-01: mismo gate anti-spoofing que el wrapper — el patron se
             # busca solo en la linea sin prefijo y nunca en lineas de chat
             # (<Jugador>), para que un jugador no pueda fijar la version.
-            m_ver = re.search(r"Version:\s*(\d+\.\d+\.\d+\.\d+)", clean_str) if not (is_chat or manager.events_alive) else None
+            # El patron es el MISMO objeto _RE_VERSION del wrapper (fuente
+            # unica D5): si Mojang cambia el formato, una sola edicion basta.
+            m_ver = _RE_VERSION.search(clean_str) if not (is_chat or manager.events_alive) else None
             if m_ver:
                 manager.installed_version = m_ver.group(1)
 
@@ -308,15 +309,19 @@ def _tail_events(path):
     """Hilo lector del canal NDJSON: consume lineas y las aplica.
 
     Abre tolerante (el archivo aparece cuando el wrapper arranca), tolerea
-    lineas corruptas, drena lo pendiente tras la muerte del wrapper y
-    termina cuando wrapper_exit_event esta set y no queda nada por leer.
+    lineas corruptas a nivel JSON y a nivel BYTES (errors=replace: una
+    escritura truncada del wrapper puede dejar UTF-8 invalido; con decode
+    estricto readline() lanzaria UnicodeDecodeError, el hilo moriria y la
+    GUI perderia la fuente autoritativa del estado hasta reiniciarla),
+    drena lo pendiente tras la muerte del wrapper y termina cuando
+    wrapper_exit_event esta set y no queda nada por leer.
     """
     handle = None
     try:
         while True:
             if handle is None:
                 try:
-                    handle = open(path, "r", encoding="utf-8")
+                    handle = open(path, "r", encoding="utf-8", errors="replace")
                 except OSError:
                     if manager.wrapper_exit_event.is_set():
                         return

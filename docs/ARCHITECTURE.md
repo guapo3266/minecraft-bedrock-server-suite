@@ -13,14 +13,18 @@ wrapper_console.py               # Regex D5, prefijos y parser save query
 wrapper_events.py                # Emisor/rotacion del canal IPC NDJSON
 wrapper_schedule.py              # Configuracion, persistencia y helpers diarios
 wrapper_backup.py                # Worker subprocess, hot backup y cancelacion
+zip_safety.py                    # Fuente unica anti-drift: _is_safe_zip_entry y _pack_dest
 server_gui_server.py            # Punto de entrada: create_app(), lifespan,
                                 #   estáticos, uvicorn, re-exports mínimos
 gui_backend/
   config.py                     # BASE_DIR, WEB_DIR, SERVER_EXE, PROPS_PATH,
                                 #   SETUP_MARKER, timeouts G8, constantes watchdog
   security.py                   # _ensure_local, _is_allowed_origin,
-                                #   _check_origin, _is_safe_zip_entry
-  metrics.py                    # _measure_process_tree, get_hardware_metrics
+                                 #   _check_origin, _is_safe_zip_entry (re-export de zip_safety)
+  metrics.py                    # _measure_process_tree, get_hardware_metrics,
+                                #   _sample_disk (disk_usage con caché TTL 30s:
+                                #   1 syscall por ventana; ante fallo sirve el
+                                #   último valor conocido en vez de tumbar el poll)
   state.py                      # ServerManager + singleton `manager` +
                                 #   build_public_status() (estado público único)
   supervisor.py                 # _spawn_wrapper_process, run_wrapper_thread
@@ -35,21 +39,24 @@ gui_backend/
     schedule_config.py          # data/schedule_config.json: defaults, validación,
                                 #   escritura atómica (backups programables)
     watchdog.py                 # opt-in: auto-restart tras crash (backoff),
-                                #   reinicio diario, backup diario en frío
+                                #   reinicio diario, backup diario en frío.
+                                #   Ramas del tick aisladas (un fallo no salta
+                                #   las demás) y errores internos logueados con
+                                #   rate-limit 60s vía manager.add_log
     players.py                  # vista de jugadores (LECTURA): registro propio
                                 #   + permissions.json + allowlist.json
     history.py                  # SQLite data/gui_history.db: metricas (30s),
                                 #   logs y sesiones; retencion 7d/7d/90d
   routers/
-    system.py                   # /favicon.svg, /, /api/status, /api/command
+    system.py                   # /favicon.svg, /, /api/status, /api/command, /api/connectivity (IP LAN/publica + puerto)
     properties.py               # /api/server_properties
     setup.py                    # /api/setup_status, install_bds, complete
     actions.py                  # /api/action/{name}, /api/check_update
-    backups.py                  # /api/backups*, /api/restore
+    backups.py                  # /api/backups*, /api/restore (+ download/delete/verify, listado filtra _CORRUPTO/_EXCEDIDO/_CRASH)
     schedule.py                 # /api/schedule (GET/POST)
     players.py                  # /api/players (GET, solo lectura)
-    history.py                  # /api/history/{metrics,logs,sessions} (GET)
-    websocket.py                # /ws
+    history.py                  # /api/history/{metrics,logs,sessions} (GET, retencion 1/6/24h y 7d/90d)
+    websocket.py                # /ws (Origin puerto-estricto, stdin_lock 6/6)
 ```
 
 ## Wrapper de consola
@@ -66,9 +73,12 @@ final y el bloque `__main__`.
   los re-exporta porque `gui_backend.supervisor` y tests los importan desde
   `server_wrapper`.
 - `wrapper_events.py` posee el handle y el lock NDJSON. `EVENTS_DIR` se parchea
-  en ese modulo, aunque el emisor se invoque por la fachada.
-- `wrapper_schedule.py` posee la cache de configuracion y
-  `last_daily_backup_date`; el scheduler accede a sus atributos de modulo.
+  en ese modulo, aunque el emisor se invoque por la fachada. El emisor hace
+  `flush+fsync` por evento y rota handle si `WRAPPER_EVENTS_FILE` cambia.
+- `wrapper_schedule.py` posee la cache de configuracion (mtime+size, invalida
+  ante reescrituras rapidas sub-segundo) y `last_daily_backup_date`; el
+  scheduler accede a sus atributos de modulo. `_coerce_schedule_value` ahora
+  acepta `"30.0"` y `"  60 "` como entero.
 - `wrapper_backup.py` posee el worker y sus helpers. `subprocess.Popen` se
   parchea en ese modulo; el emisor de comandos se inyecta desde la fachada
   para no crear un ciclo al ejecutar el archivo como `__main__`.
@@ -82,7 +92,8 @@ dueño. El detalle de acoplamientos y el inventario del movimiento están en
 
 ```text
 config ← security ← metrics ← state ← supervisor ← services ← routers ← app
-                      (console_lang, server_wrapper, auto_backup, restore_backup)
+                      (console_lang, server_wrapper, auto_backup,
+                       restore_backup, zip_safety, wrapper_events)
 ```
 
 Los routers importan servicios y estado; los servicios no conocen `Request`,
@@ -111,7 +122,21 @@ vía `manager.add_log`.
   fases con `config.SERVER_STOP_TIMEOUT_SEC` (75s) y
   `config.WRAPPER_EXIT_TIMEOUT_SEC` (450s).
 - El registro WebSocket (`active_websockets`) y `broadcast()` viven en
-  `state.py`; el router WS solo añade/descarta conexiones.
+  `state.py`; el router WS solo añade/descarta conexiones. El `finally` del
+  router cubre TODA la sesión registrada, incluido el envío del `init`: un
+  cliente que muere entre `accept()` y el primer send (o un fallo construyendo
+  el status) no deja entradas muertas. El guard S3 deriva el puerto esperado
+  con la misma fuente única que los endpoints HTTP (`security._get_request_port`).
+  Cobertura sin e2e ni httpx: `tests/test_websocket_router.py` ejercita la
+  coroutine real con un WebSocket falso.
+- El agendado del broadcast (`ServerManager._schedule_broadcast`) es
+  BEST-EFFORT y nunca lanza: si el loop referenciado está cerrado (ventana de
+  apagado de la GUI, teardown de un TestClient), `run_coroutine_threadsafe`
+  lanzaría un RuntimeError sincrónico con corrutina huérfana; el fallo se
+  descarta cerrando la corrutina (la fuente autoritativa del estado es
+  history + eventos NDJSON, no el broadcast en vivo). El lifespan resetea
+  `manager.loop = None` al apagarse para no dejar un loop muerto como global.
+  Cobertura: `tests/test_state_broadcast_robustez.py`.
 - `build_public_status(manager, players=None)` es la ÚNICA fuente del payload
   de estado (usada por `/api/status`, el `init` del WS y `update_status`):
   el hardware se muestrea ANTES de tomar `manager.lock`; `players` se puede
@@ -129,7 +154,9 @@ vía `manager.add_log`.
   Path por env `WRAPPER_EVENTS_FILE` al spawn; emisor a prueba de fallos.
 - `supervisor._tail_events` (hilo daemon por sesión) consume el archivo y
   `_apply_event` aplica cada evento; `wrapper_started` activa
-  `manager.events_alive` y el parseo de stdout queda como fallback.
+  `manager.events_alive` y el parseo de stdout queda como fallback. El lector
+  abre con `errors="replace"`: líneas corruptas a nivel JSON **y bytes**
+  (UTF-8 truncado por un write interrumpido) se saltan sin matar al hilo.
 - Contrato y fases: `docs/INFORME_IPC_EVENTOS_NDJSON.md`.
 
 ## Rollback de versión BDS (data/bds_previous)
@@ -197,6 +224,12 @@ vía `manager.add_log`.
 - El watchdog (`services/watchdog.py`) arranca en el lifespan, es daemon y
   opt-in: sin nada activado en la config nunca actúa. Backoff de re-arranques
   `WATCHDOG_BACKOFF_SCHEDULE` que se reinicia tras `WATCHDOG_STABLE_UPTIME_SEC`.
+  Las tres ramas del tick (crash-restart, reinicio diario, backup en frío)
+  corren aisladas: una excepción en una rama no salta las demás y se loguea
+  con rate-limit (1 mensaje/60 s). Si `start_wrapper` lanza, el intento cuenta
+  como fallo para el backoff (evita martillear el arranque cada poll).
+  Cobertura sin binario: `tests/test_watchdog_simulacion.py` simula el wrapper
+  con un Popen falso que pasa por la ruta real de arranque y el hilo lector.
 
 ## Convenciones para monkeypatching en tests
 
@@ -224,7 +257,21 @@ vía `manager.add_log`.
 ## Arranque
 
 - `iniciar_gui.bat` → `.venv\Scripts\python.exe server_gui_server.py` (`uvicorn.run("server_gui_server:app")`). El `.bat` crea `.venv` (aislado del Python global) e instala `requirements.txt` la primera vez; si la creación falla, usa el `python` del PATH. El bootstrap está serializado entre lanzamientos con un lock-dir efímero (`.venv_bootstrap.lock`, se borra solo; espera hasta 120 s y roba el lock si quedó abandonado): dos dobles clics simultáneos ya no pisan el venv del otro ni corren dos `pip install` en paralelo.
-- Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
+- Puerto `GUI_PORT` (default 8000), salto al siguiente libre ACOTADO a 65535
+  (`_resolver_puerto`: avisa una vez por puerto saltado y lanza `RuntimeError`
+  al agotarse el rango — el `while` histórico era infinito si nada llegaba a
+  enlazar). `_puerto_libre` soporta hosts IPv6 literales (`AF_INET6`).
 - `create_app()` monta `/assets` (build de Vite si existe) y `/static` (web/).
-- `lifespan`: fija `manager.loop`, ejecuta `recover_interrupted_updates()`,
-  arranca el bucle de métricas cada 2s y el watchdog (hilo daemon, opt-in).
+- `lifespan`: fija `manager.loop`, ejecuta `recover_interrupted_restores()` +
+  `recover_interrupted_updates()`, precarga historial SQLite, arranca el bucle
+  de métricas cada 2s (incluye sonda externa y persistencia cada 30s) y el
+  watchdog (hilo daemon, opt-in). Al apagarse cancela el task de métricas y
+  resetea `manager.loop = None` (no dejar un loop cerrado como global).
+- Host `GUI_HOST` / modo LAN `GUI_ALLOW_LAN` (opt-in): por defecto solo
+  loopback; con `GUI_ALLOW_LAN=1` el entrypoint abre en `0.0.0.0` y los guards
+  S1/S3 de `security.py` aceptan IPs privadas RFC1918
+  (`_is_allowed_client_host`, `_is_private_ip`). El parsing de la variable es
+  fuente única (`security._allow_lan`) y la resolución del host efectivo vive
+  en `_resolver_host_gui(allow_lan, GUI_HOST)` (LAN + loopback explícito se
+  fuerza a apertura). Cobertura: `tests/test_security_hardening.py`
+  (sección LAN) y `tests/test_entrypoint_puerto_lan.py`.

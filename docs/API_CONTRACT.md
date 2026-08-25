@@ -11,8 +11,16 @@ Este documento es la referencia para detectar regresiones de comportamiento.
 | `_ensure_local` (IP loopback: `127.0.0.1`, `::1`) | Todos los endpoints REST y el WS | REST: `403 {"detail": "Acceso denegado: solo conexiones locales"}`; WS: `close(1008)` |
 | `_check_origin` (header `Origin` local con el MISMO puerto del request, o ausente; anti-CSRF) | Solo endpoints de escritura y el WS | `403 {"detail": "Acceso denegado: origen no permitido"}`; WS: `close(1008)` |
 
-Endpoint solo con `_ensure_local` (lectura): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /`, `GET /favicon.svg`.
+Endpoint solo con `_ensure_local` (lectura): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/connectivity`, `GET /`, `GET /favicon.svg`.
 Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
+
+**Modo LAN opt-in (`GUI_ALLOW_LAN=1`, ver `server_gui_server.py`)**: ambos guards se relajan
+de forma controlada — S1 acepta también IPs privadas RFC1918/ULA (`_is_allowed_client_host`
+con `_is_private_ip`; una IP pública sigue en 403) y S3 acepta Origins cuyo host es privado
+con el MISMO puerto del request (el anti-CSRF por puerto se mantiene; orígenes externos,
+`"null"` y hosts públicos siguen rechazados). Sin la variable de entorno, el comportamiento
+histórico es exactamente el descrito arriba (solo loopback). Cobertura:
+`tests/test_security_hardening.py` (sección LAN).
 
 ## Estado público (payload `status` — compartido por `/api/status`, WS `init` y WS `status`)
 
@@ -130,7 +138,12 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 ### `GET /api/backups`
 - 200: `{"backups": [{"filename": "<str>", "size_mb": <float>, "date": "YYYY-MM-DD HH:MM:SS"}, ...]}` ordenado por mtime desc.
 - 200 `{"backups": []}` si no existe `auto_backup.BACKUP_DIR`.
-- Excluye nombres que contengan `_CORRUPTO` o `_EXCEDIDO`.
+- Excluye nombres que contengan `_CORRUPTO`, `_EXCEDIDO`, `_CRASH` o `_crash` (misma capa que `auto_backup.rotate_backups`; restaurar un backup marcado siempre falla).
+
+### `GET /api/connectivity`
+- Solo `_ensure_local` (lectura). No bloquea por `Origin` (es GET de lectura) y corre fuera del event loop (threadpool) para no congelar WS.
+- 200: `{"lan_ip": "<str>", "public_ip": "<str|null>", "port": "<str>"}` donde `lan_ip` es IP de salida (UDP a 8.8.8.8 sin enviar datos, fallback `127.0.0.1`), `public_ip` se resuelve con cadena de fallback `api.ipify.org → ifconfig.me → icanhazip.com` con timeout 4s y cache 5 min (`?refresh=1` fuerza recarga), `port` viene de `server.properties` (`server-port`, default 19132).
+- La IP pública se valida con regex `^\d{1,3}(\.\d{1,3}){3}$`; si ninguna fuente responde, `public_ip` es `null` (no es error HTTP).
 
 ### `POST /api/restore`
 - Body: `{"filename": "<str>"}`.
@@ -159,6 +172,11 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 
 Handshake:
 - `close(1008)` si `client.host` no es `127.0.0.1`/`::1` o si `Origin` no es local.
+- El puerto esperado del Origin se deriva con la misma fuente única que los
+  endpoints HTTP (`security._get_request_port`; acepta `Request` y `WebSocket`).
+- El socket se registra tras `accept()` y se descarta en un `finally` que
+  cubre TAMBIÉN el envío del `init`: una desconexión durante el init no deja
+  entradas muertas en `active_websockets`.
 - Query param `?lang=es|en` fija el idioma al conectar.
 
 Servidor → cliente:

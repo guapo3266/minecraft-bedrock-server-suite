@@ -550,6 +550,8 @@ def test_rotate_old_survivors_bounded_by_recent_layer(days_ago_list):
 
 import restore_backup as rb
 import server_gui_server as sgs
+import zip_safety as zs
+import gui_backend.security as sec
 
 _zip_segment = st.text(
     alphabet=st.characters(blacklist_categories=("Cc", "Cs"), blacklist_characters="\x00"),
@@ -578,6 +580,50 @@ def test_zip_entry_consensus(name):
     assert len(set(verdicts.values())) == 1, (
         f"Consenso roto para {name!r}: {verdicts}"
     )
+
+
+# P0-2: centralizacion en zip_safety — pack_dest y alias unicos
+_pack_kind = st.sampled_from(["resource_packs", "behavior_packs"])
+_pack_rest = st.lists(
+    st.one_of(_zip_segment, st.just(".."), st.just(""), st.just("a/b")),
+    min_size=0, max_size=4,
+).map(lambda segs: "/".join(segs))
+
+
+@given(st.one_of(_hostile_zip_name, st.builds(lambda k, r: f"server_{k}/{r}" if r else f"server_{k}/", _pack_kind, _pack_rest)))
+@settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+@example("server_resource_packs/notas.txt")
+@example("server_behavior_packs/manifest.json")
+@example("server_resource_packs/MiPack/manifest.json")
+@example("level.dat")
+@example("server_resource_packs/")
+def test_pack_dest_consensus(name):
+    """_pack_dest centralizado: auto_backup, restore_backup y zip_safety coinciden."""
+    verdicts = {
+        "auto_backup": ab._pack_dest(name),
+        "restore_backup": rb._pack_dest(name),
+        "zip_safety": zs._pack_dest(name),
+    }
+    assert len(set(str(v) for v in verdicts.values())) == 1 or len(set(verdicts.values())) == 1, (
+        f"Consenso _pack_dest roto para {name!r}: {verdicts}"
+    )
+    # ademas, el resultado es el mismo objeto logico (tupla/None)
+    assert verdicts["auto_backup"] == verdicts["restore_backup"] == verdicts["zip_safety"]
+
+
+def test_zip_shared_module_identity():
+    """Los tres alias apuntan al mismo objeto de zip_safety (anti-drift por import)."""
+    assert ab._is_safe_zip_entry is zs._is_safe_zip_entry
+    assert rb._is_safe_zip_entry is zs._is_safe_zip_entry
+    assert sgs._is_safe_zip_entry is zs._is_safe_zip_entry
+    assert sec._is_safe_zip_entry is zs._is_safe_zip_entry
+    assert ab._pack_dest is zs._pack_dest
+    assert rb._pack_dest is zs._pack_dest
+    # constantes compartidas
+    assert ab.SERVER_PACK_DIRS == zs.SERVER_PACK_DIRS
+    assert ab._PACK_ZIP_PREFIX == zs.PACK_ZIP_PREFIX
+    assert rb._SERVER_PACK_DIRS == zs.SERVER_PACK_DIRS
+    assert rb._PACK_ZIP_PREFIX == zs.PACK_ZIP_PREFIX
 
 
 if __name__ == "__main__":

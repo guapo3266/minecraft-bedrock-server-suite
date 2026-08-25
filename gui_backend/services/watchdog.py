@@ -32,6 +32,10 @@ last_crash_restart_at = 0.0
 last_daily_restart_date = None
 last_daily_cold_backup_date = None
 _gui_state_loaded = False
+# Rate-limit del log de errores internos del tick: un fallo persistente (p. ej.
+# disco ilegible al leer la config) no debe inundar el historial de la GUI.
+_last_error_log_at = 0.0
+_ERROR_LOG_MIN_INTERVAL_SEC = 60.0
 
 
 def start():
@@ -54,11 +58,13 @@ def watchdog_loop():
 
 def _reset_state_for_tests():
     global crash_restarts, last_crash_restart_at, last_daily_restart_date, last_daily_cold_backup_date, _gui_state_loaded
+    global _last_error_log_at
     crash_restarts = 0
     last_crash_restart_at = 0.0
     last_daily_restart_date = None
     last_daily_cold_backup_date = None
     _gui_state_loaded = False
+    _last_error_log_at = 0.0
 
 
 def _load_gui_state():
@@ -94,8 +100,34 @@ def _backoff_sec(failures):
     return schedule[min(failures - 1, len(schedule) - 1)] if failures > 0 else 0
 
 
+def _log_watchdog_error(rama, exc, now):
+    """Log de un fallo interno del tick, rate-limitado (1 mensaje/60s).
+
+    Antes el loop se tragaba cualquier excepcion en silencio: si una rama
+    fallaba de forma persistente nadie lo veia jamas en la GUI. El reloj es
+    el `now` inyectado del tick para que los tests sean deterministas.
+    """
+    global _last_error_log_at
+    if now - _last_error_log_at < _ERROR_LOG_MIN_INTERVAL_SEC:
+        return
+    _last_error_log_at = now
+    try:
+        manager.add_log(
+            L(f"[Watchdog] Error interno en la rama {rama}: {exc}",
+              f"[Watchdog] Internal error in branch {rama}: {exc}"),
+            "error",
+        )
+    except Exception:
+        pass  # ni el log de errores puede tumbar al watchdog
+
+
 def _watchdog_tick(now=None):
-    """Una iteracion del ciclo. `now` inyectable para tests."""
+    """Una iteracion del ciclo. `now` inyectable para tests.
+
+    Cada rama corre aislada: un excepcion en auto-restart no debe saltarse el
+    reinicio diario ni el backup en frio programado. Los fallos se loguean con
+    rate-limit; watchdog_loop mantiene su try/except como ultima red.
+    """
     if not _gui_state_loaded:
         _load_gui_state()
     now = time.time() if now is None else now
@@ -103,11 +135,20 @@ def _watchdog_tick(now=None):
     if not (cfg["auto_restart_on_crash"] or cfg["daily_restart_time"] or cfg["daily_backup_time"]):
         return
     if cfg["auto_restart_on_crash"]:
-        _tick_crash_restart(now)
+        try:
+            _tick_crash_restart(now)
+        except Exception as exc:
+            _log_watchdog_error("auto_restart_on_crash", exc, now)
     if cfg["daily_restart_time"]:
-        _tick_daily_restart(cfg, now)
+        try:
+            _tick_daily_restart(cfg, now)
+        except Exception as exc:
+            _log_watchdog_error("daily_restart", exc, now)
     if cfg["daily_backup_time"]:
-        _tick_daily_cold_backup(cfg, now)
+        try:
+            _tick_daily_cold_backup(cfg, now)
+        except Exception as exc:
+            _log_watchdog_error("daily_cold_backup", exc, now)
 
 
 def _tick_crash_restart(now):
@@ -121,7 +162,23 @@ def _tick_crash_restart(now):
     # En backoff: esperar antes del siguiente intento.
     if crash_restarts > 0 and (now - last_crash_restart_at) < _backoff_sec(crash_restarts):
         return
-    status, _detalle = lifecycle_service.start_wrapper()
+    try:
+        status, _detalle = lifecycle_service.start_wrapper()
+    except Exception as exc:
+        # Fallo inesperado en la propia ruta de arranque (p. ej. sonda de
+        # instancias lanzando): cuenta como intento fallido para que el
+        # backoff evite martillear start_wrapper en cada poll (5s).
+        crash_restarts += 1
+        last_crash_restart_at = now
+        try:
+            manager.add_log(
+                L(f"[Watchdog] Re-arranque #{crash_restarts} falló con excepción ({exc}); se reintentará con backoff.",
+                  f"[Watchdog] Restart #{crash_restarts} failed with exception ({exc}); will retry with backoff."),
+                "error",
+            )
+        except Exception:
+            pass
+        return
     if status == "already_running":
         return
     crash_restarts += 1

@@ -16,6 +16,7 @@ Cubre tres contratos:
 import sys, os, re, ast, io, keyword
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import pytest
 from hypothesis import given, strategies as st, settings, example, HealthCheck, assume
 import console_lang as cl
 
@@ -56,14 +57,52 @@ def placeholder_names(draw):
 # 1) console_lang: oraculo de seleccion + validacion de idioma
 # ─────────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _wrapper_lang_restaurado():
+    """Higiene: set_lang muta os.environ (global del PROCESO). Sin este
+    snapshot/restore, un test que fije 'es' se lo fuga a los siguientes
+    (orden-dependencia latente en TODA la suite, no solo este modulo)."""
+    valor_previo = os.environ.get("WRAPPER_LANG")
+    yield
+    if valor_previo is None:
+        os.environ.pop("WRAPPER_LANG", None)
+    else:
+        os.environ["WRAPPER_LANG"] = valor_previo
+
+
 @given(msg_any, msg_any, lang_any)
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_L_oraculo(es, en, lang):
-    """Oracle: L devuelve es si WRAPPER_LANG=='es', en en cualquier otro caso
-    (incluidos idiomas invalidos, vacio o ausente)."""
+    """Oracle: L devuelve es si el WRAPPER_LANG RESULTANTE es 'es', en en
+    cualquier otro caso. set_lang(lang) SOLO cambia el env cuando lang es
+    valido ('es'/'en'); con un idioma invalido/vacio es un NO-OP y L refleja
+    el idioma que ya hubiera (mismo contrato que verifica
+    test_set_lang_acepta_solo_es_en). Regresion: el oraculo antiguo comparaba
+    contra el ARGUMENTO lang, asi que un ejemplo previo con lang='es' dejaba
+    el env en 'es' y el ejemplo siguiente con lang invalido fallaba
+    (contraejemplo minimo: es='', en='00', lang='')."""
     cl.set_lang(lang)
-    esperado = es if lang == "es" else en
+    esperado = es if os.environ.get("WRAPPER_LANG") == "es" else en
     assert cl.L(es, en) == esperado
+
+
+def test_L_refleja_idioma_previo_tras_set_lang_invalido():
+    """Regresion determinista del contrato stateful: tras fijar 'es', un
+    set_lang INVALIDO (''/basura) NO debe devolver la consola a ingles por
+    arte de magia: L sigue en 'es' hasta que alguien fija un idioma valido.
+    Es la semantica deseada en produccion (una reconexion WS sin query param,
+    o un mensaje set_lang corrupto, no deben resetear el idioma en vivo)."""
+    try:
+        assert cl.set_lang("es") is True
+        assert cl.L("hola", "hello") == "hola"
+        assert cl.set_lang("") is False          # invalido -> no-op
+        assert cl.L("hola", "hello") == "hola"   # sigue en es (NO vuelve a hello)
+        assert cl.set_lang("fr") is False        # invalido -> no-op
+        assert cl.L("hola", "hello") == "hola"
+        assert cl.set_lang("en") is True         # unico cambio real posible
+        assert cl.L("hola", "hello") == "hello"
+    finally:
+        os.environ.pop("WRAPPER_LANG", None)
 
 
 @given(msg_any, msg_any, lang_any)

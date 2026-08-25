@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, WebSocket
 
 from console_lang import set_lang as _set_lang
-from gui_backend.security import _is_allowed_origin
+from gui_backend.security import _get_request_port, _is_allowed_client_host, _is_allowed_origin
 from gui_backend.state import manager, build_public_status
 
 router = APIRouter()
@@ -13,22 +13,18 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # S1: solo conexiones desde la propia máquina
-    if websocket.client is None or websocket.client.host not in ("127.0.0.1", "::1"):
+    # S1: solo conexiones desde la propia máquina (con GUI_ALLOW_LAN=1 permite LAN privada)
+    if websocket.client is None or not _is_allowed_client_host(websocket.client.host):
         await websocket.close(code=1008)
         return
-    # S3: rechazar handshakes de navegador con Origin externo o puerto incorrecto (anti-CSRF)
-    expected_port = websocket.url.port
-    if expected_port is None:
-        host_hdr = websocket.headers.get("host", "")
-        if ":" in host_hdr:
-            try:
-                expected_port = int(host_hdr.split(":")[-1])
-            except ValueError:
-                expected_port = None
-        else:
-            expected_port = 80 if websocket.url.scheme in ("http", "ws") else 443
-    if not _is_allowed_origin(websocket.headers.get("origin"), expected_port=expected_port):
+    # S3: rechazar handshakes de navegador con Origin externo o puerto incorrecto
+    # (anti-CSRF). Puerto esperado por la MISMA fuente unica que los endpoints
+    # HTTP (anti-drift: soporta Host IPv6 "[::1]:8000", Host malformado y cae
+    # al puerto por defecto del esquema ws/wss).
+    if not _is_allowed_origin(
+        websocket.headers.get("origin"),
+        expected_port=_get_request_port(websocket),
+    ):
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -38,17 +34,22 @@ async def websocket_endpoint(websocket: WebSocket):
     # (cambios en vivo). Fija WRAPPER_LANG, que usan L() y el wrapper.
     _set_lang(websocket.query_params.get("lang"))
 
-    with manager.lock:
-        logs = list(manager.log_history)
-        players = list(manager.players_online)
-
-    await websocket.send_json({
-        "type": "init",
-        "logs": logs,
-        "status": build_public_status(manager, players)
-    })
-
     try:
+        # El init va DENTRO de la sesion registrada: si el cliente muere entre
+        # accept() y el primer send, o construir el status lanza (p. ej. primer
+        # muestreo de psutil sin cache), el finally debe sacarlo del registro.
+        # Fuera del try, la entrada muerta persistia hasta el siguiente
+        # broadcast (reintento de envio garantizado contra un socket muerto).
+        with manager.lock:
+            logs = list(manager.log_history)
+            players = list(manager.players_online)
+
+        await websocket.send_json({
+            "type": "init",
+            "logs": logs,
+            "status": build_public_status(manager, players)
+        })
+
         while True:
             data = await websocket.receive_text()
             try:

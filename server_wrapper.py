@@ -721,7 +721,7 @@ if __name__ == "__main__":
                 print(L("[Wrapper] Interrupción por teclado durante backup final.", "[Wrapper] Keyboard interrupt during final backup."))
 
             if final_thread.is_alive():
-                print(L(f"[Wrapper] [WARN] Backup de cierre excedio los {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.", f"[Wrapper] [WARN] Shutdown backup exceeded {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso."))
+                print(L(f"[Wrapper] [WARN] Backup de cierre excedio los {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.", f"[Wrapper] [WARN] Shutdown backup exceeded {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Terminating."))
 
             print(L("[Wrapper] Servidor finalizado limpiamente. Adiós.", "[Wrapper] Server finished cleanly. Goodbye."))
         except BaseException as e:

@@ -256,6 +256,7 @@ export default function TerminalConsole({ logs, onSendCommand, onClearLogs, isRu
                 <ClickSpark sparkColor={style.spark} sparkCount={10} onClick={() => setTypeFilter(f.id)}>
                   <motion.button
                     type="button"
+                    aria-pressed={active}
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.94 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 17 }}

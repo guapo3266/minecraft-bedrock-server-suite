@@ -20,6 +20,11 @@ SCHEDULE_DEFAULTS = {
     "daily_restart_time": None,
 }
 
+# Intervalo valido 5-1440 min. Debe coincidir con MIN/MAX de
+# gui_backend/services/schedule_config.py (anti-drift P0-1).
+MIN_INTERVAL_MIN = 5
+MAX_INTERVAL_MIN = 24 * 60
+
 _schedule_cfg_cache = {"mtime": None, "cfg": dict(SCHEDULE_DEFAULTS)}
 
 # Fecha (YYYY-MM-DD) del ultimo backup diario disparado; persistida para que
@@ -28,15 +33,42 @@ last_daily_backup_date = None
 
 
 def _coerce_schedule_value(key, value):
-    """Coercion de tipos por clave para ediciones manuales del JSON."""
+    """Coercion de tipos por clave para ediciones manuales del JSON.
+
+    Acepta ints, floats enteros y strings numericos con espacios; rechaza
+    booleanos, floats no enteros y valores fuera de rango 5-1440.
+    """
     if key == "backup_interval_min":
         if isinstance(value, bool):
             return SCHEDULE_DEFAULTS[key]
-        try:
+        # Strings con espacios o "30.0" deben intentar convertirse
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return SCHEDULE_DEFAULTS[key]
+            # Permitir "30.0" -> 30 si es entero exacto
+            try:
+                if "." in value:
+                    fv = float(value)
+                    if fv.is_integer():
+                        value = int(fv)
+                    else:
+                        return SCHEDULE_DEFAULTS[key]
+                else:
+                    value = int(value)
+            except (TypeError, ValueError):
+                return SCHEDULE_DEFAULTS[key]
+            iv = value
+        elif isinstance(value, float):
+            if not value.is_integer():
+                return SCHEDULE_DEFAULTS[key]
             iv = int(value)
-        except (TypeError, ValueError):
-            return SCHEDULE_DEFAULTS[key]
-        return iv if iv >= 1 else SCHEDULE_DEFAULTS[key]
+        else:
+            try:
+                iv = int(value)
+            except (TypeError, ValueError):
+                return SCHEDULE_DEFAULTS[key]
+        return iv if MIN_INTERVAL_MIN <= iv <= MAX_INTERVAL_MIN else SCHEDULE_DEFAULTS[key]
     if key in ("backup_only_with_players", "auto_restart_on_crash"):
         if isinstance(value, bool):
             return value
@@ -55,14 +87,20 @@ def _coerce_schedule_value(key, value):
 
 
 def _load_schedule_config():
-    """Lee schedule_config.json y recarga solo cuando cambia el mtime."""
+    """Lee schedule_config.json y recarga solo cuando cambia el mtime/size."""
     try:
-        mtime = os.stat(SCHEDULE_CONFIG_PATH).st_mtime
+        st = os.stat(SCHEDULE_CONFIG_PATH)
+        mtime = st.st_mtime
+        fsize = st.st_size
     except OSError:
         _schedule_cfg_cache["mtime"] = None
         _schedule_cfg_cache["cfg"] = dict(SCHEDULE_DEFAULTS)
+        # limpiar size cache si existia
+        _schedule_cfg_cache.pop("size", None)
         return dict(SCHEDULE_DEFAULTS)
-    if _schedule_cfg_cache["mtime"] == mtime:
+    cached_mtime = _schedule_cfg_cache.get("mtime")
+    cached_size = _schedule_cfg_cache.get("size")
+    if cached_mtime == mtime and cached_size == fsize:
         return dict(_schedule_cfg_cache["cfg"])
     cfg = dict(SCHEDULE_DEFAULTS)
     try:
@@ -75,6 +113,7 @@ def _load_schedule_config():
     except (OSError, ValueError):
         cfg = dict(SCHEDULE_DEFAULTS)
     _schedule_cfg_cache["mtime"] = mtime
+    _schedule_cfg_cache["size"] = fsize
     _schedule_cfg_cache["cfg"] = cfg
     return dict(cfg)
 

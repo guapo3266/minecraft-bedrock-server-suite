@@ -1,6 +1,7 @@
 """Métricas de hardware de la GUI, el wrapper y BDS (RAM, CPU, disco)."""
 
 import os
+import time
 
 import psutil
 
@@ -10,6 +11,39 @@ from gui_backend import config
 # tenga baseline entre muestras (con objeto nuevo SIEMPRE devuelve 0.0). Se recrea el
 # objeto si el PID cambia (p. ej. al reiniciar BDS o el wrapper).
 _process_cache = {}
+
+# Caché TTL del volumen de disco: get_hardware_metrics se llama en cada poll
+# de status (~2 s) y en cada init de WebSocket, pero disk_used_pct cambia
+# despacio. 30 s = cadencia del muestreo histórico (record_metrics), reduce
+# ~15x las syscalls sin estropear la tarjeta de disco de la GUI. Ante fallo
+# del muestreo se sirve el último valor conocido antes que tumbar /api/status.
+DISK_CACHE_TTL_SEC = 30.0
+_disk_cache = {"at": 0.0, "total": None, "free": None, "percent": None}
+
+
+def _reset_disk_cache_for_tests():
+    _disk_cache.update({"at": 0.0, "total": None, "free": None, "percent": None})
+
+
+def _sample_disk():
+    """Devuelve (total, free, percent) del volumen de BASE_DIR con caché TTL.
+
+    Lecturas concurrentes seguras sin lock: los campos son floats atómicos y
+    el peor caso es una syscall duplicada entre dos hilos.
+    """
+    now = time.time()
+    if _disk_cache["total"] is not None and (now - _disk_cache["at"]) < DISK_CACHE_TTL_SEC:
+        return _disk_cache["total"], _disk_cache["free"], _disk_cache["percent"]
+    try:
+        d = psutil.disk_usage(config.BASE_DIR)
+    except Exception:
+        # Sin muestra fresca ni previa no hay nada que inventar: propagar
+        # (comportamiento idéntico al anterior). Con valor previo, servirlo.
+        if _disk_cache["total"] is not None:
+            return _disk_cache["total"], _disk_cache["free"], _disk_cache["percent"]
+        raise
+    _disk_cache.update(at=now, total=d.total, free=d.free, percent=d.percent)
+    return d.total, d.free, d.percent
 
 
 def _measure_process_tree():
@@ -69,11 +103,12 @@ def get_hardware_metrics():
     # lo normaliza a % de la capacidad total de la máquina.
     bds_cpu_pct = round(raw_cpu / num_cores, 1)
 
-    # Disco: el volumen donde viven el servidor y los backups (C:).
-    disk = psutil.disk_usage(config.BASE_DIR)
-    disk_total_gb = round(disk.total / (1024**3), 1)
-    disk_free_gb = round(disk.free / (1024**3), 1)
-    disk_used_pct = round(disk.percent, 1)
+    # Disco: el volumen donde viven el servidor y los backups (C:), con
+    # caché TTL (ver _sample_disk): syscall solo 1 vez cada DISK_CACHE_TTL_SEC.
+    disk_total, disk_free, disk_pct = _sample_disk()
+    disk_total_gb = round(disk_total / (1024**3), 1)
+    disk_free_gb = round(disk_free / (1024**3), 1)
+    disk_used_pct = round(disk_pct, 1)
 
     return {
         "ram_mb": bds_ram_mb,

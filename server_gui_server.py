@@ -2,7 +2,9 @@
 server_gui_server.py — Punto de entrada de la GUI Bedrock Wrapper
 =================================================================
 Crea la app FastAPI (create_app), monta estáticos, arranca el lifespan
-(recuperación de actualizaciones + métricas) y sirve por Uvicorn en loopback.
+(recuperación de actualizaciones + métricas) y sirve por Uvicorn en loopback
+por defecto. Con GUI_ALLOW_LAN=1 o GUI_HOST=0.0.0.0 abre a la LAN (ver
+gui_backend/security.py).
 
 Los endpoints y el protocolo WebSocket viven en gui_backend/routers/;
 la lógica de dominio en gui_backend/services/ y el estado/locks en
@@ -25,7 +27,7 @@ from console_lang import L
 
 from gui_backend import config
 from gui_backend.config import BASE_DIR
-from gui_backend.security import _ensure_local, _is_allowed_origin, _is_safe_zip_entry
+from gui_backend.security import _allow_lan, _ensure_local, _is_allowed_origin, _is_safe_zip_entry
 from gui_backend.metrics import get_hardware_metrics
 from gui_backend.state import manager
 from gui_backend.services import external_probe as external_probe_service
@@ -76,6 +78,11 @@ async def lifespan(app: FastAPI):
         manager.add_log(L(f"[Historial] No se pudo inicializar el historial: {exc}", f"[History] Could not initialize history: {exc}"), "error")
     yield
     task.cancel()
+    # El loop muere con este lifespan: dejar manager.loop apuntandolo deja un
+    # loop CERRADO como global y convierte cada add_log/update_status posterior
+    # (hilos de fondo en la ventana de apagado; tests tras un TestClient) en
+    # RuntimeError con corrutina huerfana. _schedule_broadcast tolera None.
+    manager.loop = None
 
 
 def create_app() -> FastAPI:
@@ -109,22 +116,70 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def _puerto_libre(puerto: int) -> bool:
+def _puerto_libre(puerto: int, host: str = "127.0.0.1") -> bool:
     """Comprueba si un puerto local está disponible para enlazar.
 
     Sin SO_REUSEADDR a propósito: uvicorn no lo usa, y en Windows ese flag
     permite a un socket "hijackear" un puerto ya ocupado (falso positivo).
+    Si host es 0.0.0.0 comprueba en todas las interfaces. Un host con ":"
+    (IPv6 literal, p. ej. "::1") enlaza por AF_INET6: con AF_INET el bind
+    falla SIEMPRE (familia sin soporte) y la búsqueda de puerto no
+    encontraría jamás uno libre.
     """
     import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    bind_host = host if host not in ("", "localhost") else "127.0.0.1"
+    family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as s:
         try:
-            s.bind(("127.0.0.1", puerto))
+            s.bind((bind_host, puerto))
             return True
         except OSError:
             return False
 
 
+def _resolver_host_gui(allow_lan: bool, gui_host_env) -> str:
+    """Host efectivo del entrypoint a partir de GUI_ALLOW_LAN y GUI_HOST.
+
+    - Sin LAN: loopback (o el GUI_HOST explícito, p. ej. una IP concreta).
+    - Con LAN: 0.0.0.0 salvo que se pida un host específico no-loopback.
+      Pedir LAN dejando loopback es contradictorio: se fuerza la apertura.
+    """
+    gui_host = (gui_host_env or "").strip()
+    if not gui_host:
+        return "0.0.0.0" if allow_lan else "127.0.0.1"
+    if allow_lan and gui_host in ("127.0.0.1", "localhost"):
+        return "0.0.0.0"
+    return gui_host
+
+
+PUERTO_MAX = 65535
+
+
+def _resolver_puerto(puerto_inicial: int, host: str = "127.0.0.1") -> int:
+    """Primer puerto >= puerto_inicial libre para `host`, ACOTADO a 65535.
+
+    Antes el salto de puerto era un `while` sin tope: si nada llegaba a
+    enlazar (host que el socket nunca acepta, rango agotado...), el bucle
+    giraba infinito imprimiendo avisos — y superado 65535 el bind falla
+    siempre. Ahora lanza RuntimeError con un mensaje claro al agotarse.
+    """
+    puerto = puerto_inicial
+    while puerto <= PUERTO_MAX:
+        if _puerto_libre(puerto, host):
+            return puerto
+        print(L(
+            f"[AVISO] El puerto {puerto} ya está en uso. Probando el siguiente libre...",
+            f"[WARNING] Port {puerto} is already in use. Trying the next free one...",
+        ))
+        puerto += 1
+    raise RuntimeError(L(
+        f"No hay puertos libres entre {puerto_inicial} y {PUERTO_MAX} para el host {host}.",
+        f"No free ports between {puerto_inicial} and {PUERTO_MAX} for host {host}.",
+    ))
+
+
 if __name__ == "__main__":
+    import socket
     import webbrowser
 
     try:
@@ -135,24 +190,64 @@ if __name__ == "__main__":
         print("[AVISO] GUI_PORT no es un puerto válido. Usando 8000.")
         puerto = 8000
 
+    # Host / modo LAN opt-in (ver gui_backend/security.py)
+    # GUI_ALLOW_LAN=1 abre a 0.0.0.0 y relaja _ensure_local/_is_allowed_origin a IPs privadas.
+    # GUI_HOST permite override explícito (p.ej. 0.0.0.0 o 192.168.1.70).
+    # Fuente única del parsing de GUI_ALLOW_LAN: security._allow_lan.
+    allow_lan = _allow_lan()
+    gui_host = _resolver_host_gui(allow_lan, os.environ.get("GUI_HOST"))
+
     # Si el puerto pedido está ocupado (p. ej. SillyTavern en 8000),
     # saltar al siguiente puerto libre para no chocar con la otra app.
-    while not _puerto_libre(puerto):
-        print(f"[AVISO] El puerto {puerto} ya está en uso. Probando el siguiente libre...")
-        puerto += 1
-
-    url = f"http://127.0.0.1:{puerto}"
-    print("=================================================================")
-    print("  MINECRAFT BEDROCK WRAPPER GUI - REACTBITS DASHBOARD")
-    print(f"  Abriendo en: {url}")
-    print("=================================================================")
     try:
-        webbrowser.open(url)
+        puerto = _resolver_puerto(puerto, gui_host)
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}")
+        raise SystemExit(1)
+
+    if gui_host == "0.0.0.0":
+        # Mostrar tanto loopback como IP de LAN para el móvil
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            lan_ip = "IP_LOCAL"
+        url_local = f"http://127.0.0.1:{puerto}"
+        url_lan = f"http://{lan_ip}:{puerto}"
+        print("=================================================================")
+        print("  MINECRAFT BEDROCK WRAPPER GUI - REACTBITS DASHBOARD [MODO LAN]")
+        print(f"  Local : {url_local}")
+        print(f"  En LAN: {url_lan}  <- abre esta en el movil (misma WiFi)")
+        print("  (GUI_ALLOW_LAN=1 activo: permite IPs privadas 192.168/10/172.16)")
+        print("=================================================================")
+        open_url = url_local
+    else:
+        url = f"http://{gui_host}:{puerto}"
+        # Normalizar display para localhost
+        if gui_host in ("127.0.0.1", "localhost"):
+            url = f"http://127.0.0.1:{puerto}"
+        print("=================================================================")
+        print("  MINECRAFT BEDROCK WRAPPER GUI - REACTBITS DASHBOARD")
+        print(f"  Abriendo en: {url}")
+        print("=================================================================")
+        open_url = url
+    try:
+        webbrowser.open(open_url)
     except Exception:
         pass  # sin navegador disponible no es crítico
     try:
-        uvicorn.run("server_gui_server:app", host="127.0.0.1", port=puerto, reload=False, log_level="info")
+        uvicorn.run("server_gui_server:app", host=gui_host, port=puerto, reload=False, log_level="info")
     except OSError:
         print(f"\n[AVISO] El puerto {puerto} se ocupó justo al abrir. Reintentando en el siguiente libre...")
         time.sleep(2)
-        uvicorn.run("server_gui_server:app", host="127.0.0.1", port=puerto + 1, reload=False, log_level="info")
+        # Mismo criterio acotado que el salto inicial: sin esto, un puerto+1
+        # también ocupado moriría con traceback en vez de buscar el siguiente.
+        try:
+            puerto = _resolver_puerto(puerto + 1, gui_host)
+        except RuntimeError as exc:
+            print(f"[ERROR] {exc}")
+            raise SystemExit(1)
+        uvicorn.run("server_gui_server:app", host=gui_host, port=puerto, reload=False, log_level="info")

@@ -9,6 +9,13 @@ try:
 except ImportError:
     psutil = None  # H3: sin psutil el guard de servidor corriendo se omite
 
+from zip_safety import _is_safe_zip_entry, _pack_dest
+import zip_safety as _zip_safety
+
+# Constantes centralizadas en zip_safety (fuente unica anti-drift)
+_SERVER_PACK_DIRS = _zip_safety.SERVER_PACK_DIRS
+_PACK_ZIP_PREFIX = _zip_safety.PACK_ZIP_PREFIX
+
 # Rutas RESUELTAS desde la propia ubicacion del script: cada instalacion
 # restaura SU mundo. (Antes estaban hardcodeadas a "Servidor de Guapo", de
 # modo que ejecutar este script desde otra instalacion sobrescribia el mundo
@@ -127,21 +134,7 @@ def _quarantine_and_restore(active_path, bak_path, is_dir=True):
             print(f"[CRITICO] Fallo en recuperacion fallback de resguardo: {e_fallback}")
 
 
-def _is_safe_zip_entry(filename: str) -> bool:
-    """True si la entrada del zip es segura para extraer (anti zip-slip).
-
-    Rechaza rutas absolutas, cualquier segmento '..' (traversal) y prefijos
-    de unidad/ADS tipo 'C:'. Misma regla que la GUI (server_gui_server.py).
-    """
-    norm = filename.replace("\\", "/")
-    if norm.startswith("/") or os.path.isabs(norm):
-        return False
-    segs = norm.split("/")
-    if any(s == ".." for s in segs):
-        return False
-    if ":" in segs[0]:
-        return False
-    return True
+# _is_safe_zip_entry centralizado en zip_safety (importado arriba)
 
 
 def _validate_backup(zip_path: str):
@@ -163,34 +156,7 @@ def _list_backup_files(backup_dir):
     ]
 
 
-# Carpetas de nivel servidor que el backup incluye junto al mundo (mods/addons).
-# Mismas constantes que auto_backup.py: los zips guardan estas carpetas con
-# prefijo propio ("server_resource_packs/...", "server_behavior_packs/...") y
-# la restauracion las devuelve a su ubicacion de servidor.
-_SERVER_PACK_DIRS = ("resource_packs", "behavior_packs")
-_PACK_ZIP_PREFIX = "server_"
-
-
-def _pack_dest(entry_filename):
-    """Clasifica una entrada del ZIP: pack de nivel servidor -> (kind, folder,
-    rel_path) con rel_path relativo a la carpeta del pack; None = mundo."""
-    norm = entry_filename.replace("\\", "/")
-    for kind in _SERVER_PACK_DIRS:
-        prefix = _PACK_ZIP_PREFIX + kind + "/"
-        if norm.startswith(prefix):
-            rest = norm[len(prefix):]
-            if rest.endswith("/") or not rest:
-                return None  # entrada de directorio: no se restaura
-            parts = rest.split("/")
-            if not parts[0]:
-                return None
-            if len(parts) >= 2:
-                return kind, parts[0], "/".join(parts[1:])
-            # H3: archivo suelto en la raiz del pack dir (p.ej.
-            # server_resource_packs/foo.txt): se restaura a BASE_DIR/<kind>,
-            # no al mundo.
-            return kind, "", parts[0]
-    return None
+# _pack_dest y constantes de packs centralizados en zip_safety (importados arriba)
 
 
 def _extract_pack_entry(zipf, entry, base_dir, rel_path):

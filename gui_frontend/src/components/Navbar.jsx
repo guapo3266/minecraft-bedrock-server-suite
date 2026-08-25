@@ -127,15 +127,17 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
         </button>
 
         {/* Selector de idioma ES/EN */}
-        <div className="flex items-center rounded-xl border border-white/10 bg-black/40 p-0.5 font-mono text-xs font-bold">
+        <div className="flex items-center rounded-xl border border-white/10 bg-black/40 p-0.5 font-mono text-xs font-bold" role="group" aria-label={t('setupLangLabel')}>
           <button
             onClick={() => setLang('es')}
+            aria-pressed={lang === 'es'}
             className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition ${lang === 'es' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
           >
             ES
           </button>
           <button
             onClick={() => setLang('en')}
+            aria-pressed={lang === 'en'}
             className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-2.5 py-1.5 transition ${lang === 'en' ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-white'}`}
           >
             EN

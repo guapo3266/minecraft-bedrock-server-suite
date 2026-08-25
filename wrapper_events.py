@@ -37,18 +37,34 @@ def _rotate_old_events():
 
 
 def _emit_event(event, **data):
-    """Escribe un evento JSON de una linea (append + flush, bajo lock)."""
+    """Escribe un evento JSON de una linea (append + flush + fsync, bajo lock).
+
+    El emisor nunca debe tumbar el wrapper: cualquier fallo se ignora y el
+    handle se resetea para reintentar en el proximo evento. Detecta cambio de
+    WRAPPER_EVENTS_FILE en runtime (p. ej. tests que cambian env) y reabre.
+    """
     global _events_handle, _events_file_path
     try:
         with _events_lock:
-            if _events_handle is None:
-                _events_file_path = _events_path()
+            desired_path = _events_path()
+            if _events_handle is None or _events_file_path != desired_path:
+                if _events_handle is not None:
+                    try:
+                        _events_handle.close()
+                    except Exception:
+                        pass
+                    _events_handle = None
+                _events_file_path = desired_path
                 os.makedirs(os.path.dirname(_events_file_path), exist_ok=True)
                 _events_handle = open(_events_file_path, "a", encoding="utf-8")
             payload = {"ts": int(time.time() * 1000), "event": event}
             payload.update(data)
             _events_handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
             _events_handle.flush()
+            try:
+                os.fsync(_events_handle.fileno())
+            except Exception:
+                pass
     except Exception:
         try:
             if _events_handle is not None:
@@ -56,6 +72,7 @@ def _emit_event(event, **data):
         except Exception:
             pass
         _events_handle = None
+        _events_file_path = None
 
 
 def _reset_events_for_tests():
