@@ -12,8 +12,11 @@ import zipfile
 
 import auto_backup
 from fastapi import HTTPException
+from zip_safety import CORRUPT_MARKERS
 
-_CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO", "_CRASH", "_crash")
+# Lista canonica compartida con la rotacion y la CLI (zip_safety, fuente
+# unica): lo que la GUI oculta para restaurar, la CLI tambien.
+_CORRUPT_MARKERS = CORRUPT_MARKERS
 
 
 def _list_backup_files(backup_dir):

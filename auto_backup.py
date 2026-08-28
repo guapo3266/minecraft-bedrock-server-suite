@@ -8,8 +8,19 @@ import re
 
 import windows_process_guard as wpg
 from console_lang import L
-from zip_safety import _is_safe_zip_entry, _pack_dest
+from zip_safety import (
+    _is_safe_zip_entry,
+    _pack_dest,
+    _quarantine_and_restore,
+    _extract_pack_entry,
+    CORRUPT_MARKERS,
+)
 import zip_safety as _zip_safety
+
+# Alias historicos para compatibilidad (tests y consumidores siguen
+# importando CORRUPT_MARKERS/_quarantine... desde aqui; la logica vive en
+# zip_safety, fuente unica anti-drift).
+_CORRUPT_MARKERS = CORRUPT_MARKERS
 
 # Constantes centralizadas en zip_safety (fuente unica anti-drift)
 SERVER_PACK_DIRS = _zip_safety.SERVER_PACK_DIRS
@@ -57,16 +68,32 @@ WORLD_DIR = os.path.join(BASE_DIR, "worlds", WORLD_NAME)
 WORLD_PARENT_DIR = os.path.join(BASE_DIR, "worlds")
 BACKUP_DIR = _resolve_backup_dir(BASE_DIR)
 
+# Instantanea del mundo resuelto AL IMPORTAR el modulo: permite distinguir un
+# monkeypatch de tests (WORLD_DIR != este valor) de una instalacion longinqua
+# (GUI) cuyo server.properties cambio despues del import (WORLD_DIR == este
+# valor pero != lo que dicen hoy las propiedades). Sin esto, get_world_dir()
+# trataba el global stale como un patch y devolvia el mundo EQUIVOCADO.
+_IMPORT_TIME_WORLD_DIR = WORLD_DIR
+
 
 def get_world_dir(base_dir=None):
-    """Resuelve la ruta del mundo activo dinámicamente según server.properties."""
+    """Resuelve la ruta del mundo activo dinámicamente según server.properties.
+
+    Reglas:
+      - Con base_dir explicita (tests/CLI sobre otra instalacion): resolucion
+        100% dinamica contra ese arbol.
+      - Si el global WORLD_DIR difiere del valor calculado al importar, es un
+        monkeypatch de tests: respetarlo (convencion de la suite).
+      - En caso contrario se RELEE server.properties: un proceso largo (GUI)
+        que vio cambiar level-name sin reimportar debe apuntar al mundo real,
+        no al que estaba en el import (hallazgo H3-2026-08-28: el backup en
+        frio/previo de update empaquetaba silenciosamente el mundo viejo).
+    """
     bdir = base_dir or BASE_DIR
     if bdir == BASE_DIR and "WORLD_DIR" in globals():
-        # Si un test hizo monkeypatch a auto_backup.WORLD_DIR que difiere del valor
-        # estático default y del server.properties de BASE_DIR, respetarlo
         current_global = globals()["WORLD_DIR"]
-        if current_global != os.path.join(BASE_DIR, "worlds", "Bedrock level") and current_global != os.path.join(BASE_DIR, "worlds", get_world_name(BASE_DIR)):
-            return current_global
+        if current_global != _IMPORT_TIME_WORLD_DIR:
+            return current_global  # monkeypatch de tests: respetar
     return os.path.join(bdir, "worlds", get_world_name(bdir))
 
 
@@ -194,7 +221,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
     Crea una copia de seguridad comprimida del mundo.
     - file_snapshot: Lista de tuplas (rel_path, byte_count) devueltas por 'save query'.
       Si se provee, SOLO se leen y copian esos archivos hasta esa cantidad exacta de bytes (Protocolo Bedrock Nativo).
-      Si es None, se realiza un backup tradicional escaneando WORLD_DIR.
+      Si es None, se realiza un backup tradicional escaneando el mundo.
     - wait_lock_timeout_sec: Segundos a esperar si ya hay un backup en curso antes de abortar.
     - external_lock: Instancia IPC de lock (multiprocessing.Lock) compartida con el proceso principal.
     """
@@ -228,19 +255,25 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
     tmp_filepath = None
 
     try:
+        # Rutas resueltas AL INICIO de cada backup (no los globales del
+        # import): en procesos largos (GUI) server.properties puede haber
+        # cambiado de level-name; get_world_dir/get_backup_dir respetan los
+        # parches de tests y releen lo demas (fix H3-2026-08-28).
+        world_dir = get_world_dir()
+        backup_dir = get_backup_dir()
         # Limpiar .tmp huerfanos (solo con el lock adquirido)
-        if os.path.exists(BACKUP_DIR):
-            for orphan_tmp in glob.glob(os.path.join(BACKUP_DIR, "*.tmp")):
+        if os.path.exists(backup_dir):
+            for orphan_tmp in glob.glob(os.path.join(backup_dir, "*.tmp")):
                 try:
                     os.remove(orphan_tmp)
                     print(L(f"[*] Limpieza: Eliminado archivo huérfano {os.path.basename(orphan_tmp)}", f"[*] Cleanup: removed orphan file {os.path.basename(orphan_tmp)}"))
                 except Exception:
                     pass
-        if not os.path.exists(WORLD_DIR):
-            print(L(f"[ERROR] No se encontro la carpeta del mundo: {WORLD_DIR}", f"[ERROR] World folder not found: {WORLD_DIR}"))
+        if not os.path.exists(world_dir):
+            print(L(f"[ERROR] No se encontro la carpeta del mundo: {world_dir}", f"[ERROR] World folder not found: {world_dir}"))
             return False
 
-        os.makedirs(BACKUP_DIR, exist_ok=True)
+        os.makedirs(backup_dir, exist_ok=True)
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         # FIX F4: trigger_name puede venir de cualquier origen; se sanea para
@@ -251,9 +284,9 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         # pisaba silenciosamente al primero).
         nonce = os.urandom(3).hex()
         zip_filename = f"auto_backup_{SERVER_NAME}_{safe_trigger}_{timestamp}_{nonce}.zip"
-        zip_filepath = os.path.join(BACKUP_DIR, zip_filename)
+        zip_filepath = os.path.join(backup_dir, zip_filename)
         if os.path.abspath(zip_filepath) != os.path.join(
-            os.path.abspath(BACKUP_DIR), os.path.basename(zip_filepath)
+            os.path.abspath(backup_dir), os.path.basename(zip_filepath)
         ):
             raise RuntimeError(L(f"Nombre de backup invalido after sanitizing: {trigger_name!r}", f"Invalid backup name after sanitizing: {trigger_name!r}"))
         tmp_filepath = zip_filepath + ".tmp"
@@ -299,8 +332,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             # no se puede abrir aunque el ZIP sea valido. No se exige cobertura
             # completa de tablas: el snapshot de save query es autoritativo y un
             # chequeo de cobertura daba falsos positivos en mundos recien creados.
-            active_world_dir = get_world_dir()
-            db_dir = os.path.join(active_world_dir, "db")
+            db_dir = os.path.join(world_dir, "db")
             has_disk_db = False
             if os.path.isdir(db_dir):
                 db_files = [f for f in os.listdir(db_dir) if os.path.isfile(os.path.join(db_dir, f))]
@@ -331,7 +363,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         raise RuntimeError(L(f"Longitud invalida para '{rel_path}': {byte_length}", f"Invalid length for '{rel_path}': {byte_length}"))
 
                     clean_rel_path, full_path = _resolve_snapshot_path(rel_path)
-                    arcname = os.path.relpath(full_path, WORLD_DIR).replace("\\", "/")
+                    arcname = os.path.relpath(full_path, world_dir).replace("\\", "/")
 
                     if not os.path.exists(full_path):
                         raise SnapshotDesyncError(L(f"Archivo de snapshot no encontrado en disco: {clean_rel_path}", f"Snapshot file not found on disk: {clean_rel_path}"))
@@ -376,13 +408,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 # Debemos empacarlos manualmente en el ZIP del backup en caliente.
                 static_includes = ["world_resource_packs.json", "world_behavior_packs.json", "world_icon.jpeg", "resource_packs", "behavior_packs"]
                 for static_name in static_includes:
-                    static_path = os.path.join(WORLD_DIR, static_name)
+                    static_path = os.path.join(world_dir, static_name)
                     if os.path.exists(static_path):
                         if os.path.isdir(static_path):
                             for root, dirs, files in os.walk(static_path):
                                 for static_file in files:
                                     full_f = os.path.join(root, static_file)
-                                    arc = os.path.relpath(full_f, WORLD_DIR).replace("\\", "/")
+                                    arc = os.path.relpath(full_f, world_dir).replace("\\", "/")
                                     zipf.write(full_f, arc)
                                     total_bytes += os.path.getsize(full_f)
                                     if total_bytes > MAX_BACKUP_BYTES:
@@ -390,7 +422,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                             L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
                                         )
                         else:
-                            arc = os.path.relpath(static_path, WORLD_DIR).replace("\\", "/")
+                            arc = os.path.relpath(static_path, world_dir).replace("\\", "/")
                             zipf.write(static_path, arc)
                             total_bytes += os.path.getsize(static_path)
                             if total_bytes > MAX_BACKUP_BYTES:
@@ -404,14 +436,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 total_bytes = _write_server_packs(zipf, total_bytes, cancel_event)
             else:
                 # Backup completo tradicional (usado al inicio, apagar o caída por snapshot incompleto)
-                for root, dirs, files in os.walk(WORLD_DIR):
+                for root, dirs, files in os.walk(world_dir):
                     if _cancelled(cancel_event):
                         raise RuntimeError(L("Backup cancelado durante escaneo tradicional.", "Backup cancelled during traditional scan."))
                     for file in files:
                         if _cancelled(cancel_event):
                             raise RuntimeError(L("Backup cancelado durante compresion tradicional.", "Backup cancelled during traditional compression."))
                         full_path = os.path.join(root, file)
-                        arcname = os.path.relpath(full_path, WORLD_DIR).replace("\\", "/")
+                        arcname = os.path.relpath(full_path, world_dir).replace("\\", "/")
                         zipf.write(full_path, arcname)
                         total_bytes += os.path.getsize(full_path)
                         if total_bytes > MAX_BACKUP_BYTES:
@@ -489,7 +521,7 @@ def rotate_backups(now=None):
     if now is None:
         now = datetime.datetime.now()
     active_backup_dir = get_backup_dir()
-    excluded_markers = ("_CORRUPTO", "_EXCEDIDO", "_CRASH", "_crash")
+    excluded_markers = CORRUPT_MARKERS
     backups = glob.glob(os.path.join(active_backup_dir, "auto_backup_*.zip"))
     if not backups:
         return
@@ -553,87 +585,8 @@ def rotate_backups(now=None):
     if deleted_count > 0:
         print(L(f"[*] Limpieza completada. Backups retenidos: {len(keepers)}.", f"[*] Cleanup complete. Backups kept: {len(keepers)}."))
 
-# _is_safe_zip_entry y _pack_dest centralizados en zip_safety (importados arriba)
-
-
-def _extract_pack_entry(zipf, entry, base_dir, rel_path):
-    """Extrae una entrada de pack a base_dir con doble chequeo anti traversal.
-
-    rel_path proviene de una entrada ya validada con _is_safe_zip_entry y de
-    un prefijo fijo, pero se revalida igual: el destino nunca escapa de
-    base_dir.
-    """
-    segs = rel_path.split("/")
-    if any(s == ".." for s in segs) or os.path.isabs(rel_path) or ":" in segs[0]:
-        raise ValueError(L(f"Entrada de pack insegura: {entry.filename}", f"Unsafe pack entry: {entry.filename}"))
-    dest = os.path.join(base_dir, *segs)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with zipf.open(entry, "r") as src, open(dest, "wb") as out:
-        shutil.copyfileobj(src, out)
-
-
-def _quarantine_and_restore(active_path, bak_path, is_dir=True):
-    """Garantiza la recuperación del resguardo .bak aislando la ruta activa.
-
-    1. Intenta renombrar active_path a .failed_<nonce> para liberar la ruta y
-       hacer os.rename(bak_path, active_path).
-    2. Si active_path no existe, hace os.rename(bak_path, active_path).
-    3. Si active_path no pudo ser renombrado ni eliminado (p. ej. archivos bloqueados
-       por Windows Defender o procesos en segundo plano), copia recursivamente
-       el contenido de bak_path sobre active_path y limpia bak_path.
-    """
-    if not os.path.exists(bak_path):
-        return
-
-    restored = False
-    if os.path.exists(active_path):
-        failed_path = active_path + f".failed_{os.urandom(4).hex()}"
-        try:
-            os.rename(active_path, failed_path)
-        except Exception:
-            pass
-        else:
-            try:
-                os.rename(bak_path, active_path)
-                restored = True
-            except Exception as e_rb:
-                print(L(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}",
-                        f"[CRITICAL] Could not restore backup {bak_path} -> {active_path}: {e_rb}"))
-            try:
-                if is_dir:
-                    shutil.rmtree(failed_path, ignore_errors=True)
-                else:
-                    os.remove(failed_path)
-            except Exception:
-                pass
-
-    if not restored and not os.path.exists(active_path):
-        try:
-            os.rename(bak_path, active_path)
-            restored = True
-        except Exception as e_rb:
-            print(L(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}",
-                    f"[CRITICAL] Could not restore backup {bak_path} -> {active_path}: {e_rb}"))
-
-    if not restored and is_dir and os.path.isdir(bak_path):
-        try:
-            for root, dirs, files in os.walk(bak_path):
-                rel = os.path.relpath(root, bak_path)
-                target_dir = os.path.join(active_path, rel)
-                os.makedirs(target_dir, exist_ok=True)
-                for f in files:
-                    src_f = os.path.join(root, f)
-                    dst_f = os.path.join(target_dir, f)
-                    try:
-                        shutil.copy2(src_f, dst_f)
-                    except Exception:
-                        pass
-            shutil.rmtree(bak_path, ignore_errors=True)
-            restored = True
-        except Exception as e_fallback:
-            print(L(f"[CRITICO] Fallo en recuperacion fallback de resguardo: {e_fallback}",
-                    f"[CRITICAL] Fallback backup recovery failed: {e_fallback}"))
-
+# _is_safe_zip_entry, _pack_dest, _extract_pack_entry, _quarantine_and_restore
+# y CORRUPT_MARKERS centralizados en zip_safety (importados arriba)
 
 def restore_backup(filename):
     """

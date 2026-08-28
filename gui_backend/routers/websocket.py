@@ -57,6 +57,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 if msg.get("type") == "command":
                     cmd = msg.get("command", "").strip()
                     if cmd and manager.is_running and manager.wrapper_process:
+                        # 'stop' en consola apaga el wrapper entero: es un stop
+                        # deliberado y debe marcar stop_requested (igual que
+                        # /api/command) o el watchdog lo tomara por crash y
+                        # re-lanzara el servidor que el usuario acaba de parar.
+                        # Se compara por LINEA: "list\nstop" tambien apaga.
+                        if "stop" in {l.strip().lower() for l in cmd.splitlines()}:
+                            manager.stop_requested = True
                         with manager.stdin_lock:
                             manager.wrapper_process.stdin.write(cmd + "\n")
                             manager.wrapper_process.stdin.flush()

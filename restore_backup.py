@@ -9,7 +9,13 @@ try:
 except ImportError:
     psutil = None  # H3: sin psutil el guard de servidor corriendo se omite
 
-from zip_safety import _is_safe_zip_entry, _pack_dest
+from zip_safety import (
+    _is_safe_zip_entry,
+    _pack_dest,
+    _extract_pack_entry,
+    _quarantine_and_restore,
+    CORRUPT_MARKERS,
+)
 import zip_safety as _zip_safety
 
 # Constantes centralizadas en zip_safety (fuente unica anti-drift)
@@ -51,7 +57,8 @@ def _resolve_backup_dir(base_dir):
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())
 SERVER_NAME = os.path.basename(os.path.normpath(BASE_DIR))
 BACKUP_DIR = _resolve_backup_dir(BASE_DIR)
-_CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO")
+# Marcadores canonicos centralizados en zip_safety (GUI y CLI coinciden)
+_CORRUPT_MARKERS = CORRUPT_MARKERS
 
 
 def get_world_dir(base_dir=None):
@@ -73,68 +80,6 @@ def get_backup_dir(base_dir=None):
             return current_global
     return _resolve_backup_dir(bdir)
 
-
-def _quarantine_and_restore(active_path, bak_path, is_dir=True):
-    """Garantiza la recuperación del resguardo .bak aislando la ruta activa.
-
-    1. Intenta renombrar active_path a .failed_<nonce> para liberar la ruta y
-       hacer os.rename(bak_path, active_path).
-    2. Si active_path no existe, hace os.rename(bak_path, active_path).
-    3. Si active_path no pudo ser renombrado ni eliminado (p. ej. archivos bloqueados
-       por Windows Defender o procesos en segundo plano), copia recursivamente
-       el contenido de bak_path sobre active_path y limpia bak_path.
-    """
-    if not os.path.exists(bak_path):
-        return
-
-    restored = False
-    if os.path.exists(active_path):
-        failed_path = active_path + f".failed_{os.urandom(4).hex()}"
-        try:
-            os.rename(active_path, failed_path)
-        except Exception:
-            pass
-        else:
-            try:
-                os.rename(bak_path, active_path)
-                restored = True
-            except Exception as e_rb:
-                print(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}")
-            try:
-                if is_dir:
-                    shutil.rmtree(failed_path, ignore_errors=True)
-                else:
-                    os.remove(failed_path)
-            except Exception:
-                pass
-
-    if not restored and not os.path.exists(active_path):
-        try:
-            os.rename(bak_path, active_path)
-            restored = True
-        except Exception as e_rb:
-            print(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}")
-
-    if not restored and is_dir and os.path.isdir(bak_path):
-        try:
-            for root, dirs, files in os.walk(bak_path):
-                rel = os.path.relpath(root, bak_path)
-                target_dir = os.path.join(active_path, rel)
-                os.makedirs(target_dir, exist_ok=True)
-                for f in files:
-                    src_f = os.path.join(root, f)
-                    dst_f = os.path.join(target_dir, f)
-                    try:
-                        shutil.copy2(src_f, dst_f)
-                    except Exception:
-                        pass
-            shutil.rmtree(bak_path, ignore_errors=True)
-            restored = True
-        except Exception as e_fallback:
-            print(f"[CRITICO] Fallo en recuperacion fallback de resguardo: {e_fallback}")
-
-
-# _is_safe_zip_entry centralizado en zip_safety (importado arriba)
 
 
 def _validate_backup(zip_path: str):
@@ -158,16 +103,6 @@ def _list_backup_files(backup_dir):
 
 # _pack_dest y constantes de packs centralizados en zip_safety (importados arriba)
 
-
-def _extract_pack_entry(zipf, entry, base_dir, rel_path):
-    """Extrae una entrada de pack a base_dir con doble chequeo anti traversal."""
-    segs = rel_path.split("/")
-    if any(s == ".." for s in segs) or os.path.isabs(rel_path) or ":" in segs[0]:
-        raise ValueError(f"Entrada de pack insegura: {entry.filename}")
-    dest = os.path.join(base_dir, *segs)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with zipf.open(entry, "r") as src, open(dest, "wb") as out:
-        shutil.copyfileobj(src, out)
 
 
 def _server_is_running():

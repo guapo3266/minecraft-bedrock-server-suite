@@ -126,6 +126,11 @@ def _force_kill_compress_process(proc):
 def execute_backup_worker(file_snapshot=None, cancel_event=None):
     """Hilo efimero que orquesta el proceso de compresion de Bedrock."""
     outcome = "exception"
+    # Definidos ya aqui para que el finally pueda limpiarlos SIEMPRE: la rama
+    # de excepcion general podia dejar bw_snap_*.json huerfano en %TEMP%
+    # (hallazgo H6-2026-08-28; las ramas timeout/exito/launch_error ya los
+    # borraban, la excepcion inesperada no).
+    _snap_path = _marker = _result = None
     try:
         print(L("[Worker] Iniciando compresion de archivos en proceso separado (subprocess)...", "[Worker] Starting compression in a separate process (subprocess)..."))
         wrapper_events._emit_event(
@@ -306,6 +311,16 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
         # Marcador de FIN incondicional del ciclo de compresion.
         print(L("[Worker] Backup finalizado", "[Worker] Backup finished"))
         wrapper_events._emit_event("backup_finished", outcome=outcome)
+        # Limpieza incondicional de los temporales del ciclo (snapshot/cancel
+        # marker/resultado) en %TEMP%: exito, timeout, watchdog, launch_error
+        # o excepcion inesperada. try/except por archivo: uno bloqueado (p. ej.
+        # antivirus) no impide borrar los demas ni toca el marcador de arriba.
+        for _p in (_snap_path, _marker, _result):
+            if _p:
+                try:
+                    os.remove(_p)
+                except Exception:
+                    pass
 
 
 def _begin_manual_hot_backup():

@@ -44,6 +44,13 @@ def _validate_props(values):
         spec = PROPS_FIELDS.get(key)
         if spec is None:
             return False, f"campo desconocido: {key}"
+        # Ningun valor puede contener caracteres de control: un \n dentro de
+        # server-name inyectaba lineas arbitrarias en server.properties
+        # (p. ej. level-name/online-mode escritos sin pasar por la lista de
+        # campos editables). El archivo se escribe linea a linea: un solo
+        # salto de linea rompe el formato.
+        if any(ord(c) < 32 or ord(c) == 127 for c in raw):
+            return False, f"{key}: caracteres de control no permitidos"
         if spec["type"] == "enum":
             if raw not in spec["values"]:
                 return False, f"{key}: valores validos: {', '.join(spec['values'])}"
@@ -55,6 +62,10 @@ def _validate_props(values):
                 n = int(raw)
             except (TypeError, ValueError):
                 return False, f"{key}: debe ser un entero"
+            # Forma canonica: BDS parsea mal " 10", "+10" u "010"; escribir
+            # solo lo que int() acepta sin sorpresas.
+            if raw != str(n):
+                return False, f"{key}: entero sin espacios ni signos: {n}"
             if not (spec["min"] <= n <= spec["max"]):
                 return False, f"{key}: rango {spec['min']}-{spec['max']}"
         elif spec["type"] == "string":

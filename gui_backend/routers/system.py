@@ -134,7 +134,9 @@ async def send_command(req: CommandRequest, request: Request):
     
     # 'stop' en consola apaga el wrapper entero (lo intercepta el wrapper,
     # no BDS): es un stop deliberado y el watchdog no debe re-lanzarlo.
-    if cmd.lower() == "stop":
+    # Se compara por LINEA: un comando multi-linea tipo "list\nstop" tambien
+    # termina el wrapper en read_stdin y debe contar como stop deliberado.
+    if "stop" in {line.strip().lower() for line in cmd.splitlines()}:
         manager.stop_requested = True
 
     try:

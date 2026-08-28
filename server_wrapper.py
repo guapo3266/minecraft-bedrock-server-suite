@@ -54,7 +54,10 @@ from wrapper_schedule import (
     SCHEDULE_STATE_PATH,
     SCHEDULE_DEFAULTS,
     _schedule_cfg_cache,
-    last_daily_backup_date,
+    # NO se re-exporta el escalar mutable `last_daily_backup_date`: el
+    # `from ... import` fija una COPIA del binding al importar y se vuelve
+    # una trampa para futuros edits/tests. Todo acceso va por
+    # wrapper_schedule.last_daily_backup_date.
     _coerce_schedule_value,
     _load_schedule_config,
     _load_last_daily_backup_date,
@@ -472,10 +475,16 @@ def read_stdin():
 # ═══════════════════════════════════════════════════════════════
 # Backup final de cierre
 # ═══════════════════════════════════════════════════════════════
-def execute_final_backup():
-    """Hilo efímero para el backup de cierre."""
+def execute_final_backup(trigger="cierre"):
+    """Hilo efimero para el backup de cierre (normal o de emergencia por crash).
+
+    Ambos caminos comparten external_lock + wait timeout: se lanzan en el
+    mismo punto del shutdown (tras join/kill del worker), y usar el MISMO
+    dominio de lock que el backup de cierre normal evita que el de emergencia
+    se ejecute sin coordinar con el ipc lock jerarquico.
+    """
     try:
-        result = auto_backup.create_backup("cierre", file_snapshot=None, wait_lock_timeout_sec=wstate.FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=wstate.backup_ipc_lock)
+        result = auto_backup.create_backup(trigger, file_snapshot=None, wait_lock_timeout_sec=wstate.FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=wstate.backup_ipc_lock)
         if not result:
             print(L("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.", "[Wrapper] The final backup did not produce a valid ZIP or was aborted by timeout."))
     except Exception as e:
@@ -505,7 +514,14 @@ def should_run_initial_backup():
 # ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     wrapper_mutex = wpg.NamedMutex(f"BDS_Wrapper_{wpg.get_installation_hash(wstate.BASE_DIR)}")
-    if wrapper_mutex.already_exists or not wrapper_mutex.acquire(timeout_ms=100):
+    # Guard de instancia por ADQUISICION, nunca por existencia. El wrapper
+    # retiene el mutex desde aqui hasta morir; una sonda ajena (p. ej. el loop
+    # de metricas de otra GUI) solo abre el handle un instante sin retenerlo,
+    # por lo que ya no puede provocar un aborto falso. Se reintenta una vez
+    # para tolerar esa microcolision sin bloquear a un wrapper real (que si
+    # retiene el mutex y hara fallar ambas adquisiciones).
+    if not (wrapper_mutex.acquire(timeout_ms=100)
+            or wrapper_mutex.acquire(timeout_ms=100)):
         print(L("[Wrapper] [ERROR] Ya hay una instancia del wrapper en ejecución para este servidor. Abortando.",
                 "[Wrapper] [ERROR] An instance of the wrapper is already running for this server. Aborting."))
         wrapper_mutex.close()
@@ -709,7 +725,7 @@ if __name__ == "__main__":
             if wstate.server_process and wstate.server_process.returncode is not None and wstate.server_process.returncode != 0:
                 print(L(f"[Wrapper] ADVERTENCIA: BDS finalizó con código {wstate.server_process.returncode} (crash/anormal). Creando backup de emergencia...",
                         f"[Wrapper] WARNING: BDS exited with code {wstate.server_process.returncode} (crash/abnormal). Creating emergency backup..."))
-                final_thread = threading.Thread(target=lambda: auto_backup.create_backup("cierre_crash"), daemon=True)
+                final_thread = threading.Thread(target=execute_final_backup, args=("cierre_crash",), daemon=True)
             else:
                 print(L("[Wrapper] Creando backup final de cierre...", "[Wrapper] Creating final shutdown backup..."))
                 final_thread = threading.Thread(target=execute_final_backup, daemon=True)

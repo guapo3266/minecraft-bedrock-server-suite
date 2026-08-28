@@ -13,12 +13,24 @@ EVENTS_RETENTION_DAYS = 7
 _events_lock = threading.Lock()
 _events_handle = None
 _events_file_path = None
+# Nombre estable del archivo de eventos en modo standalone (sin
+# WRAPPER_EVENTS_FILE): se genera UNA sola vez por proceso. Sin esto,
+# _events_path() devolvia una ruta nueva en cada _emit_event y cada evento
+# creaba su propio NDJSON de una linea (regresion verificada 2026-08-28:
+# decenas de archivos por boot en iniciar_servidor.bat).
+_standalone_suffix = None
 
 
 def _events_path():
-    return os.environ.get("WRAPPER_EVENTS_FILE") or os.path.join(
-        EVENTS_DIR, "be_%d_%s.ndjson" % (int(time.time()), os.urandom(4).hex())
-    )
+    env_path = os.environ.get("WRAPPER_EVENTS_FILE")
+    if env_path:
+        return env_path
+    global _standalone_suffix
+    if _standalone_suffix is None:
+        _standalone_suffix = "be_%d_%s.ndjson" % (
+            int(time.time()), os.urandom(4).hex()
+        )
+    return os.path.join(EVENTS_DIR, _standalone_suffix)
 
 
 def _rotate_old_events():
@@ -76,7 +88,7 @@ def _emit_event(event, **data):
 
 
 def _reset_events_for_tests():
-    global _events_handle, _events_file_path
+    global _events_handle, _events_file_path, _standalone_suffix
     with _events_lock:
         if _events_handle is not None:
             try:
@@ -85,3 +97,4 @@ def _reset_events_for_tests():
                 pass
         _events_handle = None
         _events_file_path = None
+        _standalone_suffix = None

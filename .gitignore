@@ -7,6 +7,7 @@ venv/
 
 # ── Herramienta local (no es parte del proyecto) ────────
 .codewhale/
+.zcode/
 
 # ── Instrucciones locales para agentes (cada carpeta tiene la suya) ──
 AGENTS.md
@@ -38,6 +39,9 @@ whitelist.json
 packetlimitconfig.json
 profanity_filter.wlist
 packet-statistics.txt
+# release-notes.txt: artefacto del zip de Mojang, se sobre escribe en cada
+# update_bds (_apply_staged_update no lo preserva). Dato de instalacion.
+release-notes.txt
 
 # ── Historiales/archivos previos (limpieza del repo) ────
 archived/

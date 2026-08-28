@@ -8,7 +8,6 @@ import os
 import time
 
 import psutil
-from console_lang import L
 import windows_process_guard as wpg
 from gui_backend import config
 from gui_backend.state import manager

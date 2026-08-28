@@ -24,6 +24,11 @@ LOG_PRELOAD = 200          # logs recargados en log_history al arrancar la GUI
 MAX_METRICS_POINTS = 300   # tope de puntos por consulta (downsample)
 
 _lock = threading.Lock()
+# Lock propio de CREACION de la conexion: los escritores llaman a _connect()
+# antes de tomar _lock, y dos hilos pueden llegar a la vez (p. ej. primer
+# record_metrics concurrente con el primer sink de log). Sin doble-check
+# atómico se creaban dos conexiones SQLite y una quedaba fugada.
+_connect_lock = threading.Lock()
 _conn = None
 _started = False
 _last_sweep_day = None
@@ -31,28 +36,31 @@ _last_sweep_day = None
 
 def _connect():
     global _conn
-    if _conn is None:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute(
-            "CREATE TABLE IF NOT EXISTS metrics ("
-            " ts INTEGER PRIMARY KEY,"
-            " ram_mb REAL, ram_pct REAL, cpu_pct REAL,"
-            " disk_used_pct REAL, sys_used_pct REAL, running INTEGER)"
-        )
-        _conn.execute(
-            "CREATE TABLE IF NOT EXISTS logs ("
-            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            " ts INTEGER, time_text TEXT, type TEXT, text TEXT)"
-        )
-        _conn.execute(
-            "CREATE TABLE IF NOT EXISTS sessions ("
-            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            " player TEXT, xuid TEXT,"
-            " started_ts INTEGER, ended_ts INTEGER, duration_sec INTEGER)"
-        )
-        _conn.commit()
+    if _conn is not None:
+        return _conn
+    with _connect_lock:
+        if _conn is None:
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            _conn.execute("PRAGMA journal_mode=WAL")
+            _conn.execute(
+                "CREATE TABLE IF NOT EXISTS metrics ("
+                " ts INTEGER PRIMARY KEY,"
+                " ram_mb REAL, ram_pct REAL, cpu_pct REAL,"
+                " disk_used_pct REAL, sys_used_pct REAL, running INTEGER)"
+            )
+            _conn.execute(
+                "CREATE TABLE IF NOT EXISTS logs ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " ts INTEGER, time_text TEXT, type TEXT, text TEXT)"
+            )
+            _conn.execute(
+                "CREATE TABLE IF NOT EXISTS sessions ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " player TEXT, xuid TEXT,"
+                " started_ts INTEGER, ended_ts INTEGER, duration_sec INTEGER)"
+            )
+            _conn.commit()
     return _conn
 
 
