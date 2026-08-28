@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Hardening regresiones para security y zip_safety (ralph-loop ronda 1).
+"""Hardening regresiones para security y zip_safety.
 
 Cubre:
 - _is_allowed_origin robusto ante "null", vacios con espacios, control chars,
