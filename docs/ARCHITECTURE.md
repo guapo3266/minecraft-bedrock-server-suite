@@ -13,7 +13,8 @@ wrapper_console.py               # Regex D5, prefijos y parser save query
 wrapper_events.py                # Emisor/rotacion del canal IPC NDJSON
 wrapper_schedule.py              # Configuracion, persistencia y helpers diarios
 wrapper_backup.py                # Worker subprocess, hot backup y cancelacion
-zip_safety.py                    # Fuente unica anti-drift: _is_safe_zip_entry y _pack_dest
+zip_safety.py                    # Fuente unica anti-drift: _is_safe_zip_entry, _pack_dest,
+                                 #   _extract_pack_entry, _quarantine_and_restore y CORRUPT_MARKERS
 server_gui_server.py            # Punto de entrada: create_app(), lifespan,
                                 #   estáticos, uvicorn, re-exports mínimos
 gui_backend/
