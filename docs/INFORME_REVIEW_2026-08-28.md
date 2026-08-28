@@ -231,6 +231,53 @@ normales`, `test_fachada_no_reexporta_scalares_mutables`.
   (TOCTOU del clear de `wrapper_exit_event`); leak de 1 hilo por boot, se
   limpia en el siguiente stop.
 
+---
+
+## Post-e2e: endurecimiento del e2e oficial y causa raíz del huérfano
+
+Al validar los fixes con el e2e real (GUI + wrapper + BDS + backup caliente),
+la corrida dejó un **huérfano**: wrapper+BDS vivos ~10 min reteniendo el
+`NamedMutex`, sin `shutdown_initiated` en el canal NDJSON — el `POST
+/api/action/stop` nunca llegó a procesarse. El test PASABA igual porque su
+limpieza no asertaba el stop.
+
+**Descarte de regresión (H1–H7)**, verificado antes de tocar nada:
+- La cadena de stop está intacta en el diff (`actions.py` sin cambios;
+  `read_stdin`/`initiate_shutdown`/`send_command` sin tocar).
+- Repro standalone (wrapper + `stop` por stdin, sin GUI): PASS — apagado
+  limpio en 9.9 s, `shutdown_initiated` + `server_stopped` + backup de cierre
+  + exit 0.
+- Repro del flujo GUI real en el estado exacto del e2e (BDS arriba + backup
+  caliente + stop por API): PASS — `running=False` en 10.0 s.
+- Firma idéntica pre-existente: el boot e2e del 2026-08-24 23:53 (anterior a
+  los fixes) también termina sin shutdown y con su zip borrado por la
+  limpieza del test.
+
+**Causa raíz (no es concurrencia, es I/O)**: el e2e lanzaba la GUI con
+`stdout=subprocess.PIPE` y nunca lo drenaba (solo lo leía si la GUI moría al
+arrancar). Uvicorn loguea cada `/api/status` y el test sondea cada ~0.15 s:
+el buffer del pipe de Windows (~4–8 KB) se llena en 1–2 minutos → **la GUI se
+congela al escribir el access log** → el event loop deja de procesar el stop →
+árbol huérfano. El freeze ocurría DESPUÉS de las aserciones del cuerpo, por lo
+que el test "pasaba" de forma determinista dejando el huérfano. Los repros
+manuales pasaban porque redirigían el stdout de la GUI a archivo.
+
+**Fix (test-only)**:
+- `finally` endurecido: aserta que el stop completó (`running=False`),
+  mata el árbol GUI→wrapper→BDS con `taskkill /F /T` (el Job Object
+  KILL_ON_JOB_CLOSE del wrapper se lleva al BDS) y verifica con psutil que ni
+  wrapper ni BDS de ESTA instalación sobreviven (con matanza manual de última
+  red). Los asertos solo se lanzan si el cuerpo no estaba ya fallando
+  (`sys.exc_info()`), para no enmascarar el fallo original.
+- stdout de la GUI **a archivo** (no bloquea), borrado en el `finally`; el
+  camino de "GUI murió al arrancar" ahora lee ese archivo.
+
+**Validación**: e2e 2/2 passed (2:07, antes 3:39 — ya no hay congelación),
+`server.properties` restaurado byte a byte, cero procesos/logs residuales.
+AGENTS.md actualizado (bala de e2e).
+
+---
+
 ## Verificación
 
 - Suite completa: `python -m pytest tests -m "not e2e"` → **423 passed,
