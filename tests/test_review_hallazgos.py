@@ -215,6 +215,36 @@ def test_gui_busca_la_cadena_exacta_del_wrapper():
     assert any(k in linea_real.lower() for k in ("backup", "compres", "save query"))
 
 
+def _procesos_residuales_e2e():
+    """PIDs huerfanos del e2e: bedrock_server.exe o server_wrapper.py de ESTA
+    instalacion. Se llama con la GUI ya muerta: cualquiera que quede es un
+    arbol que sobrevivio al test (retiene el NamedMutex y envenena corridas
+    siguientes con falsos 409)."""
+    import psutil
+
+    pids = []
+    me = os.getpid()
+    base_nc = os.path.normcase(BASE_DIR)
+    for p in psutil.process_iter(["pid", "name", "cmdline", "exe"]):
+        try:
+            if p.info.get("pid") == me:
+                continue
+            name = (p.info.get("name") or "").lower()
+            if name == "bedrock_server.exe":
+                exe = os.path.normcase(p.info.get("exe") or "")
+                # exe ilegible (AccessDenied) en este escenario = proceso nuestro:
+                # conservador, mejor fallo ruidoso que huesped silencioso
+                if not exe or exe.startswith(base_nc):
+                    pids.append(p.info["pid"])
+            elif name == "python.exe":
+                cl = " ".join(p.info.get("cmdline") or [])
+                if "server_wrapper.py" in cl and base_nc in os.path.normcase(cl):
+                    pids.append(p.info["pid"])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return pids
+
+
 @pytest.mark.e2e
 @pytest.mark.skipif(
     not os.path.exists(os.path.join(BASE_DIR, "bedrock_server.exe")),
@@ -239,6 +269,8 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
     gui_proc = None
     ws = None
     logs = []
+    gui_log = None
+    gui_log_path = None
     # H3: BACKUP_DIR es por servidor y la subcarpeta nace con el primer backup;
     # el baseline del E2E la crea si aun no existe.
     os.makedirs(BACKUP_DIR_REAL, exist_ok=True)
@@ -294,10 +326,20 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
         env["GUI_PORT"] = str(port)
         env["BROWSER"] = "cmd /c exit"
         env["PYTHONUNBUFFERED"] = "1"
+        # REGRESION 2026-08-28: el stdout de la GUI NUNCA a PIPE sin drenar.
+        # Uvicorn loguea cada /api/status (el test sondea cada ~0.15s) y el
+        # buffer del pipe (~4-8KB) se llena en 1-2 min: la GUI se CONGELA al
+        # escribir el access log, el event loop deja de procesar el stop y el
+        # arbol queda huerfano. A archivo no bloquea.
+        gui_log_path = os.path.join(
+            os.environ.get("TEMP", os.getcwd()), "e2e_gui_stdout_%d.log" % port
+        )
+        gui_log = open(gui_log_path, "wb")
         gui_proc = subprocess.Popen(
             [sys.executable, "-u", os.path.join(BASE_DIR, "server_gui_server.py")],
             cwd=BASE_DIR,
-            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            stdout=gui_log,
             stderr=subprocess.STDOUT,
             env=env,
         )
@@ -311,7 +353,9 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
             except Exception:
                 pass
             if gui_proc.poll() is not None:
-                out = gui_proc.stdout.read().decode(errors="replace")
+                gui_log.close()
+                with open(gui_log_path, "r", encoding="utf-8", errors="replace") as f:
+                    out = f.read()
                 raise AssertionError("la GUI murio al arrancar:\n%s" % out[-2000:])
             time.sleep(0.3)
         assert ready, "la GUI no respondio en 60s"
@@ -435,6 +479,11 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
             ), "el update debio abortar (pagina sin zip); logs: %s" % logs[-10:]
     finally:
         # ── apagado limpio y limpieza ──
+        # REGRESION 2026-08-28: el stop debe COMPLETARSE y el arbol
+        # GUI->wrapper->BDS jamas debe sobrevivir al test. La corrida de ese
+        # dia dejo wrapper+BDS huerfanos ~10 min reteniendo el NamedMutex
+        # (el stop se perdió y el test pasaba igual porque no lo asertaba).
+        stop_ok = False
         try:
             api("POST", "/api/action/stop", timeout=5)
         except Exception:
@@ -444,6 +493,7 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
                 st, body = api("GET", "/api/status", timeout=2)
                 j = __import__("json").loads(body)
                 if j.get("running") is False:
+                    stop_ok = True
                     break
             except Exception:
                 break
@@ -454,11 +504,42 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
             except Exception:
                 pass
         if gui_proc is not None:
+            # /T mata el ARBOL (GUI -> wrapper); el Job Object KILL_ON_JOB_CLOSE
+            # del wrapper se lleva a BDS. El kill() plano dejaba al wrapper vivo.
             try:
-                gui_proc.kill()
-                gui_proc.wait(timeout=10)
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(gui_proc.pid)],
+                                   capture_output=True, timeout=15)
+                else:
+                    gui_proc.kill()
+                gui_proc.wait(timeout=15)
+            except Exception:
+                try:
+                    gui_proc.kill()
+                except Exception:
+                    pass
+        # Verificacion dura: ni wrapper ni BDS de ESTA instalacion sobreviven.
+        if gui_log is not None:
+            try:
+                gui_log.close()
             except Exception:
                 pass
+        leftovers = []
+        for _ in range(20):
+            leftovers = _procesos_residuales_e2e()
+            if not leftovers:
+                break
+            time.sleep(0.5)
+        if leftovers:
+            # ultima red: matarlos a mano para no envenenar la siguiente corrida
+            for pid in leftovers:
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True, timeout=10)
+                except Exception:
+                    pass
+            time.sleep(1.0)
+            leftovers = _procesos_residuales_e2e()
         # restaurar props (flush+close explícito: si la config del servidor no
         # puede restaurarse, el test debe FALLAR visible, nunca dejarla tocada)
         with open(props_path, "wb") as f:
@@ -479,6 +560,21 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
                     os.remove(os.path.join(BACKUP_DIR_REAL, f))
                 except Exception:
                     pass
+        if gui_log_path and os.path.exists(gui_log_path):
+            try:
+                os.remove(gui_log_path)
+            except Exception:
+                pass
+        # Asertos SOLO si el cuerpo no esta ya fallando: un raise dentro del
+        # finally con sys.exc_info activo ENMASCARARIA la excepcion original.
+        if sys.exc_info()[0] is None:
+            assert stop_ok, (
+                "el stop via API no completo el apagado: quedarian wrapper/BDS "
+                "huerfanos reteniendo el mutex (flake observado 2026-08-28)"
+            )
+            assert not leftovers, (
+                "procesos residuales del e2e tras el taskkill del arbol: %s" % leftovers
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════
