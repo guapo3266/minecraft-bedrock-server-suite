@@ -130,7 +130,9 @@ def test_cli_detecta_servidor_corriendo(monkeypatch):
     import restore_backup
 
     if restore_backup.psutil is None:
-        pytest.skip("psutil no disponible")
+        # Fail-closed: sin psutil no se puede probar BDS parado -> aborta.
+        assert restore_backup._server_is_running() is True
+        return
 
     class FakeProc:
         def __init__(self, name):
@@ -150,3 +152,11 @@ def test_cli_detecta_servidor_corriendo(monkeypatch):
 
     monkeypatch.setattr(restore_backup.psutil, "process_iter", lambda attrs: [])
     assert restore_backup._server_is_running() is False
+
+
+def test_cli_sin_psutil_aborta_fail_closed(monkeypatch):
+    """Sin psutil no se puede probar BDS parado: aborta (True)."""
+    import restore_backup
+
+    monkeypatch.setattr(restore_backup, "psutil", None)
+    assert restore_backup._server_is_running() is True

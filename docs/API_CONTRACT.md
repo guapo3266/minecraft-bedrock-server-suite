@@ -125,7 +125,7 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 | acción | Respuestas 200 | Respuestas de error |
 |---|---|---|
 | `start` | `{"status": "starting"}` / `{"status": "already_running"}` / `{"status": "busy", "message": "Operación en curso (restauración/actualización)"}` / `{"status": "error", "message": "<e>"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (sonda externa) |
-| `stop` | `{"status": "stopping"}` / `{"status": "not_running"}` | — |
+| `stop` | `{"status": "stopping"}` / `{"status": "not_running"}` | 500 `"Error al detener: <e>"` (fallo de entrega a stdin; no marca stop_requested) |
 | `restart` | `{"status": "restarting"}` (progreso solo por logs) | — |
 | `backup` | `{"status": "hot_backup_dispatched"}` (caliente) / `{"status": "backup_dispatched"}` (frío) / `{"status": "busy", "message": "Ya hay un backup en curso"}` | 500 `"Error al iniciar backup: <e>"` (caliente) |
 | `update_bds` | `{"status": "update_dispatched"}` / `{"status": "already_updating"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (sonda externa, solo con `is_running == false`) |

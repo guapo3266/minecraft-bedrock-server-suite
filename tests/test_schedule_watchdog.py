@@ -383,6 +383,39 @@ def test_stop_por_gui_marca_stop_requested(via, monkeypatch, tmp_path):
     assert "stop\n" in gui.manager.wrapper_process.stdin.lines
 
 
+def test_stop_stdin_roto_devuelve_500_y_no_marca_flag(monkeypatch, tmp_path):
+    """Stop honesto: si el write a stdin falla, 500 y sin stop_requested.
+
+    Antes se marcaba el flag y se devolvía stopping aunque el comando no
+    se entregó (inhibía al watchdog con el servidor aún vivo).
+    """
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    class _BrokenStdin:
+        def write(self, s):
+            raise BrokenPipeError("tubería rota")
+
+        def flush(self):
+            pass
+
+    class _BrokenProc(_FakeProc):
+        def __init__(self):
+            super().__init__()
+            self.stdin = _BrokenStdin()
+
+    _patch_paths(monkeypatch, tmp_path)
+    _reset_manager_state()
+    gui.manager.is_running = True
+    gui.manager.wrapper_process = _BrokenProc()
+    gui.manager.stop_requested = False
+
+    client = TestClient(gui.app, client=("127.0.0.1", 50000), raise_server_exceptions=False)
+    r = client.post("/api/action/stop")
+    assert r.status_code == 500
+    assert gui.manager.stop_requested is False
+
+
 def test_start_limpia_stop_requested(monkeypatch):
     """_spawn_wrapper_process (todas las rutas de arranque pasan por el) resetea
     el flag: la salida de un wrapper NUEVO solo es crash si nadie lo paro."""

@@ -24,8 +24,8 @@ Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola e
 
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
 - Requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global). Si no se puede crear el `.venv`, usa el Python global.
-- Solo Windows: el servidor BDS oficial de Mojang únicamente existe para Windows.
-- El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008).
+- Solo Windows: esta suite solo soporta Windows (el BDS oficial de Mojang existe para Windows y Linux, pero aquí solo se prueba/soporta Windows).
+- El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008). Modo LAN opt-in solo con `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, sin autenticación: solo para red doméstica de confianza).
 
 **2. Sin GUI (solo consola)** — el wrapper clásico:
 
@@ -134,8 +134,8 @@ Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, s
 
 - **No Node.js needed**: the frontend ships prebuilt in `gui_frontend/dist/`.
 - Requires **Python 3.10+**. The `.bat` creates a `.venv` virtual environment isolated from your machine's Python and installs `requirements.txt` there on first run (nothing goes into the global Python). If `.venv` cannot be created, it falls back to the global Python.
-- Windows only: Mojang's official BDS server exists for Windows only.
-- The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008).
+- Windows only: this suite only supports Windows (Mojang's official BDS exists for Windows and Linux, but only Windows is tested/supported here).
+- The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008). LAN mode is opt-in via `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, no authentication: trusted home network only).
 
 **2. Without GUI (console only)** — the classic wrapper:
 

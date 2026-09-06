@@ -40,14 +40,18 @@ async def handle_action(action_name: str, request: Request):
     elif action == "stop":
         if not manager.is_running or not manager.wrapper_process:
             return {"status": "not_running"}
-        manager.stop_requested = True  # stop deliberado: el watchdog no debe re-lanzar
         try:
             with manager.stdin_lock:
                 manager.wrapper_process.stdin.write("stop\n")
                 manager.wrapper_process.stdin.flush()
-            manager.add_log(L("[GUI Backend] Comando 'stop' enviado...", "[GUI Backend] 'stop' command sent..."), "system")
-        except Exception:
-            pass
+        except Exception as e:
+            manager.add_log(L(f"[GUI Backend] Error enviando 'stop': {e}", f"[GUI Backend] Error sending 'stop': {e}"), "error")
+            raise HTTPException(status_code=500, detail=L(f"Error al detener: {e}", f"Error stopping: {e}"))
+        # Solo tras entrega correcta: el watchdog no debe re-lanzar.
+        # (Antes se marcaba antes del write y un fallo dejaba el flag
+        # inhibiendo al watchdog mientras el servidor seguía vivo.)
+        manager.stop_requested = True
+        manager.add_log(L("[GUI Backend] Comando 'stop' enviado...", "[GUI Backend] 'stop' command sent..."), "system")
         return {"status": "stopping"}
 
     elif action == "restart":

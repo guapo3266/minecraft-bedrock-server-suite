@@ -39,6 +39,8 @@ from gui_backend.routers import system, properties, setup, actions, backups, web
 
 async def hardware_metrics_loop():
     tick = 0
+    _metric_errs = 0
+    _metric_last_log = 0.0
     while True:
         try:
             # Sonda psutil (itera procesos) y muestreo de hardware: fuera del
@@ -50,8 +52,16 @@ async def hardware_metrics_loop():
                 hw = await run_in_threadpool(get_hardware_metrics)
                 history_service.record_metrics(hw, manager.is_running)
                 history_service.maybe_sweep()
-        except Exception:
-            pass
+        except Exception as e:
+            # Antes: pass silencioso y la GUI mostraba métricas congeladas
+            # como si fueran actuales. Ahora: print throttled a consola
+            # (no add_log: cada 2s inundaría SQLite/WS y cogería lock).
+            _metric_errs += 1
+            now = time.time()
+            if now - _metric_last_log >= 300:
+                _metric_last_log = now
+                print(L(f"[Métricas] Muestreo degradado ({_metric_errs} fallos): {type(e).__name__}: {e}",
+                        f"[Metrics] Degraded sampling ({_metric_errs} failures): {type(e).__name__}: {e}"))
         await asyncio.sleep(2.0)
 
 @asynccontextmanager

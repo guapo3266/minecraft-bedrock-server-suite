@@ -100,3 +100,35 @@ def test_disco_fallo_sin_cache_previa_propaga(monkeypatch):
     # Comportamiento previo preservado: sin valor conocido no hay nada que inventar.
     with pytest.raises(OSError):
         metrics.get_hardware_metrics()
+
+
+def test_metrics_loop_no_oculta_errores_log_throttled(monkeypatch, capsys):
+    """El loop de métricas ya no hace except pass: sobrevive y avisa.
+
+    Falla la sonda en cada tick; el loop debe seguir vivo (se cancela
+    externamente) y printear 1 aviso throttled en vez de callar.
+    """
+    import asyncio
+
+    import server_gui_server as sgs
+
+    def _siempre_falla():
+        raise OSError("sonda caída")
+
+    async def _fake_threadpool(fn, *a, **k):
+        return _siempre_falla()
+
+    llamadas = {"n": 0}
+
+    async def _fake_sleep(_):
+        llamadas["n"] += 1
+        if llamadas["n"] >= 3:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(sgs, "run_in_threadpool", _fake_threadpool)
+    monkeypatch.setattr(sgs.asyncio, "sleep", _fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(sgs.hardware_metrics_loop())
+    out = capsys.readouterr().out
+    assert "degradado" in out.lower() or "degraded" in out.lower()
+    assert out.count("sonda caída") <= 1 or out.lower().count("degradad") == 1

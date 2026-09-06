@@ -7,7 +7,7 @@ import datetime
 try:
     import psutil
 except ImportError:
-    psutil = None  # H3: sin psutil el guard de servidor corriendo se omite
+    psutil = None  # H3: sin psutil no se puede probar BDS parado -> fail-closed
 
 from zip_safety import (
     _is_safe_zip_entry,
@@ -108,11 +108,12 @@ def _list_backup_files(backup_dir):
 def _server_is_running():
     """H3: True si bedrock_server.exe esta en ejecucion.
 
-    Sin psutil se omite el chequeo (el os.rename de WORLD_DIR seguira
-    fallando en Windows como red de seguridad).
+    Fail-closed: sin psutil no se puede comprobar que BDS esté parado,
+    así que se asume en ejecución para abortar la restauración antes de
+    tocar el mundo (restaurar con BDS vivo lo pisaría en uso).
     """
     if psutil is None:
-        return False
+        return True
     try:
         for p in psutil.process_iter(["name"]):
             try:
