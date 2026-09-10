@@ -47,7 +47,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 - Borra automáticamente los backups viejos (guarda los últimos 15 y 1 diario por una semana).
 - Backup al arrancar el servidor y otro al apagarlo.
 - Actualizador de BDS con marcha atrás: guardo la versión anterior en cada update y si la nueva rompe algo, volvés con un clic.
-- Menú interactivo con `.bat` para restaurar el mundo fácil (`02_restaurar_backup.bat`, `03_regresar_al_anterior.bat`).
+- Restauración fácil: desde la GUI (restaurar/verificar/borrar) o con la CLI interactiva `python restore_backup.py`. Los accesos directos `.bat` de esta instalación viven en la carpeta local `backups/` y no se distribuyen con el repo.
 - Script para abrir los puertos del firewall (`configurar_firewall.bat`; ejecútalo como administrador: sin permisos avisa y aborta en vez de fingir éxito).
 - Desde la GUI: consola de comandos en vivo, métricas, forzar backup, restaurar/verificar/borrar backups y una tarjeta con tu IP local/pública para invitar amigos.
 
@@ -61,16 +61,15 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 | `server_wrapper.py` | Script principal: lee la consola, detecta jugadores, maneja los backups |
 | `backup_worker.py` | Worker de compresión en proceso separado (subprocess, arranque rápido) |
 | `tools/bds_first_run.py` | Primer arranque por consola: descarga BDS si falta (pregunta S/n) |
+| `tools/verify_backups.py` | Verifica el CRC de todos los backups y marca los corruptos con `_CORRUPTO` |
 | `auto_backup.py` | Comprime la base de datos a ZIP |
 | `restore_backup.py` | Restaura un backup |
 | `gui_frontend/` | Frontend React (código fuente + `dist/` compilado, listo para usar) |
 | `web/` | GUI clásica de respaldo (sin React) |
-| `01_hacer_backup.bat` | Backup manual con robocopy |
-| `02_restaurar_backup.bat` | Menú para restaurar un backup |
-| `03_regresar_al_anterior.bat` | Vuelve al backup más reciente en un clic |
 | `configurar_firewall.bat` | Abre los puertos del firewall (como administrador) |
 | `configurar_antivirus.bat` | Añade exclusiones de Windows Defender para los backups |
 | `tools/setup_defender_exclusions.ps1` | Script PowerShell de exclusiones (pide administrador la primera vez) |
+| `requirements-dev.txt` | Dependencias de desarrollo/tests (pytest, hypothesis, httpx, pytest-cov) |
 | `server.properties.example` | Plantilla de configuración (copiar a `server.properties`) |
 
 ### Arranque inicial lento y Windows Defender
@@ -86,6 +85,18 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 - **Alternativa manual por GUI**: *Seguridad de Windows → Protección contra virus y amenazas → Administrar la configuración → Exclusiones → Agregar o quitar exclusiones → Carpeta*.
 - **Sin permisos de administrador**: añade `backup-inicio=false` en `server.properties` para saltarte el backup inicial y depender solo de los backups en caliente periódicos.
 
+### Solución de problemas
+
+- **El backup inicial tarda 3+ minutos**: aplicá las exclusiones de Windows Defender (sección anterior) o poné `backup-inicio=false` en `server.properties`.
+- **`409 Hay una instancia externa del servidor en ejecución`**: hay un wrapper o BDS de ESTA instalación corriendo por fuera de la GUI. Cerralo y reintentá; la sonda compara la ruta del ejecutable, así que un BDS de otra carpeta no bloquea.
+- **El puerto 8000 está ocupado**: la GUI salta sola al siguiente libre y abre el navegador ahí; para fijarlo, ejecutá `set GUI_PORT=8001` antes de arrancar.
+- **La GUI no muestra jugadores**: las detecciones leen el log de BDS en inglés (`Player connected: ...`). No cambies el idioma del servidor; si Mojang cambia el formato, se pierden jugadores pero los backups en caliente siguen funcionando.
+- **No aparece un backup para restaurar**: los marcados `_CORRUPTO`, `_EXCEDIDO` o `_CRASH` se ocultan a propósito (misma lista en la GUI y en la CLI).
+- **¿Dónde quedan los backups?**: fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`. Se conservan 15 recientes + 1 por día durante 7 días (los marcados, 7 días como evidencia).
+- **`Debes apagar el servidor antes de reestablecer un backup`**: la restauración exige BDS apagado; usá la GUI o `python restore_backup.py`.
+- **Linux**: no soportado (el BDS de Mojang existe para Linux, pero esta suite solo se prueba en Windows).
+- **No corras los e2e sobre una instalación real**: `pytest -m e2e` toca `server.properties` y crea/borra `worlds/TestWorld`.
+
 ### Para usarlo
 
 1. Necesitas Python 3.10+ instalado.
@@ -97,11 +108,14 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 ### Tests
 
 ```bash
-pip install hypothesis pytest   # o .venv\Scripts\python -m pip install hypothesis pytest
+pip install -r requirements-dev.txt   # o .venv\Scripts\python -m pip install -r requirements-dev.txt
+python -m ruff check .                  # lint estatico (F/E9)
 python -m pytest tests -m "not e2e" -q   # excluye e2e (requieren BDS vivo y tocan mundo real)
 # alternativa corta (tambien excluye e2e por defecto si falta bedrock_server.exe):
 python -m pytest tests/ -q
 ```
+
+GitHub Actions corre esta misma suite (sin e2e) en `windows-latest` con cada push/PR del repo público (`.github/workflows/tests.yml`, incluye lint del frontend).
 
 Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local, más suites de inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback) y de la máquina de estados del disparo manual de backup en caliente. Desde la revisión de 2026-08-02 incluyen además regresiones de los fixes (reintento inmediato tras snapshot incompleto, validación de snapshot por `level.dat`, retención con reloj inyectable, filtro de backups corruptos en la GUI, guard TOCTOU del restore) y propiedades adicionales: prefijos de log apilados, idempotencia/normalización de rutas y consenso anti-drift del guard zip-slip entre sus copias. Desde 2026-08-16 suman suites de programación de backups + watchdog, gestión de jugadores, historial SQLite, rollback de BDS y canal de eventos NDJSON. Desde 2026-08-24 se añaden hardening de seguridad (Origin puerto-estricto, null-byte zip-slip, IPv6 Host), PBT de schedule/seguridad, simulación del watchdog con wrapper falso sin binario (crash → re-arranque real → backoff), caché TTL de métricas de disco, la migración del antiguo script manual `tests/test_wrapper_logic.py` a tests pytest reales (sus regresiones del parser no podían fallar bajo pytest) y un fixture autouse que aísla el canal NDJSON en tmp para no escribir nunca en el `data/wrapper_events/` real de la instalación, más un lector del canal tolerante a corrupción a nivel bytes (UTF-8 truncado por escritura interrumpida) con PBT de basura binaria, una suite del router WebSocket sin e2e ni httpx (ejercita la coroutine real con un WebSocket falso: handshake S3, canal ping/command/set_lang y registro de sockets limpio incluso si el cliente muere durante el init), la corrección del oráculo PBT de `console_lang` (un `set_lang` inválido es un no-op documentado, no una vuelta al inglés) y hermeticidad de los tests de arranque frente a un BDS externo real en la máquina, robustez del broadcast WebSocket del backend (`ServerManager._schedule_broadcast` es best-effort: un loop cerrado en la ventana de apagado ya no convierte cada `add_log`/`update_status` en un RuntimeError con corrutina huérfana; el lifespan resetea `manager.loop` al salir) con su suite de regresión, y cobertura de los gates del modo LAN opt-in (`GUI_ALLOW_LAN`: IPs privadas RFC1918 solo con la variable activa, loopback siempre, públicas nunca y anti-CSRF por puerto intacto) y del entrypoint LAN (`_resolver_host_gui` para GUI_HOST/GUI_ALLOW_LAN con fuente única `security._allow_lan`, `_resolver_puerto` acotado a 65535 e IPv6 en `_puerto_libre`) y una barrera de higiene i18n de consola (barrido AST sobre todos los sitios `L()`: el fallback inglés — idioma por defecto — sin residuos de español) (379 tests verdes; los 23 skipped requieren `httpx`/`websockets` o `bedrock_server.exe`).
 
@@ -157,7 +171,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 - Auto-deletes old backups (keeps the last 15 and 1 daily for a week).
 - Backup on server start and on server stop.
 - BDS updater with rollback: each update keeps the previous version, and if the new one breaks something you go back with one click.
-- Interactive `.bat` menus to restore the world easily (`02_restaurar_backup.bat`, `03_regresar_al_anterior.bat`).
+- Easy restore: from the GUI (restore/verify/delete) or with the interactive `python restore_backup.py` CLI. This installation's `.bat` shortcuts live in the local `backups/` folder and are not distributed with the repo.
 - Firewall port opener (`configurar_firewall.bat`; run it as administrator: without elevation it reports the failure instead of pretending success).
 - From the GUI: live command console, metrics, forced backup, restore/verify/delete backups and a card with your local/public IP to invite friends.
 
@@ -171,16 +185,15 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 | `server_wrapper.py` | Main script: reads the console, detects players, handles backups |
 | `backup_worker.py` | Compression worker in a separate process (subprocess, fast startup) |
 | `tools/bds_first_run.py` | Console first run: downloads BDS if missing (asks S/n) |
+| `tools/verify_backups.py` | CRC-checks every backup and marks corrupt ones as `_CORRUPTO` |
 | `auto_backup.py` | Zips the database |
 | `restore_backup.py` | Restores a backup |
 | `gui_frontend/` | React frontend (source + prebuilt `dist/`, ready to use) |
 | `web/` | Classic fallback GUI (no React) |
-| `01_hacer_backup.bat` | Manual backup with robocopy |
-| `02_restaurar_backup.bat` | Menu to restore a zip |
-| `03_regresar_al_anterior.bat` | Reverts to the latest backup in one click |
 | `configurar_firewall.bat` | Opens firewall ports (as administrator) |
 | `configurar_antivirus.bat` | Adds Windows Defender exclusions for the backups |
 | `tools/setup_defender_exclusions.ps1` | PowerShell exclusion script (asks for admin the first time) |
+| `requirements-dev.txt` | Development/test dependencies (pytest, hypothesis, httpx, pytest-cov) |
 | `server.properties.example` | Config template (copy to `server.properties`) |
 
 ### Slow initial startup and Windows Defender
@@ -196,6 +209,18 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 - **Manual GUI alternative**: *Windows Security → Virus & threat protection → Manage settings → Exclusions → Add or remove exclusions → Folder*.
 - **Without admin rights**: set `backup-inicio=false` in `server.properties` to skip the startup backup and rely on the periodic hot backups.
 
+### Troubleshooting
+
+- **The initial backup takes 3+ minutes**: apply the Windows Defender exclusions (previous section) or set `backup-inicio=false` in `server.properties`.
+- **`409 Hay una instancia externa del servidor en ejecución`**: a wrapper or BDS of THIS installation is running outside the GUI. Close it and retry; the probe compares the executable path, so a BDS from another folder does not block.
+- **Port 8000 is taken**: the GUI automatically jumps to the next free port and opens the browser there; to pin it, run `set GUI_PORT=8001` before starting.
+- **The GUI shows no players**: detections read the BDS log in English (`Player connected: ...`). Do not change the server language; if Mojang changes the format, players are lost but hot backups keep working.
+- **A backup does not show up for restore**: entries marked `_CORRUPTO`, `_EXCEDIDO` or `_CRASH` are hidden on purpose (same list in the GUI and the CLI).
+- **Where are the backups?**: outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`. The last 15 plus 1 daily for 7 days are kept (marked ones, 7 days as evidence).
+- **`Debes apagar el servidor antes de reestablecer un backup`**: restore requires BDS to be stopped; use the GUI or `python restore_backup.py`.
+- **Linux**: not supported (Mojang's BDS exists for Linux, but this suite is only tested on Windows).
+- **Do not run the e2e on a real installation**: `pytest -m e2e` touches `server.properties` and creates/deletes `worlds/TestWorld`.
+
 ### How to use
 
 1. You need Python 3.10+ installed.
@@ -207,11 +232,14 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 ### Tests
 
 ```bash
-pip install hypothesis pytest   # or .venv\Scripts\python -m pip install hypothesis pytest
+pip install -r requirements-dev.txt   # or .venv\Scripts\python -m pip install -r requirements-dev.txt
+python -m ruff check .                  # static lint (F/E9)
 python -m pytest tests -m "not e2e" -q   # excludes e2e (need live BDS, touches real world)
 # short alternative (also skips e2e when bedrock_server.exe missing):
 python -m pytest tests/ -q
 ```
+
+GitHub Actions runs this same suite (without e2e) on `windows-latest` for every push/PR of the public repo (`.github/workflows/tests.yml`, includes frontend lint).
 
 Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control, plus backup fault-injection suites (cancellation, double backup, incomplete snapshot, corrupt ZIP, rollback) and the hot-backup manual trigger state machine. Since the 2026-08-02 review it also includes fix regressions (immediate retry after an incomplete snapshot, snapshot validation by `level.dat`, clock-injectable retention, corrupt-backup filtering in the GUI, restore TOCTOU guard) and extra properties: stacked log prefixes, path idempotence/normalization and anti-drift consensus of the zip-slip guard across its copies. Since 2026-08-16 it adds suites for backup scheduling + watchdog, player management, SQLite history, BDS rollback and the wrapper NDJSON event channel. Since 2026-08-24 it adds security hardening (strict-port Origin, null-byte zip-slip, IPv6 Host), schedule/security PBTs, watchdog simulation with a fake wrapper process (no binary needed: crash → real relaunch → backoff), TTL-cached disk metrics, the migration of the old manual-style `tests/test_wrapper_logic.py` to real pytest tests (its parser regressions could never fail under pytest) and an autouse fixture that isolates the NDJSON event channel into tmp so the suite never writes to the installation's real `data/wrapper_events/`, plus a channel reader tolerant to byte-level corruption (truncated UTF-8 from an interrupted write) with binary-garbage PBT, a WebSocket router suite without e2e or httpx (exercises the real coroutine with a fake WebSocket: S3 handshake, ping/command/set_lang channel, and a clean socket registry even if the client dies during init), the fix of the `console_lang` PBT oracle (an invalid `set_lang` is a documented no-op, not a fallback to English) and hermetic start-path tests against a real external BDS running on the machine, backend WebSocket broadcast robustness (`ServerManager._schedule_broadcast` is best-effort: a closed loop during the shutdown window no longer turns every `add_log`/`update_status` into a RuntimeError with an orphaned coroutine; the lifespan resets `manager.loop` on exit) with its regression suite, and coverage of the opt-in LAN mode gates (`GUI_ALLOW_LAN`: RFC1918 private IPs only when the variable is set, loopback always, public never, port-based anti-CSRF intact) and of the LAN entrypoint (`_resolver_host_gui` for GUI_HOST/GUI_ALLOW_LAN with single source `security._allow_lan`, `_resolver_puerto` bounded at 65535, IPv6 support in `_puerto_libre`) and a console i18n hygiene barrier (AST sweep over every `L()` call site: the English fallback — the default language — carries no Spanish residue) (379 green tests; the 23 skipped require `httpx`/`websockets` or `bedrock_server.exe`).
 

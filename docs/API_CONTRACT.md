@@ -11,6 +11,8 @@ Este documento es la referencia para detectar regresiones de comportamiento.
 | `_ensure_local` (IP loopback: `127.0.0.1`, `::1`) | Todos los endpoints REST y el WS | REST: `403 {"detail": "Acceso denegado: solo conexiones locales"}`; WS: `close(1008)` |
 | `_check_origin` (header `Origin` local con el MISMO puerto del request, o ausente; anti-CSRF) | Solo endpoints de escritura y el WS | `403 {"detail": "Acceso denegado: origen no permitido"}`; WS: `close(1008)` |
 
+**Guarda temprana (middleware, 2026-09-10):** `create_app()` instala un middleware HTTP que aplica ambos guards a **todo** `/api/*` ANTES del routing y de la validación del body. Sin él, un cliente externo podía recibir un `422` de pydantic (p. ej. `POST /api/command` sin body) y enumerar rutas/esquema sin pasar por los guards internos. Los endpoints conservan sus propios chequeos (defensa en profundidad) y el WS valida en el handshake (no pasa por middleware HTTP). Cobertura anti-drift: `tests/test_router_guards.py` (inventario OpenAPI + `403` en todos los POST/GET de API con cliente externo u Origin externo).
+
 Endpoint solo con `_ensure_local` (lectura): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/connectivity`, `GET /`, `GET /favicon.svg`.
 Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
 
@@ -192,15 +194,17 @@ Cliente → servidor:
 
 | `type` | Payload | Efecto |
 |---|---|---|
-| `command` | `{"type":"command","command":"<str>"}` | Escribe en stdin del wrapper bajo `stdin_lock` (solo si corriendo) + log `> cmd` |
+| `command` | `{"type":"command","command":"<str>"}` | Escribe en stdin del wrapper bajo `stdin_lock` si el servidor corre; con el servidor apagado o el wrapper muerto añade 2 logs (echo `> cmd` + aviso) igual que `POST /api/command`, sin escribir a stdin |
 | `ping` | `{"type":"ping"}` | Latencia del frontend |
 | `set_lang` | `{"type":"set_lang","lang":"es|en"}` | Cambia `WRAPPER_LANG` en vivo |
 
 ## Invariantes de concurrencia (protegidas por tests, no modificar)
 
+- Guarda temprana: el middleware de `create_app()` aplica S1+S3 a `/api/*` antes de pydantic; los endpoints re-chequean (defensa en profundidad).
 - `manager.lock`: mutaciones/lecturas de `players_online` y `log_history`.
 - `manager.stdin_lock`: TODAS las escrituras a `wrapper_process.stdin` (API command, WS command, stop/restart/backup/update) — 6 sitios.
 - `manager.op_lock`: exclusión mutua de start/restore/update/backup frío/install.
+- Stop deliberado: `stop_requested` solo se marca DESPUÉS de entregar el `stop` por stdin (router stop, `restart_wrapper`, `stop_and_wait`); si el write falla, la operación se cancela sin inhibir al watchdog.
 - Eventos G8: `server_stopped_event` (BDS muerto) ≠ `wrapper_exit_event` (wrapper terminado, backup final incluido).
 - `SERVER_STOP_TIMEOUT_SEC=75`, `WRAPPER_EXIT_TIMEOUT_SEC=450`.
 - `manager` es un singleton global; nunca crear instancias por petición.
@@ -211,4 +215,4 @@ Cliente → servidor:
 - Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
 - `uvicorn.run("server_gui_server:app", host="127.0.0.1", ...)`.
 - Estáticos: `/assets` desde `gui_frontend/dist/assets` (si existe) y `/static` desde `web/`.
-- `lifespan`: `manager.loop`, `recover_interrupted_updates()`, `recover_interrupted_restores()` y bucle de métricas (2s, incluye la sonda de instancia externa).
+- `lifespan`: `manager.loop`, `recover_interrupted_updates()`, `recover_interrupted_restores()`, bucle de métricas (2s, incluye la sonda de instancia externa), `watchdog.start()` (hilo daemon opt-in; los tests lo neutralizan en `tests/conftest.py`) y `history.start()` (SQLite + precarga de logs).

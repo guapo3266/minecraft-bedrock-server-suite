@@ -15,8 +15,10 @@ wrapper_schedule.py              # Configuracion, persistencia y helpers diarios
 wrapper_backup.py                # Worker subprocess, hot backup y cancelacion
 zip_safety.py                    # Fuente unica anti-drift: _is_safe_zip_entry, _pack_dest,
                                  #   _extract_pack_entry, _quarantine_and_restore y CORRUPT_MARKERS
-server_gui_server.py            # Punto de entrada: create_app(), lifespan,
-                                #   estáticos, uvicorn, re-exports mínimos
+server_properties.py             # Lectura tolerante de server.properties (clave = valor,
+                                 #   comentarios #/;): fuente unica de los parsers de props
+server_gui_server.py            # Punto de entrada: create_app() (middleware de guarda
+                                #   temprana /api/*), lifespan, estáticos, uvicorn
 gui_backend/
   config.py                     # BASE_DIR, WEB_DIR, SERVER_EXE, PROPS_PATH,
                                 #   SETUP_MARKER, timeouts G8, constantes watchdog
@@ -231,6 +233,12 @@ vía `manager.add_log`.
   como fallo para el backoff (evita martillear el arranque cada poll).
   Cobertura sin binario: `tests/test_watchdog_simulacion.py` simula el wrapper
   con un Popen falso que pasa por la ruta real de arranque y el hilo lector.
+- **En tests el loop de fondo NO corre**: `tests/conftest.py` neutraliza
+  `watchdog.start` durante toda la suite (más un guard de las recuperaciones
+  del lifespan que apunta a la instalación real). El hilo daemon sobrevive a
+  los monkeypatches; si lee configs temporales de otro test con
+  `auto_restart_on_crash` podía lanzar wrappers REALES (backups reales, BDS,
+  409 espurios). No quitar esos fixtures: ver `docs/INFORME_REVIEW_2026-09-10.md` (F1).
 
 ## Convenciones para monkeypatching en tests
 
@@ -252,6 +260,12 @@ vía `manager.add_log`.
     `supervisor.py`, lectura bajo lock en `state.py`.
   - `test_gui_stdin_bajo_stdin_lock` → escaneo multi-archivo
     (`server_gui_server.py` + `gui_backend/**/*.py`).
+  - `test_watchdog_de_fondo_neutralizado_en_la_suite` → exige el fixture de
+    `tests/conftest.py` que desactiva el watchdog en tests (F1).
+- `test_web_classic_gui.py` → prohíbe interpolar datos en plantillas
+  `innerHTML` de `web/app.js` (los datos del servidor van con `textContent`).
+- `test_router_guards.py` → inventario OpenAPI de rutas POST/GET de API y 403
+  con cliente/Origin externos (la guarda temprana es middleware).
 - `test_console_lang_pbt.py` `L_PY_FILES` → lista explícita de archivos con
   llamadas `L(es, en)`; añadir ahí cualquier módulo nuevo con cadenas i18n.
 
@@ -262,7 +276,11 @@ vía `manager.add_log`.
   (`_resolver_puerto`: avisa una vez por puerto saltado y lanza `RuntimeError`
   al agotarse el rango — el `while` histórico era infinito si nada llegaba a
   enlazar). `_puerto_libre` soporta hosts IPv6 literales (`AF_INET6`).
-- `create_app()` monta `/assets` (build de Vite si existe) y `/static` (web/).
+- `create_app()` monta `/assets` (build de Vite si existe) y `/static` (web/),
+  e instala el **middleware de guarda temprana `/api/*`**: `_ensure_local` +
+  `_check_origin` antes del routing y de pydantic (un body inválido de cliente
+  externo da 403, no 422). Cobertura: `tests/test_router_guards.py` (inventario
+  OpenAPI anti-drift + probes).
 - `lifespan`: fija `manager.loop`, ejecuta `recover_interrupted_restores()` +
   `recover_interrupted_updates()`, precarga historial SQLite, arranca el bucle
   de métricas cada 2s (incluye sonda externa y persistencia cada 30s) y el

@@ -337,3 +337,58 @@ Fase 9     → Verificación N1 en PROD          [regresión: POST-FIX]
 | `01_hacer_backup.bat` | B03 |
 | `02_restaurar_backup.bat` | B04 |
 | `03_regresar_al_anterior.bat` | B05 |
+
+---
+
+## Ronda 2026-09-10 — determinismo, hermeticidad y tooling (F1-F7)
+
+Auditoría post-entrega sobre la suite completa (detalle en
+`docs/INFORME_REVIEW_2026-09-10.md`). Todos los cambios son de tests/docs/tooling;
+el código productivo no se tocó.
+
+| ID | Hallazgo | Severidad | Estado | Commit |
+|----|----------|-----------|--------|--------|
+| F1 | El hilo `gui-watchdog` sobrevivía a los tests y lanzaba wrappers reales (backups de 85 MB, 409 espurios, flakiness) | Alta | CORREGIDO | `6681385` |
+| F2 | 24 tests de GUI se saltaban en silencio sin `httpx` | Alta | CORREGIDO | `2c76591` |
+| F3 | 43 `open().read()` sin context manager en tests | Baja | CORREGIDO | `f25a476` |
+| F4 | El README anunciaba 3 `.bat` que no se distribuyen | Media | CORREGIDO | `0d0cb8d` |
+| F5 | `bedrock_server_how_to.html` (Mojang) versionado | Media | CORREGIDO | `3bcb082` |
+| F6 | Basura local sin ignorar (`.playwright-mcp/`, QR) | Baja | CORREGIDO | `7955a09` |
+| F7 | Sin CI ni `requirements-dev.txt` | Media | CORREGIDO | `f25a476` + docs |
+
+> F1 incluye dos falsos fallos de oráculos PBT destapados por la base de
+> ejemplos de Hypothesis (`_ensure_local` con `localhost` y
+> `valid_world_relative_path` con `WORLDS`), corregidos en `6681385` y
+> `2018a79`.
+
+**Verificación:** 427 passed, 2 deselected (e2e), 10/10 corridas consecutivas;
+0 artefactos nuevos en `Backups_Minecraft/` ni en `data/wrapper_events/`.
+
+### Parte 2 (mismo día) — mejoras prácticas
+
+Detalle en `docs/INFORME_RONDA2_2026-09-10.md`. Todos con verificación y commit
+propio: hermeticidad de recoveries en tests (`fb54ced`), guard de restore CLI
+por instalación (`1ae5ff9`), **middleware de guarda temprana `/api/*` +
+`test_router_guards.py`** (`253b839`), sanidad de ZIP vacío/sin `level.dat`
+(`b7f26c0`), CI con permisos mínimos + lint de frontend (`4585d22`), feedback
+del WS apagado (`21de1d1`), `textContent` en la GUI clásica (`7ac4e25`), stop
+honesto en lifecycle (`657061d`), docs/contratos (`7674db9`), mensaje ENOSPC +
+uso del worker (`4c1dbbb`), i18n de `tools/` con guard anti-drift (`cead3ea`),
+URL IPv6 + firewall privado (`7b711c0`).
+
+**Verificación Parte 2:** 478 passed, 2 deselected, 10/10 corridas consecutivas;
+smoke real con uvicorn (403 de Origin externo y de body inválido, status/index/
+backups 200) y 0 artefactos nuevos.
+
+### Parte 3 — sesión extendida (mismo día)
+
+Detalle en `docs/INFORME_RONDA3_2026-09-10.md` (23 commits). Bloques: lint
+estático con ruff + limpieza de código muerto; cobertura del CLI de
+restauración (22→70%), scheduler del wrapper, apagado/consola, zip_safety,
+lifespan/broadcast, setup/properties y updater; lector tolerante de
+`server.properties`; límite anti zip-bomb al restaurar; resultado atómico del
+worker; `tools/verify_backups.py`; troubleshooting en README.
+
+**Verificación Parte 3:** 702 passed, 2 deselected, 0 skips; 10/10 corridas
+consecutivas + base de Hypothesis fresca; `ruff check` limpio; smoke real con
+uvicorn; 0 artefactos nuevos.
