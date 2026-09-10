@@ -47,7 +47,7 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
           (data.totals || []).forEach((x) => { map[x.player] = x.total_sec; });
           setSessionTotals(map);
         }
-      } catch (e) {
+      } catch {
         /* historial opcional */
       }
     })();

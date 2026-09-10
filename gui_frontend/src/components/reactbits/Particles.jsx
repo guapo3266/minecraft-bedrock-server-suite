@@ -100,6 +100,9 @@ export default function Particles({
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', handleMouseMove);
     };
+    // particleColors por defecto es un array nuevo en cada render: incluirlo
+    // en las deps reiniciaria todas las particulas continuamente.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [particleCount]);
 
   return <canvas ref={canvasRef} className={`fixed inset-0 pointer-events-none z-0 ${className}`} />;

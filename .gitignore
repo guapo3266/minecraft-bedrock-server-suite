@@ -2,15 +2,17 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 .venv/
 venv/
 
 # ── Herramienta local (no es parte del proyecto) ────────
 .codewhale/
 .zcode/
-
-# ── Instrucciones locales para agentes (cada carpeta tiene la suya) ──
-AGENTS.md
+.playwright-mcp/
+whatsapp-web-qr.png
 
 # ── Datos del servidor (privados y/o pesados) ───────────
 worlds/
@@ -30,6 +32,13 @@ bedrock_server.exe
 bedrock_server.pdb
 bedrock_server_symbols.pdb
 bds_update.zip
+# Staging/resguardos transitorios del updater: si un crash los deja, no deben
+# aparecer en git status (el lifespan los recupera al siguiente arranque).
+bds_update_staging/
+bds_update_prev_*/
+# Doc oficial que viaja en el zip de BDS: no se redistribuye en el repo
+# (el archivo local se conserva; el disclaimer del README lo exige).
+bedrock_server_how_to.html
 
 # ── Config del servidor (contiene datos locales) ────────
 server.properties
@@ -49,3 +58,4 @@ archived/
 # ── Herramientas externas / generados pesados ────────────
 static_analysis_semgrep_*/
 gui_frontend/node_modules/
+tools/gui_e2e_home.png

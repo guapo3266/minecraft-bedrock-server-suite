@@ -319,11 +319,17 @@ export default function App() {
     }
 
     try {
-      await fetch('/api/command', {
+      const res = await fetch('/api/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ command })
       });
+      // Mismo criterio que los demas handlers: un rechazo HTTP (403/500) debe
+      // verse en la consola, no quedar en silencio.
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        pushLog(makeLog(tRef.current('commandError', { err: data.detail || res.statusText }), 'error'));
+      }
     } catch (e) {
       pushLog(makeLog(tRef.current('commandError', { err: e }), 'error'));
     }

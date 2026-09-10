@@ -27,6 +27,9 @@ export default function CountUp({ to, duration = 1, decimals = 0, className = ""
     };
 
     requestAnimationFrame(step);
+    // count es el valor de arranque de la animacion; agregarlo a las deps
+    // reiniciaria la animacion en cada frame.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [to, duration]);
 
   return <span className={className}>{count.toFixed(decimals)}</span>;

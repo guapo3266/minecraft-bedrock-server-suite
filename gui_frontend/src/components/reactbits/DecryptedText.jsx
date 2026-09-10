@@ -9,8 +9,7 @@ export default function DecryptedText({
   speed = 40, 
   maxIterations = 10, 
   sequential = true, 
-  className = "",
-  animateOnMount = true
+  className = ""
 }) {
   const [displayText, setDisplayText] = useState(text);
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*';

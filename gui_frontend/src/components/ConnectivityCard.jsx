@@ -11,7 +11,7 @@ function CopyButton({ value, label, copiedLabel }) {
       await navigator.clipboard.writeText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
+    } catch {
       // clipboard no disponible: sin accion
     }
   };

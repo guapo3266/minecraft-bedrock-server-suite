@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
  * Magnet — ReactBits Component (.jsx)
  * Wrapper con animación elástica de atracción magnética hacia el cursor.
  */
-export default function Magnet({ children, padding = 100, disabled = false, className = "" }) {
+export default function Magnet({ children, disabled = false, className = "" }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const ref = useRef(null);
 

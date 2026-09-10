@@ -33,7 +33,7 @@ export default function HardwareMeter({ hardware, running, version }) {
         const res = await fetch(`/api/history/metrics?hours=${range}`);
         const data = await res.json();
         if (!cancelled && Array.isArray(data.points)) setPoints(data.points);
-      } catch (e) {
+      } catch {
         /* historial opcional: sin el, la GUI funciona igual */
       }
     };

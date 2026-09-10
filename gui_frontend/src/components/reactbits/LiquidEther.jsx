@@ -25,9 +25,7 @@ export default function LiquidEther({
 }) {
   const mountRef = useRef(null);
   const webglRef = useRef(null);
-  const resizeObserverRef = useRef(null);
   const rafRef = useRef(null);
-  const intersectionObserverRef = useRef(null);
   const isVisibleRef = useRef(true);
   const resizeRafRef = useRef(null);
 
@@ -168,7 +166,7 @@ export default function LiquidEther({
         this.docTarget = null;
         this.container = null;
       }
-      isPointInside(clientX, clientY) {
+      isPointInside(_clientX, _clientY) {
         return true;
       }
       updateHoverState(clientX, clientY) {
@@ -995,7 +993,7 @@ export default function LiquidEther({
             Common.renderer.dispose();
             Common.renderer.forceContextLoss();
           }
-        } catch (e) {
+        } catch {
           void 0;
         }
       }
@@ -1056,21 +1054,13 @@ export default function LiquidEther({
       });
     });
     ro.observe(container);
-    resizeObserverRef.current = ro;
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (resizeObserverRef.current) {
+      if (ro) {
         try {
-          resizeObserverRef.current.disconnect();
-        } catch (e) {
-          void 0;
-        }
-      }
-      if (intersectionObserverRef.current) {
-        try {
-          intersectionObserverRef.current.disconnect();
-        } catch (e) {
+          ro.disconnect();
+        } catch {
           void 0;
         }
       }

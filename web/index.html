@@ -11,7 +11,7 @@
 </head>
 <body>
   <!-- Canvas de fondo para partículas interactivas estilo ReactBits -->
-  <canvas id="particles-canvas"></canvas>
+  <canvas id="particles-canvas" aria-hidden="true"></canvas>
 
   <div class="app-container">
     <!-- Encabezado con DecryptedText y Status Badge -->
@@ -120,7 +120,7 @@
 
         <form id="command-form" class="command-bar">
           <span class="prompt-symbol">&gt;</span>
-          <input type="text" id="command-input" placeholder="Escribe un comando de Minecraft (ej: op player, say Hola, list)..." autocomplete="off" />
+          <input type="text" id="command-input" aria-label="Comando de consola de Minecraft" placeholder="Escribe un comando de Minecraft (ej: op player, say Hola, list)..." autocomplete="off" />
           <button type="submit" class="btn-send">Enviar</button>
         </form>
 

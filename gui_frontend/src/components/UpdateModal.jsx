@@ -17,7 +17,7 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
 
   return (
     <div>
-      <Modal onClose={onClose} label={t('updaterTitle')} className="max-w-lg border-emerald-500/40 overflow-hidden">
+      <Modal onClose={onClose} label={t('updaterTitle')} className="max-w-lg border-emerald-500/40 flex max-h-[85vh] flex-col overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
             <div className="flex items-center gap-3">
@@ -34,8 +34,9 @@ export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpda
             </button>
           </div>
 
-          {/* Body Content */}
-          <div className="my-6 space-y-4">
+          {/* Body Content (mismo patron que Schedule/Props: scroll interno
+              cuando el viewport es chico) */}
+          <div className="my-4 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
             {versionUnavailable ? (
               <TiltCard>
                 <SpotlightCard spotlightColor="rgba(245, 158, 11, 0.2)">

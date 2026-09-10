@@ -237,11 +237,16 @@ function renderPlayersList(players) {
   players.forEach(p => {
     const li = document.createElement('li');
     li.className = 'player-item';
-    const initial = p.charAt(0).toUpperCase();
-    li.innerHTML = `
-      <div class="player-avatar">${initial}</div>
-      <span class="player-name">${p}</span>
-    `;
+    // textContent (nunca innerHTML) para datos del servidor: un nombre con
+    // caracteres HTML no debe interpretarse como markup.
+    const avatar = document.createElement('div');
+    avatar.className = 'player-avatar';
+    avatar.textContent = (p || '?').charAt(0).toUpperCase();
+    const name = document.createElement('span');
+    name.className = 'player-name';
+    name.textContent = p;
+    li.appendChild(avatar);
+    li.appendChild(name);
     playersListEl.appendChild(li);
   });
 }
@@ -260,12 +265,17 @@ async function fetchBackupsList() {
     data.backups.slice(0, 8).forEach(b => {
       const item = document.createElement('div');
       item.className = 'backup-item';
-      item.innerHTML = `
-        <div>
-          <strong style="color: #fff;">${b.filename}</strong>
-          <div style="color: var(--text-muted); font-size: 0.75rem;">${b.date} &bull; ${b.size_mb} MB</div>
-        </div>
-      `;
+      const info = document.createElement('div');
+      const strong = document.createElement('strong');
+      strong.style.color = '#fff';
+      strong.textContent = b.filename;  // textContent: dato del servidor
+      const meta = document.createElement('div');
+      meta.style.color = 'var(--text-muted)';
+      meta.style.fontSize = '0.75rem';
+      meta.textContent = `${b.date} • ${b.size_mb} MB`;
+      info.appendChild(strong);
+      info.appendChild(meta);
+      item.appendChild(info);
       backupsListEl.appendChild(item);
     });
   } catch (e) {

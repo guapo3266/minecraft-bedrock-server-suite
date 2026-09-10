@@ -1,0 +1,14 @@
+# Configuracion de ruff (linter estatico). Solo reglas de correccion:
+# pyflakes (F) y errores de sintaxis (E9). No se aplican reglas de estilo.
+#
+# Uso: python -m ruff check .
+# CI: paso "Lint estatico" del job pytest.
+
+[lint]
+select = ["F", "E9"]
+
+[lint.per-file-ignores]
+# server_wrapper.py es la fachada de compatibilidad: re-exporta nombres que
+# tests y gui_backend importan desde ahi (documentado en el propio modulo).
+# No son imports muertos; no eliminar sin actualizar todos los consumidores.
+"server_wrapper.py" = ["F401"]
