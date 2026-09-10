@@ -14,6 +14,12 @@ venv/
 .playwright-mcp/
 whatsapp-web-qr.png
 
+# ── Rulesets locales (no se publican) ────────────────────
+# AGENTS.md está trackeado en el repo de desarrollo (esta carpeta es la
+# fuente), pero en los destinos cada carpeta tiene el suyo y no debe entrar
+# al repo público. Este ignore se hereda por la copia del .gitignore.
+AGENTS.md
+
 # ── Datos del servidor (privados y/o pesados) ───────────
 worlds/
 backups/
