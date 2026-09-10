@@ -29,12 +29,18 @@ echo       URL local: http://127.0.0.1:%GUI_PORT%
 for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do (
     for /f "tokens=1" %%b in ("%%a") do set LAN_IP=%%b
 )
-if defined LAN_IP echo       URL en movil: http://%LAN_IP%:%GUI_PORT%  (misma WiFi)
+if defined LAN_IP (
+    echo       URL en movil: http://%LAN_IP%:%GUI_PORT%  ^(misma WiFi^)
+) else (
+    echo       [AVISO] No se pudo detectar la IP local; usa "ipconfig" para verla.
+)
 echo.
 echo [LAN] Intentando abrir puerto %GUI_PORT% en Firewall de Windows...
 netsh advfirewall firewall show rule name="Minecraft GUI LAN" >nul 2>&1
 if errorlevel 1 (
-    netsh advfirewall firewall add rule name="Minecraft GUI LAN" dir=in action=allow protocol=TCP localport=%GUI_PORT% >nul 2>&1
+    rem profile=private: la GUI LAN no tiene autenticacion; la regla no debe
+    rem abrir el puerto en redes Publicas/Dominio, solo en la red de confianza.
+    netsh advfirewall firewall add rule name="Minecraft GUI LAN" dir=in action=allow protocol=TCP localport=%GUI_PORT% profile=private >nul 2>&1
     if not errorlevel 1 (
         echo [LAN] Regla de firewall creada: permite TCP %GUI_PORT% (solo red privada)
     ) else (
@@ -104,7 +110,11 @@ if not exist "gui_frontend\dist\index.html" (
 
 echo.
 echo [3/3] Iniciando servidor FastAPI en modo LAN (0.0.0.0:%GUI_PORT%)...
-echo       Abre en tu movil: http://%LAN_IP%:%GUI_PORT%
+if defined LAN_IP (
+    echo       Abre en tu movil: http://%LAN_IP%:%GUI_PORT%
+) else (
+    echo       [AVISO] IP local no detectada: mira "ipconfig" y abre http://TU_IP:%GUI_PORT%
+)
 echo       (Debe estar en la misma WiFi que este PC)
 echo.
 "%RUN_PY%" server_gui_server.py

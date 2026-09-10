@@ -35,6 +35,24 @@ _PACK_ZIP_PREFIX = PACK_ZIP_PREFIX
 CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO", "_CRASH", "_crash")
 _CORRUPT_MARKERS = CORRUPT_MARKERS
 
+# Tope de expansion al RESTAURAR (defensa ante zip-bomb o backup corrupto):
+# el limite de creacion (auto_backup.MAX_BACKUP_BYTES) es 10 GB SIN comprimir,
+# asi que 20 GB da margen de sobra para mundos legitimos.
+MAX_RESTORE_UNCOMPRESSED_BYTES = 20 * 1024**3
+
+
+def _exceeds_expansion_limit(infos, max_bytes=MAX_RESTORE_UNCOMPRESSED_BYTES):
+    """True si la suma declarada de tamaños sin comprimir supera `max_bytes`."""
+    total = 0
+    for info in infos:
+        try:
+            total += int(info.file_size)
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if total > max_bytes:
+            return True
+    return False
+
 
 def _is_safe_zip_entry(filename: str) -> bool:
     """True si la entrada del zip es segura para extraer (anti zip-slip).

@@ -1,5 +1,6 @@
 import os
 import datetime
+import errno
 import zipfile
 import glob
 import multiprocessing
@@ -13,6 +14,7 @@ from zip_safety import (
     _pack_dest,
     _quarantine_and_restore,
     _extract_pack_entry,
+    _exceeds_expansion_limit,
     CORRUPT_MARKERS,
 )
 import zip_safety as _zip_safety
@@ -40,18 +42,11 @@ SERVER_NAME = os.path.basename(os.path.normpath(BASE_DIR))
 
 def get_world_name(base_dir=None):
     bdir = base_dir or BASE_DIR
-    props_path = os.path.join(bdir, "server.properties")
-    if os.path.exists(props_path):
-        try:
-            with open(props_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("level-name="):
-                        val = line.split("=", 1)[1].strip()
-                        if val:
-                            return val
-        except Exception:
-            pass
+    from server_properties import read_value
+
+    val = read_value(os.path.join(bdir, "server.properties"), "level-name")
+    if val:
+        return val
     return "Bedrock level"
 
 
@@ -342,6 +337,27 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     L("Snapshot sin descriptores de base de datos LevelDB (CURRENT/MANIFEST); snapshot incompleto.", "Snapshot missing LevelDB database descriptors (CURRENT/MANIFEST); incomplete snapshot.")
                 )
 
+        # Aviso temprano de disco (no bloqueante): el ZIP comprime, pero si el
+        # espacio libre es menor que el snapshot sin comprimir conviene saberlo
+        # antes de empezar. El fallo real por ENOSPC ya tiene su propio mensaje.
+        if use_snapshot:
+            try:
+                estimado = sum(
+                    item[1] for item in file_snapshot
+                    if isinstance(item, (tuple, list)) and len(item) == 2
+                    and isinstance(item[1], int) and item[1] > 0
+                )
+                libre = shutil.disk_usage(backup_dir).free
+                if 0 < libre < estimado:
+                    print(L(
+                        f"[WARN] Espacio libre ({libre / (1024**3):.2f} GB) menor que el snapshot "
+                        f"({estimado / (1024**3):.2f} GB sin comprimir); el ZIP comprime, pero revisa el disco.",
+                        f"[WARN] Free space ({libre / (1024**3):.2f} GB) is below the snapshot "
+                        f"({estimado / (1024**3):.2f} GB uncompressed); the ZIP compresses, but check the disk.",
+                    ))
+            except OSError:
+                pass
+
         with zipfile.ZipFile(tmp_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             total_bytes = 0
             if use_snapshot:
@@ -455,6 +471,23 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 # Packs de nivel servidor (mods/addons) tambien van al backup
                 total_bytes = _write_server_packs(zipf, total_bytes, cancel_event)
 
+        # Sanidad post-escritura antes de publicar: un ZIP vacio (p. ej. mundo
+        # sin archivos comprimibles) o sin level.dat no debe llegar a BACKUP_DIR
+        # como si fuera un backup valido. Leer la central directory es barato:
+        # no descomprime nada.
+        with zipfile.ZipFile(tmp_filepath, "r") as _zip_check:
+            _zip_names = _zip_check.namelist()
+        if not _zip_names:
+            raise RuntimeError(L(
+                "El ZIP de backup quedo vacio; no se publica.",
+                "The backup ZIP came out empty; not publishing it.",
+            ))
+        if use_snapshot and "level.dat" not in _zip_names:
+            raise RuntimeError(L(
+                "El ZIP de backup en caliente no contiene level.dat; no se publica.",
+                "The hot backup ZIP does not contain level.dat; not publishing it.",
+            ))
+
         if _cancelled(cancel_event):
             raise RuntimeError(L("Backup cancelado antes de publicar ZIP.", "Backup cancelled before publishing ZIP."))
 
@@ -472,6 +505,13 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         except Exception as e:
             print(L(f"[WARN] Fallo en rotacion de backups: {e}", f"[WARN] Backup rotation failed: {e}"))
     except Exception as e:
+        if isinstance(e, OSError) and getattr(e, "errno", None) == errno.ENOSPC:
+            print(L(
+                "[ERROR] Disco lleno durante el backup: libera espacio (o revisa la "
+                "retencion de backups) y reintenta; el .tmp se limpia solo.",
+                "[ERROR] Disk full during backup: free up space (or check backup "
+                "retention) and retry; the .tmp is cleaned up automatically.",
+            ))
         print(L(f"[ERROR] No se pudo crear el backup: {e}", f"[ERROR] Could not create the backup: {e}"))
         if isinstance(e, SnapshotDesyncError):
             # Snapshot desincronizado/incompleto: merece reintento (un nuevo
@@ -625,6 +665,11 @@ def restore_backup(filename):
         bad = zf.testzip()
         if bad is not None:
             raise ValueError(L(f"Backup corrupto (CRC fallido): {bad}", f"Corrupt backup (CRC failed): {bad}"))
+        if _exceeds_expansion_limit(zf.infolist()):
+            raise ValueError(L(
+                "Backup rechazado: su tamaño descomprimido excede el limite de seguridad.",
+                "Backup rejected: its uncompressed size exceeds the safety limit.",
+            ))
 
     nonce = os.urandom(4).hex()
     world_staging = active_world_dir + f".restore_staging_{nonce}"

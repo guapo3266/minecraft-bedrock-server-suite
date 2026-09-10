@@ -14,6 +14,7 @@ from zip_safety import (
     _pack_dest,
     _extract_pack_entry,
     _quarantine_and_restore,
+    _exceeds_expansion_limit,
     CORRUPT_MARKERS,
 )
 import zip_safety as _zip_safety
@@ -32,18 +33,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def _world_name(base_dir=None):
     """Nombre del nivel desde server.properties (misma regla que auto_backup)."""
     bdir = base_dir or BASE_DIR
-    props_path = os.path.join(bdir, "server.properties")
-    if os.path.exists(props_path):
-        try:
-            with open(props_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("level-name="):
-                        val = line.split("=", 1)[1].strip()
-                        if val:
-                            return val
-        except Exception:
-            pass
+    from server_properties import read_value
+
+    val = read_value(os.path.join(bdir, "server.properties"), "level-name")
+    if val:
+        return val
     return "Bedrock level"
 
 
@@ -91,6 +85,8 @@ def _validate_backup(zip_path: str):
         bad = zipf.testzip()
         if bad is not None:
             raise ValueError(f"Backup corrupto (CRC fallido): {bad}")
+        if _exceeds_expansion_limit(zipf.infolist()):
+            raise ValueError("Backup rechazado: su tamano descomprimido excede el limite de seguridad.")
 
 
 def _list_backup_files(backup_dir):
@@ -106,23 +102,42 @@ def _list_backup_files(backup_dir):
 
 
 def _server_is_running():
-    """H3: True si bedrock_server.exe esta en ejecucion.
+    """True si bedrock_server.exe DE ESTA INSTALACION esta en ejecucion.
 
-    Fail-closed: sin psutil no se puede comprobar que BDS esté parado,
-    así que se asume en ejecución para abortar la restauración antes de
-    tocar el mundo (restaurar con BDS vivo lo pisaría en uso).
+    H3: escopado por la ruta del ejecutable (misma regla que la sonda de la
+    GUI en gui_backend/services/external_probe.py): un BDS de otra instalacion
+    no debe vetar la restauracion de esta.
+
+    Fail-closed (operacion destructiva):
+      - sin psutil no se puede comprobar -> True;
+      - si no se puede leer la ruta de un proceso bedrock_server.exe
+        (AccessDenied, p. ej. elevado) no se puede descartar que sea el nuestro
+        -> True;
+      - si el listado de procesos falla -> True.
     """
     if psutil is None:
         return True
+    target_exe = os.path.normcase(os.path.abspath(
+        os.path.join(BASE_DIR, "bedrock_server.exe")
+    ))
     try:
         for p in psutil.process_iter(["name"]):
             try:
-                if p.info.get("name") and p.info["name"].lower() == "bedrock_server.exe":
+                name = (p.info.get("name") or "").lower()
+                if name != "bedrock_server.exe":
+                    continue
+                try:
+                    exe = os.path.normcase(os.path.abspath(p.exe()))
+                except psutil.AccessDenied:
+                    return True  # no se puede descartar que sea el nuestro
+                except psutil.NoSuchProcess:
+                    continue
+                if exe == target_exe:
                     return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     except Exception:
-        return False
+        return True  # ante la duda, no tocar el mundo
     return False
 
 
@@ -183,7 +198,7 @@ def list_and_restore():
         return
 
     print("\n" + "=" * 60)
-    print(f"  ATENCION: Se restaurara el backup:")
+    print("  ATENCION: Se restaurara el backup:")
     print(f"  {os.path.basename(selected_zip)}")
     print("  El mundo actual sera reemplazado con este punto de restauracion.")
     print("=" * 60)
@@ -215,7 +230,6 @@ def list_and_restore():
                 world_infos.append(entry)
 
     active_world_dir = get_world_dir()
-    active_backup_dir = get_backup_dir()
 
     nonce = os.urandom(4).hex()
     world_staging = active_world_dir + f".restore_staging_{nonce}"

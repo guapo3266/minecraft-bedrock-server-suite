@@ -3,14 +3,13 @@
 import os
 import re
 import threading
-import time
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 import auto_backup
 from console_lang import L
-from gui_backend import config, supervisor
+from gui_backend import config
 from gui_backend.security import _ensure_local, _check_origin
 from gui_backend.services import bds_update as bds_update_service
 from gui_backend.services import lifecycle as lifecycle_service

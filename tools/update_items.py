@@ -3,6 +3,25 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+def write_text_atomic(path, text):
+    """Escritura atomica (tmp + os.replace): un corte a mitad no trunca el
+    archivo original (mismo patron que update_items_v2/enable_beta_apis_v2)."""
+    tmp_path = path + ".tmp_" + os.urandom(4).hex()
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 def update_json_file(file_path, modify_func):
     if not os.path.exists(file_path):
         print(f"File not found: {file_path}")
@@ -10,8 +29,7 @@ def update_json_file(file_path, modify_func):
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     modify_func(data)
-    with open(file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    write_text_atomic(file_path, json.dumps(data, indent=2, ensure_ascii=False))
     print(f"Updated {file_path}")
 
 # 1. Modify item JSONs

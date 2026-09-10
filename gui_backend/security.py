@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
-from zip_safety import _is_safe_zip_entry
+from zip_safety import _is_safe_zip_entry  # noqa: F401  (re-export: lo importa bds_update)
 
 
 def _allow_lan() -> bool:

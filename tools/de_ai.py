@@ -34,6 +34,26 @@ replacements = [
 ]
 
 repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _write_text_atomic(path, text):
+    """Escritura atomica (tmp + os.replace): este script reescribe fuentes de
+    produccion; un corte a mitad no debe truncarlas."""
+    tmp_path = path + ".tmp_" + os.urandom(4).hex()
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 for filename in files_to_process:
     filepath = os.path.join(repo_dir, filename)
     if not os.path.exists(filepath):
@@ -51,7 +71,6 @@ for filename in files_to_process:
         else:
             content = re.sub(pattern, replacement, content)
             
-    with open(filepath, 'w', encoding='utf-8') as f:
-        f.write(content)
+    _write_text_atomic(filepath, content)
 
 print('Hecho')

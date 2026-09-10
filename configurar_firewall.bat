@@ -4,10 +4,23 @@ echo  Configurando Firewall para Minecraft Bedrock
 echo ============================================
 echo.
 
-netsh advfirewall firewall add rule name="Minecraft Bedrock Server UDP" dir=in action=allow protocol=UDP localport=19132,19133
-if errorlevel 1 goto :fw_error
-netsh advfirewall firewall add rule name="Minecraft Bedrock Server TCP" dir=in action=allow protocol=TCP localport=19132,19133
-if errorlevel 1 goto :fw_error
+rem Idempotente: si la regla ya existe no se duplica (reiniciar dos veces no
+rem acumula reglas repetidas en el firewall de Windows).
+netsh advfirewall firewall show rule name="Minecraft Bedrock Server UDP" >nul 2>&1
+if errorlevel 1 (
+    netsh advfirewall firewall add rule name="Minecraft Bedrock Server UDP" dir=in action=allow protocol=UDP localport=19132,19133
+    if errorlevel 1 goto :fw_error
+) else (
+    echo [INFO] La regla UDP ya existe.
+)
+
+netsh advfirewall firewall show rule name="Minecraft Bedrock Server TCP" >nul 2>&1
+if errorlevel 1 (
+    netsh advfirewall firewall add rule name="Minecraft Bedrock Server TCP" dir=in action=allow protocol=TCP localport=19132,19133
+    if errorlevel 1 goto :fw_error
+) else (
+    echo [INFO] La regla TCP ya existe.
+)
 
 echo.
 echo ============================================

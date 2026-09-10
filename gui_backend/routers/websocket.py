@@ -4,7 +4,7 @@ import json
 
 from fastapi import APIRouter, WebSocket
 
-from console_lang import set_lang as _set_lang
+from console_lang import L, set_lang as _set_lang
 from gui_backend.security import _get_request_port, _is_allowed_client_host, _is_allowed_origin
 from gui_backend.state import manager, build_public_status
 
@@ -56,18 +56,33 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = json.loads(data)
                 if msg.get("type") == "command":
                     cmd = msg.get("command", "").strip()
-                    if cmd and manager.is_running and manager.wrapper_process:
-                        # 'stop' en consola apaga el wrapper entero: es un stop
-                        # deliberado y debe marcar stop_requested (igual que
-                        # /api/command) o el watchdog lo tomara por crash y
-                        # re-lanzara el servidor que el usuario acaba de parar.
-                        # Se compara por LINEA: "list\nstop" tambien apaga.
-                        if "stop" in {l.strip().lower() for l in cmd.splitlines()}:
-                            manager.stop_requested = True
-                        with manager.stdin_lock:
-                            manager.wrapper_process.stdin.write(cmd + "\n")
-                            manager.wrapper_process.stdin.flush()
+                    if not cmd:
+                        continue
+                    wrapper_alive = bool(
+                        manager.wrapper_process
+                        and manager.wrapper_process.poll() is None
+                    )
+                    if not manager.is_running or not wrapper_alive:
+                        # Mismo feedback que el POST /api/command: el usuario ve
+                        # por que su comando no hace nada (antes se descartaba
+                        # en silencio y la consola parecia rota).
                         manager.add_log(f"> {cmd}", "command")
+                        manager.add_log(L(
+                            "[SISTEMA] El servidor de Minecraft está APAGADO. Presiona '▶ Iniciar Servidor' primero.",
+                            "[SISTEMA] The Minecraft server is OFF. Press '▶ Start Server' first.",
+                        ), "error")
+                        continue
+                    # 'stop' en consola apaga el wrapper entero: es un stop
+                    # deliberado y debe marcar stop_requested (igual que
+                    # /api/command) o el watchdog lo tomara por crash y
+                    # re-lanzara el servidor que el usuario acaba de parar.
+                    # Se compara por LINEA: "list\nstop" tambien apaga.
+                    if "stop" in {l.strip().lower() for l in cmd.splitlines()}:
+                        manager.stop_requested = True
+                    with manager.stdin_lock:
+                        manager.wrapper_process.stdin.write(cmd + "\n")
+                        manager.wrapper_process.stdin.flush()
+                    manager.add_log(f"> {cmd}", "command")
                 elif msg.get("type") == "ping":
                     # Medición real de latencia del frontend
                     await websocket.send_json({"type": "pong"})

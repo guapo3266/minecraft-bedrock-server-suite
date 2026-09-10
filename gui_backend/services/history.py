@@ -196,6 +196,13 @@ def sweep(now=None):
                 "DELETE FROM sessions WHERE started_ts < ?",
                 (int(now - SESSIONS_RETENTION_DAYS * 86400),),
             )
+            # El borrado libera paginas dentro del archivo pero el WAL puede
+            # quedar grande; un checkpoint TRUNCATE 1 vez al dia lo devuelve al
+            # tamaño minimo (best-effort: si otro lector lo bloquea, no pasa nada).
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass
     except sqlite3.Error:
         pass
 

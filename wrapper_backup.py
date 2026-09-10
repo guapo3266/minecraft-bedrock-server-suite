@@ -81,7 +81,8 @@ class _FileCancelEvent:
 
     def set(self):
         try:
-            open(self.path, "w").close()
+            with open(self.path, "w"):
+                pass
         except Exception:
             pass
 
@@ -123,6 +124,36 @@ def _force_kill_compress_process(proc):
             pass
 
 
+class _WorkerProcess:
+    """Adaptador del Popen del worker a la API que usa el ciclo (is_alive/join).
+
+    Antes se monkeypatcheaban metodos sobre la instancia de Popen (asignar
+    `comp_proc.is_alive`/`join`); el adaptador evita mutar objetos de la stdlib
+    y deja un unico tipo para `active_compress_process`.
+    """
+
+    def __init__(self, proc):
+        self._proc = proc
+
+    def is_alive(self):
+        return self._proc.poll() is None
+
+    def join(self, timeout=None):
+        try:
+            self._proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            pass
+
+    def kill(self):
+        self._proc.kill()
+
+    def wait(self, timeout=None):
+        return self._proc.wait(timeout=timeout)
+
+    def __getattr__(self, name):
+        return getattr(self._proc, name)
+
+
 def execute_backup_worker(file_snapshot=None, cancel_event=None):
     """Hilo efimero que orquesta el proceso de compresion de Bedrock."""
     outcome = "exception"
@@ -153,20 +184,11 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                 _json.dump(file_snapshot, _f, ensure_ascii=False)
             if cancel_event is not None and hasattr(cancel_event, "path"):
                 _marker = cancel_event.path
-            comp_proc = subprocess.Popen(
+            comp_proc = _WorkerProcess(subprocess.Popen(
                 [sys.executable, "-u", _worker, _snap_path, _marker, _result],
                 cwd=_base,
                 stdin=subprocess.DEVNULL,
-            )
-            comp_proc.is_alive = lambda: comp_proc.poll() is None
-
-            def _join(timeout=None):
-                try:
-                    comp_proc.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    pass
-
-            comp_proc.join = _join
+            ))
         except Exception as e:
             print(L(f"[Worker] [WARN] No se pudo lanzar el worker: {e}", f"[Worker] [WARN] Could not launch the worker: {e}"))
             for _p in (_snap_path, _marker, _result):

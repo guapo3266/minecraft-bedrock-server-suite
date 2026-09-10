@@ -1,8 +1,10 @@
 """Test E2E de la GUI (webapp-testing): carga, consola, WS, métricas, backups."""
-import json, sys, time
+import os
+import sys, time
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:8000/"
+# Permite apuntar a otro puerto/host: GUI_E2E_BASE=http://127.0.0.1:8001/
+BASE = os.environ.get("GUI_E2E_BASE", "http://127.0.0.1:8000/")
 results = []
 console_errors = []
 failed_requests = []

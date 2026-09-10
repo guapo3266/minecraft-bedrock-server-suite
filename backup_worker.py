@@ -42,15 +42,48 @@ def load_snapshot(snap_path):
 
 
 def write_result(result_path, result):
-    """Escribe el resultado del backup (zip/error) como JSON UTF-8."""
-    with open(result_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
+    """Escribe el resultado del backup (zip/error) como JSON UTF-8 atomico.
+
+    tmp + fsync + os.replace: si la serializacion o el disco fallan, no queda
+    un result.json a medias que el wrapper lea como fallo opaco.
+    """
+    tmp_path = result_path + ".tmp_" + os.urandom(3).hex()
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, result_path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def _main():
+    if len(sys.argv) < 4:
+        print(
+            L("Uso: python backup_worker.py <snapshot.json> <cancel_marker> <result.json>",
+              "Usage: python backup_worker.py <snapshot.json> <cancel_marker> <result.json>"),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     snap_path, marker, result_path = sys.argv[1:4]
 
-    file_snapshot = load_snapshot(snap_path)
+    try:
+        file_snapshot = load_snapshot(snap_path)
+    except Exception as e:
+        # El padre pudo borrar el temporal o el JSON quedar ilegible: se anota
+        # como fallo de snapshot (retryable por el wrapper), no como traceback.
+        result = {"zip": None, "error": "Snapshot: no se pudo leer el snapshot: %s" % e}
+        try:
+            write_result(result_path, result)
+        except Exception:
+            pass
+        print(L("[Worker] Falló la compresión: %s", "[Worker] Compression failed: %s") % result["error"])
+        raise SystemExit(1)
 
     import auto_backup  # import tardio: solo aqui hace falta
 

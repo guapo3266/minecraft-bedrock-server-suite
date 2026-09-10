@@ -80,13 +80,21 @@ def restart_wrapper():
     """
     exit_event = manager.wrapper_exit_event
     if manager.is_running and manager.wrapper_process:
-        manager.stop_requested = True
         try:
             with manager.stdin_lock:
                 manager.wrapper_process.stdin.write("stop\n")
                 manager.wrapper_process.stdin.flush()
-        except Exception:
-            pass
+        except Exception as e:
+            manager.add_log(
+                L(f"[GUI Backend] Reinicio cancelado: no se pudo enviar 'stop' al wrapper ({e}).",
+                  f"[GUI Backend] Restart cancelled: could not send 'stop' to the wrapper ({e})."),
+                "error",
+            )
+            return
+        # Solo tras entrega correcta: un fallo no debe marcar la ausencia del
+        # wrapper como deliberada mientras el servidor sigue vivo (misma regla
+        # que /api/action/stop; si no, el watchdog no re-lanzaria un crash real).
+        manager.stop_requested = True
         manager.add_log(L("[GUI Backend] Reiniciando servidor...", "[GUI Backend] Restarting server..."), "system")
         # G8: espera en DOS fases antes de lanzar otro wrapper (evita dobles
         # instancias y pisado de estado):
@@ -140,13 +148,20 @@ def stop_and_wait(tag="[Actualizador BDS]"):
     """
     if not (manager.is_running and manager.wrapper_process):
         return True
-    manager.stop_requested = True
     try:
         with manager.stdin_lock:
             manager.wrapper_process.stdin.write("stop\n")
             manager.wrapper_process.stdin.flush()
-    except Exception:
-        pass
+    except Exception as e:
+        manager.add_log(
+            L(f"{tag} No se pudo enviar 'stop' al wrapper ({e}). Operación cancelada.",
+              f"{tag} Could not send 'stop' to the wrapper ({e}). Operation cancelled."),
+            "error",
+        )
+        return False
+    # Solo tras entrega correcta (misma regla que /api/action/stop): un fallo no
+    # debe inhibir al watchdog mientras el servidor sigue vivo.
+    manager.stop_requested = True
     manager.add_log(L(f"{tag} Deteniendo servidor de Minecraft...", f"{tag} Stopping Minecraft server..."), "system")
     # G8: dos fases — BDS muerto primero, despues el wrapper completo
     # (backup final de cierre incluido) antes de tocar binarios o mundos.

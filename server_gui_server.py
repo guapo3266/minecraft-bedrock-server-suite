@@ -13,11 +13,13 @@ tests/herramientas aún importan desde aquí (ver docs/ARCHITECTURE.md).
 """
 
 import asyncio
+import contextlib
 import os
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 import uvicorn
@@ -26,8 +28,8 @@ import auto_backup
 from console_lang import L
 
 from gui_backend import config
-from gui_backend.config import BASE_DIR
-from gui_backend.security import _allow_lan, _ensure_local, _is_allowed_origin, _is_safe_zip_entry
+from gui_backend.config import BASE_DIR  # noqa: F401  (re-export: lo usan tests)
+from gui_backend.security import _allow_lan, _ensure_local, _check_origin, _is_allowed_origin, _is_safe_zip_entry  # noqa: F401  (dos ultimos: re-exports para tests)
 from gui_backend.metrics import get_hardware_metrics
 from gui_backend.state import manager
 from gui_backend.services import external_probe as external_probe_service
@@ -88,6 +90,10 @@ async def lifespan(app: FastAPI):
         manager.add_log(L(f"[Historial] No se pudo inicializar el historial: {exc}", f"[History] Could not initialize history: {exc}"), "error")
     yield
     task.cancel()
+    # Esperar la cancelacion del task de metricas evita "Task was destroyed but
+    # it is pending" y corrutinas huerfanas en el cierre del loop.
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
     # El loop muere con este lifespan: dejar manager.loop apuntandolo deja un
     # loop CERRADO como global y convierte cada add_log/update_status posterior
     # (hilos de fondo en la ventana de apagado; tests tras un TestClient) en
@@ -98,6 +104,25 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Construye la app: lifespan, estáticos y todos los routers."""
     app = FastAPI(title="ReactBits Minecraft Bedrock Wrapper GUI", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def _guard_api_local_only(request, call_next):
+        """Guarda temprana para /api/*: cliente local + Origin permitido.
+
+        Corre ANTES del routing y de la validación del body: sin esto, un
+        cliente externo a loopback podía recibir un 422 de esquema pydantic
+        (p. ej. POST /api/command sin body) y enumerar rutas/campos sin pasar
+        por `_ensure_local`/`_check_origin`, que viven dentro de los endpoints.
+        Los endpoints conservan sus chequeos (defensa en profundidad) y el
+        WebSocket valida en el handshake (aquí no pasa por middleware HTTP).
+        """
+        if request.url.path.startswith("/api/"):
+            try:
+                _ensure_local(request.client.host if request.client else "")
+                _check_origin(request)
+            except HTTPException as exc:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return await call_next(request)
 
     DIST_DIR = os.path.join(config.BASE_DIR, "gui_frontend", "dist")
     STATIC_TARGET = DIST_DIR if os.path.exists(DIST_DIR) else config.WEB_DIR
@@ -160,6 +185,21 @@ def _resolver_host_gui(allow_lan: bool, gui_host_env) -> str:
     if allow_lan and gui_host in ("127.0.0.1", "localhost"):
         return "0.0.0.0"
     return gui_host
+
+
+def _url_para_navegador(host: str, puerto: int) -> str:
+    """URL http:// lista para el navegador.
+
+    Normaliza loopback/localhost a 127.0.0.1 y CORCHETEA los IPv6 literales
+    ('::1' -> 'http://[::1]:8000'): sin corchetes la URL es inválida y
+    `webbrowser.open` falla en silencio.
+    """
+    h = (host or "").strip()
+    if h in ("", "localhost", "127.0.0.1"):
+        h = "127.0.0.1"
+    elif ":" in h and not h.startswith("["):
+        h = f"[{h}]"
+    return f"http://{h}:{puerto}"
 
 
 PUERTO_MAX = 65535
@@ -235,10 +275,7 @@ if __name__ == "__main__":
         print("=================================================================")
         open_url = url_local
     else:
-        url = f"http://{gui_host}:{puerto}"
-        # Normalizar display para localhost
-        if gui_host in ("127.0.0.1", "localhost"):
-            url = f"http://127.0.0.1:{puerto}"
+        url = _url_para_navegador(gui_host, puerto)
         print("=================================================================")
         print("  MINECRAFT BEDROCK WRAPPER GUI - REACTBITS DASHBOARD")
         print(f"  Abriendo en: {url}")

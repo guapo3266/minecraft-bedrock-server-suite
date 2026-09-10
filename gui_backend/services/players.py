@@ -49,15 +49,10 @@ def _allowlisted_names_and_xuids():
 
 
 def _allow_list_enabled():
-    try:
-        with open(config.PROPS_PATH, encoding="utf-8") as f:
-            for line in f:
-                stripped = line.strip()
-                if stripped.startswith("allow-list="):
-                    return stripped.split("=", 1)[1].strip().lower() == "true"
-    except OSError:
-        pass
-    return False
+    from server_properties import read_value
+
+    valor = read_value(config.PROPS_PATH, "allow-list")
+    return (valor or "").lower() == "true"
 
 
 def build_players_view(online_players):

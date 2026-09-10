@@ -37,8 +37,8 @@ def _copy_properties_if_missing():
         print(L("[Setup] No habia server.properties: se copio del example.",
                 "[Setup] server.properties was missing: copied from the example."))
     except Exception as e:
-        print(L("[Setup] No se pudo copiar server.properties.example: %s" % e,
-                "[Setup] Could not copy server.properties.example: %s" % e))
+        print(L(f"[Setup] No se pudo copiar server.properties.example: {e}",
+                f"[Setup] Could not copy server.properties.example: {e}"))
 
 
 def main():
@@ -64,16 +64,19 @@ def main():
     try:
         ok, version = bds_update._download_and_install_bds(tag="[Setup]", log_fn=_console_log)
     except Exception as e:
-        print(L("[Setup] Error durante la descarga o instalacion: %s" % e,
-                "[Setup] Error during download or installation: %s" % e))
+        print(L(f"[Setup] Error durante la descarga o instalacion: {e}",
+                f"[Setup] Error during download or installation: {e}"))
         return 1
     if not ok:
         print(L("[Setup] No se pudo instalar BDS (sin red o descarga invalida). Revisa los mensajes anteriores.",
                 "[Setup] BDS could not be installed (no network or invalid download). Check the messages above."))
         return 1
 
-    print(L("[Setup] BDS instalado (v%s)." % version if version else "[Setup] BDS instalado.",
-            "[Setup] BDS installed (v%s)." % version if version else "[Setup] BDS installed."))
+    if version:
+        print(L(f"[Setup] BDS instalado (v{version}).",
+                f"[Setup] BDS installed (v{version})."))
+    else:
+        print(L("[Setup] BDS instalado.", "[Setup] BDS installed."))
     _copy_properties_if_missing()
     return 0
 

@@ -494,20 +494,16 @@ def should_run_initial_backup():
     """Lee backup-inicio de server.properties (default: True).
 
     Permite desactivar el backup inicial en entornos con políticas restrictivas
-    donde no sea posible aplicar exclusiones de antivirus.
+    donde no sea posible aplicar exclusiones de antivirus. Tolera espacios
+    alrededor de la clave (`backup-inicio = false`) via server_properties.
     """
+    from server_properties import read_value
+
     props_path = os.path.join(wstate.BASE_DIR, "server.properties")
-    if os.path.exists(props_path):
-        try:
-            with open(props_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("backup-inicio="):
-                        val = line.split("=", 1)[1].strip().lower()
-                        return val not in ("false", "0", "no", "off")
-        except Exception:
-            pass
-    return True
+    val = read_value(props_path, "backup-inicio")
+    if val is None:
+        return True
+    return val.lower() not in ("false", "0", "no", "off")
 
 # ═══════════════════════════════════════════════════════════════
 # PUNTO DE ENTRADA PRINCIPAL
