@@ -6,7 +6,6 @@ Todo opera en tmp: BASE_DIR/previous dir parcheados; nunca la instalacion real.
 import json
 import os
 import sys
-import threading
 import time
 
 import pytest
@@ -14,9 +13,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import gui_backend.config as config
-import gui_backend.supervisor as supervisor
 import gui_backend.services.bds_update as bds_update
-import gui_backend.services.lifecycle as lifecycle
 import server_gui_server as gui
 
 

@@ -9,8 +9,8 @@ Finalizando proceso." y "[ERROR] Ya hay un backup ejecutandose; cancelling
 this request.").
 
 Esta suite recorre con AST todos los sitios L(es, en) de los modulos de
-produccion (raiz del repo + gui_backend/; excluidos archived/, tests/,
-tools/ y gui_frontend/) y exige del argumento EN:
+produccion (raiz del repo + gui_backend/ + tools/; excluidos archived/ y
+tests/) y exige del argumento EN:
   1. cero caracteres propios del espanol (acentos, ñ, ¡ ¿ º ª);
   2. cero residuos espanoles conocidos (lista negra minima y explicita).
 
@@ -41,6 +41,11 @@ def _modulos_produccion():
     rutas = sorted(glob.glob(os.path.join(ROOT, "*.py")))
     rutas += sorted(
         glob.glob(os.path.join(ROOT, "gui_backend", "**", "*.py"), recursive=True)
+    )
+    # tools/ tambien es produccion (bds_first_run.py se ejecuta desde el .bat
+    # de arranque); quedo fuera del barrido hasta el hallazgo 2026-09-10.
+    rutas += sorted(
+        glob.glob(os.path.join(ROOT, "tools", "**", "*.py"), recursive=True)
     )
     excluido = os.sep + "archived" + os.sep
     return [r for r in rutas if excluido not in r]

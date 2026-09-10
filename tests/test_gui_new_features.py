@@ -3,7 +3,6 @@
 Tests de los endpoints nuevos de la GUI: editor de server.properties,
 verificacion de integridad de backups y metrica de disco.
 """
-import io
 import os
 import sys
 import zipfile

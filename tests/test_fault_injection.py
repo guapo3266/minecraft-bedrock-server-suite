@@ -11,6 +11,7 @@ Escenarios:
 
 Usan directorios temporales: NUNCA tocan el mundo real del servidor.
 """
+from pathlib import Path
 import os
 import sys
 import time
@@ -218,8 +219,8 @@ def test_zip_truncado_rechazado_sin_tocar_mundo():
         zip_path = os.path.join(fake_bkp, "auto_backup_test_truncado.zip")
         with zipfile.ZipFile(zip_path, "w") as zf:
             zf.writestr("level.dat", b"GOOD-DATA" * 100)
-        data = open(zip_path, "rb").read()
-        open(zip_path, "wb").write(data[: len(data) // 2])  # truncar a la mitad
+        data = Path(zip_path).read_bytes()
+        Path(zip_path).write_bytes(data[: len(data) // 2])  # truncar a la mitad
 
         _write(os.path.join(fake_world, "level.dat"), b"CURRENT-WORLD")
         try:
@@ -270,5 +271,73 @@ def test_restore_fallo_a_mitad_hace_rollback(monkeypatch):
             assert f.read() == b"MANIFEST"
         assert not os.path.exists(fake_world + ".bak"), "quedo un resguardo .bak colgado"
         assert calls["n"] >= 2
+    finally:
+        _teardown(tmp, old)
+
+
+# ---- Escenario 7: ZIP vacio -> no se publica ----
+def test_backup_de_mundo_vacio_no_publica_zip(capsys):
+    """Un mundo sin archivos comprimibles no debe publicar un ZIP vacio en
+    BACKUP_DIR: el chequeo de sanidad post-escritura lo rechaza, limpia el
+    .tmp y no queda ningun .zip."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    lock = multiprocessing.Lock()
+    try:
+        result = auto_backup.create_backup("test", file_snapshot=None, external_lock=lock)
+        out = capsys.readouterr().out
+        assert result is False, "un ZIP vacio se publico como backup valido"
+        assert "vacio" in out.lower() or "empty" in out.lower(), out
+        assert not glob_tmp(fake_bkp), "quedo un .tmp huerfano"
+        assert not any(f.endswith(".zip") for f in os.listdir(fake_bkp))
+        assert _lock_free(lock), "el lock quedo tomado tras el rechazo"
+    finally:
+        _teardown(tmp, old)
+
+
+# ---- Escenario 9: espacio libre menor que el snapshot -> aviso no bloqueante ----
+def test_aviso_de_espacio_libre_menor_al_snapshot(monkeypatch, capsys):
+    import collections
+    import shutil as _shutil
+
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    lock = multiprocessing.Lock()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"L" * 100)
+        _write(os.path.join(fake_world, "db", "CURRENT"), b"MANIFEST-000001")
+        Uso = collections.namedtuple("Uso", "total used free")
+        monkeypatch.setattr(_shutil, "disk_usage", lambda _p: Uso(10**12, 10**12 - 1, 1))
+
+        resultado = auto_backup.create_backup(
+            "test",
+            file_snapshot=[("level.dat", 100), ("db/CURRENT", 15)],
+            external_lock=lock,
+        )
+
+        salida = capsys.readouterr().out
+        assert resultado, "el aviso no debe bloquear el backup"
+        assert "Espacio libre" in salida or "Free space" in salida
+    finally:
+        _teardown(tmp, old)
+
+
+# ---- Escenario 8: disco lleno (ENOSPC) -> mensaje claro y sin publicar ----
+def test_backup_con_disco_lleno_mensaje_especifico(monkeypatch, capsys):
+    import errno as _errno
+
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    lock = multiprocessing.Lock()
+    try:
+        _valid_world(fake_world)
+
+        def _write_lleno(self, *args, **kwargs):
+            raise OSError(_errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr(zipfile.ZipFile, "write", _write_lleno)
+        result = auto_backup.create_backup("test", file_snapshot=None, external_lock=lock)
+        out = capsys.readouterr().out
+        assert result is False
+        assert "disco lleno" in out.lower() or "disk full" in out.lower(), out
+        assert not glob_tmp(fake_bkp)
+        assert not any(f.endswith(".zip") for f in os.listdir(fake_bkp))
     finally:
         _teardown(tmp, old)

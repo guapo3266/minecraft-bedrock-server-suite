@@ -10,6 +10,7 @@ Cubre:
 6. Clasificacion de fallos de snapshot para reintento inmediato.
 7. Parser acepta prefijos con nivel LOG.
 """
+from pathlib import Path
 import os
 import sys
 import time
@@ -514,10 +515,10 @@ def test_apply_staged_update_exito_con_preservados():
             {"server.properties"}, {"worlds"},
         )
 
-        assert open(os.path.join(base, "a.dll")).read() == "new-a"
-        assert open(os.path.join(base, "behavior_packs", "pack.json")).read() == "new-pack"
-        assert open(os.path.join(base, "server.properties")).read() == "keep-me"
-        assert open(os.path.join(base, "worlds", "level.dat")).read() == "world"
+        assert Path(os.path.join(base, "a.dll")).read_text() == "new-a"
+        assert Path(os.path.join(base, "behavior_packs", "pack.json")).read_text() == "new-pack"
+        assert Path(os.path.join(base, "server.properties")).read_text() == "keep-me"
+        assert Path(os.path.join(base, "worlds", "level.dat")).read_text() == "world"
         assert not os.path.exists(staging)
         assert not [d for d in os.listdir(base) if d.startswith("bds_update_prev_")]
 
@@ -556,8 +557,8 @@ def test_apply_staged_update_rollback_restaura_instalacion(monkeypatch):
             bds_update._apply_staged_update(staging, base, set(), set())
 
         # Rollback: TODO vuelve al estado anterior, sin mezcla de versiones
-        assert open(os.path.join(base, "a.dll")).read() == "old-a"
-        assert open(os.path.join(base, "b.dll")).read() == "old-b"
+        assert Path(os.path.join(base, "a.dll")).read_text() == "old-a"
+        assert Path(os.path.join(base, "b.dll")).read_text() == "old-b"
         assert not [d for d in os.listdir(base) if d.startswith("bds_update_prev_")]
 
 
@@ -578,7 +579,7 @@ def test_recover_interrupted_update_restores_old_and_removes_new():
 
         bds_update.recover_interrupted_updates(base)
 
-        assert open(os.path.join(base, "a.dll"), "rb").read() == b"old-a"
+        assert Path(os.path.join(base, "a.dll")).read_bytes() == b"old-a"
         assert not os.path.exists(os.path.join(base, "new.dll"))
         assert not os.path.exists(prev)
 
@@ -1084,7 +1085,7 @@ def test_download_backup_rechaza_sec_fetch_site_cross_site(tmp_path, monkeypatch
         # Same-origin -> 200
         resp_ok = client.get("/api/backups/auto_backup_test_ok.zip/download", headers={"sec-fetch-site": "same-origin"})
         assert resp_ok.status_code == 200
-        assert resp_ok.content == open(zip_path, "rb").read()
+        assert resp_ok.content == Path(zip_path).read_bytes()
 
 
 # ── 21) Resolución dinámica de mundo sin reimportar módulo ────────────────────

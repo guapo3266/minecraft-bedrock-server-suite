@@ -11,6 +11,7 @@ lo exige. Los tests documentan el COMPORTAMIENTO ACTUAL observado:
 Escenarios E2E con servidor real (BDS) estan marcados @pytest.mark.e2e y se
 saltan si no hay bedrock_server.exe.
 """
+from pathlib import Path
 import datetime
 import glob
 import io
@@ -84,7 +85,7 @@ def test_release_notes_actual_no_contiene_version():
         # H3: el repo desnudo (sin instalacion de servidor) no tiene estos
         # artefactos; el test aplica solo donde BDS esta instalado.
         pytest.skip("requiere instalacion de servidor (release-notes.txt y bedrock_server.exe)")
-    content = open(p, encoding="utf-8", errors="replace").read()
+    content = Path(p).read_text(encoding="utf-8", errors="replace")
     assert not __import__("re").search(r"\d+\.\d+\.\d+\.\d+", content), (
         "si release-notes.txt tuviera version, el fallback cambiaria"
     )
@@ -194,8 +195,8 @@ def test_gui_busca_la_cadena_exacta_del_wrapper():
     """CORREGIDO (F2): la GUI busca la cadena EXACTA que imprime el wrapper
     ('Iniciando compresion', sin acento), y la condicion EXTERNA de la rama
     no excluye la linea del worker (sin 'backup' y sin 'compresión')."""
-    src = open(os.path.join(BASE_DIR, "wrapper_backup.py"), encoding="utf-8").read()
-    gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
+    src = Path(os.path.join(BASE_DIR, "wrapper_backup.py")).read_text(encoding="utf-8")
+    gui_src = Path(os.path.join(BASE_DIR, "gui_backend", "supervisor.py")).read_text(encoding="utf-8")
     gui_thread = gui_src.split("def run_wrapper_thread")[1]
     assert "Starting compression in a separate process" in src
     assert (
@@ -262,10 +263,9 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
     port = 18231
     base_url = "http://127.0.0.1:%d" % port
     props_path = os.path.join(BASE_DIR, "server.properties")
-    orig_props = open(props_path, "rb").read()
+    orig_props = Path(props_path).read_bytes()
     world_dir = os.path.join(BASE_DIR, "worlds", "TestWorld")
     world_existed = os.path.exists(world_dir)  # nunca borrar un mundo preexistente
-    created_zips = []
     gui_proc = None
     ws = None
     logs = []
@@ -318,7 +318,7 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
         # ── preparar mundo de prueba y propiedades ──
         props = orig_props.decode("utf-8")
         props = props.replace("level-name=Bedrock level", "level-name=TestWorld")
-        open(props_path, "wb").write(props.encode("utf-8"))
+        Path(props_path).write_bytes(props.encode("utf-8"))
         os.makedirs(world_dir, exist_ok=True)
 
         # ── arrancar la GUI real ──
@@ -343,6 +343,10 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
             stderr=subprocess.STDOUT,
             env=env,
         )
+        # La GUI no lee stdin: cerrarlo evita el PytestUnraisableExceptionWarning
+        # por el BufferedWriter sin cerrar (gate filterwarnings=error).
+        if gui_proc.stdin is not None:
+            gui_proc.stdin.close()
         ready = False
         for _ in range(200):
             try:
@@ -519,6 +523,11 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
                 except Exception:
                     pass
         # Verificacion dura: ni wrapper ni BDS de ESTA instalacion sobreviven.
+        if gui_proc is not None and gui_proc.stdin is not None:
+            try:
+                gui_proc.stdin.close()
+            except Exception:
+                pass
         if gui_log is not None:
             try:
                 gui_log.close()
@@ -650,8 +659,8 @@ def test_trigger_name_no_escapa_de_backup_dir(monkeypatch, tmp_path):
 def test_run_backup_process_eliminado():
     """CORREGIDO: _run_backup_process (legacy del enfoque multiprocessing)
     fue eliminado de server_wrapper.py; el worker real es backup_worker.py."""
-    wrapper_src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
-    backup_src = open(os.path.join(BASE_DIR, "wrapper_backup.py"), encoding="utf-8").read()
+    wrapper_src = Path(os.path.join(BASE_DIR, "server_wrapper.py")).read_text(encoding="utf-8")
+    backup_src = Path(os.path.join(BASE_DIR, "wrapper_backup.py")).read_text(encoding="utf-8")
     assert "_run_backup_process" not in wrapper_src
     assert "_run_backup_process" not in backup_src
 
@@ -829,7 +838,7 @@ def test_restore_recupera_mundo_si_falla_makedirs(monkeypatch, tmp_path):
     # el mundo original permanece intacto tras el fallo
     assert os.path.exists(fake_world), "el mundo debio recuperarse tras el fallo"
     assert os.path.exists(os.path.join(fake_world, "level.dat"))
-    assert open(os.path.join(fake_world, "level.dat"), "rb").read() == b"WORLD-ORIGINAL"
+    assert Path(os.path.join(fake_world, "level.dat")).read_bytes() == b"WORLD-ORIGINAL"
     assert not os.path.exists(fake_world + ".bak"), "el .bak debio limpiarse"
 
 
@@ -1035,7 +1044,7 @@ def test_patrones_bds_centralizados_y_matchean_log_real():
     assert sw._RE_PLAYERS_LIST.search(sw._strip_log_prefix(line_list).strip())
 
     # la GUI importa los patrones del wrapper: sin regex duplicados
-    gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
+    gui_src = Path(os.path.join(BASE_DIR, "gui_backend", "supervisor.py")).read_text(encoding="utf-8")
     assert (
         "from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT" in gui_src
     )
@@ -1289,7 +1298,7 @@ def test_stop_normal_tiene_tope_y_fuerza_terminacion():
     cierra en BDS_STOP_TIMEOUT_SEC, el wrapper lo fuerza ANTES del backup
     final (antes solo la ruta Ctrl+C forzaba; la normal colgaba para
     siempre, dejando el mundo bloqueado)."""
-    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
+    src = Path(os.path.join(BASE_DIR, "server_wrapper.py")).read_text(encoding="utf-8")
     assert "BDS_STOP_TIMEOUT_SEC" in src
     assert "shutdown_requested_at" in src
     assert "forcing termination" in src
@@ -1306,7 +1315,7 @@ def test_wrapper_marca_fin_de_ciclo_en_finally():
     finalizado' en un finally, asi TODOS los caminos (exito, fallo, timeout,
     watchdog y excepcion) emiten el marcador, incluidos los `return`
     tempranos del watchdog y del timeout."""
-    src = open(os.path.join(BASE_DIR, "wrapper_backup.py"), encoding="utf-8").read()
+    src = Path(os.path.join(BASE_DIR, "wrapper_backup.py")).read_text(encoding="utf-8")
     worker = src.split("def execute_backup_worker")[1].split("\ndef _begin_manual_hot_backup")[0]
     assert "finally:" in worker
     assert '"[Worker] Backup finalizado"' in worker
@@ -1320,7 +1329,7 @@ def test_gui_resetea_flag_con_backup_finalizado():
     """CORREGIDO (H3): la GUI resetea backup_in_progress con el marcador de
     fin del wrapper (ademas de las cadenas de exito existentes), para que el
     boton de backup en frio no quede bloqueado tras un backup fallido."""
-    gui_src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
+    gui_src = Path(os.path.join(BASE_DIR, "gui_backend", "supervisor.py")).read_text(encoding="utf-8")
     gui_thread = gui_src.split("def run_wrapper_thread")[1]
     assert '"Backup finished" in line_str' in gui_thread
     assert "backup_in_progress = False" in gui_thread
@@ -1331,7 +1340,7 @@ def test_lines_waited_for_list_se_reinicia_tras_parseo_exitoso():
     jugadores se parsea con exito (antes quedaba con el valor viejo; sin
     efecto practico porque la rama exige expecting_list_names, pero dejaba el
     contador inconsistente)."""
-    src = open(os.path.join(BASE_DIR, "server_wrapper.py"), encoding="utf-8").read()
+    src = Path(os.path.join(BASE_DIR, "server_wrapper.py")).read_text(encoding="utf-8")
     read_stdout_src = src.split("def read_stdout")[1].split("def backup_scheduler")[0]
     # resets: lista vacia (original) + parseo de nombres + continuacion parseada
     assert read_stdout_src.count("lines_waited_for_list = 0") >= 3
@@ -1416,7 +1425,7 @@ def test_gui_players_online_bajo_manager_lock():
     size during iteration' (500s intermitentes o desconexion del WS)."""
     # Refactor: las mutaciones viven en gui_backend/supervisor.py
     # (run_wrapper_thread), unico sitio que toca players_online.
-    src = open(os.path.join(BASE_DIR, "gui_backend", "supervisor.py"), encoding="utf-8").read()
+    src = Path(os.path.join(BASE_DIR, "gui_backend", "supervisor.py")).read_text(encoding="utf-8")
     for needle in (
         "manager.players_online.add(name)",
         "manager.players_online.discard(name)",
@@ -1428,7 +1437,7 @@ def test_gui_players_online_bajo_manager_lock():
         )
     # Refactor: la lectura bajo lock de /api/status, update_status y el init
     # del WS ahora vive en gui_backend/state.py (build_public_status).
-    state_src = open(os.path.join(BASE_DIR, "gui_backend", "state.py"), encoding="utf-8").read()
+    state_src = Path(os.path.join(BASE_DIR, "gui_backend", "state.py")).read_text(encoding="utf-8")
     i = state_src.index("players = list(manager.players_online)")
     assert "with manager.lock:" in state_src[i - 300:i], (
         "build_public_status debe leer players_online bajo manager.lock"
@@ -1446,7 +1455,7 @@ def test_gui_stdin_bajo_stdin_lock():
     archivos del backend (el total debe seguir siendo 6 writes == 6 locks).
     """
     # Refactor: el lock vive en gui_backend/state.py (ServerManager).
-    state_src = open(os.path.join(BASE_DIR, "gui_backend", "state.py"), encoding="utf-8").read()
+    state_src = Path(os.path.join(BASE_DIR, "gui_backend", "state.py")).read_text(encoding="utf-8")
     assert "self.stdin_lock = threading.Lock()" in state_src
 
     backend_files = [os.path.join(BASE_DIR, "server_gui_server.py")]
@@ -1456,7 +1465,7 @@ def test_gui_stdin_bajo_stdin_lock():
             if n.endswith(".py"):
                 backend_files.append(os.path.join(root, n))
 
-    src = "\n".join(open(p, encoding="utf-8").read() for p in backend_files)
+    src = "\n".join(Path(p).read_text(encoding="utf-8") for p in backend_files)
     writes = src.count("manager.wrapper_process.stdin.write")
     locks = src.count("with manager.stdin_lock:")
     assert writes == 6, "numero inesperado de sitios de escritura: %d" % writes
@@ -1480,8 +1489,26 @@ def test_estado_del_wrapper_no_se_rebindea_fuera_de_wrapper_state():
     if os.path.exists(wrapper_backup):
         paths.append(wrapper_backup)
     for path in paths:
-        source = open(path, encoding="utf-8").read()
+        source = Path(path).read_text(encoding="utf-8")
         for name in state_names:
             assert not re.search(r"(?m)^\s*%s\s*(?:\+|-)?=" % re.escape(name), source), (
                 "%s se rebindea fuera de wrapper_state en %s" % (name, path)
             )
+
+
+def test_watchdog_de_fondo_neutralizado_en_la_suite():
+    """El loop de fondo del watchdog debe quedar desactivado en tests (F1).
+
+    El hilo `gui-watchdog` arranca con el lifespan de cualquier TestClient y
+    sobrevive a los monkeypatches: al leer configs temporales de otros tests
+    (auto_restart_on_crash / daily_*) lanzaba wrappers REALES contra la
+    instalacion — backups reales de 85 MB, BDS real, mutex del wrapper
+    retenido (409 espurios) y mutex de backup ocupado (fallos falsos del
+    worker). Si se elimina el fixture de conftest, la suite vuelve a tener
+    efectos reales y a ser flaky. Ver docs/INFORME_REVIEW_2026-09-10.md (F1).
+    """
+    conftest_src = Path(os.path.join(BASE_DIR, "tests", "conftest.py")).read_text(encoding="utf-8")
+    assert 'mp.setattr(watchdog, "start", lambda: None)' in conftest_src, (
+        "tests/conftest.py debe desactivar watchdog.start durante la suite "
+        "(el loop de fondo lanza wrappers reales y contamina la instalacion)"
+    )

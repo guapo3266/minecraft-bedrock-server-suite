@@ -26,6 +26,7 @@ Cada test falla contra el codigo PRE-fix y pasa contra el POST-fix:
       server.properties) y enteros no canonicos (' 12 '); y server_wrapper
       re-exportaba el scalar MUTABLE last_daily_backup_date como copia stale.
 """
+from pathlib import Path
 import asyncio
 import json
 import os
@@ -100,8 +101,7 @@ def test_arranque_wrapper_no_aborta_por_existencia():
     el objeto mutex abierto un instante sin retenerlo; con already_exists en
     el guard, el wrapper abortaba su propio arranque apesar de poder adquirir.
     """
-    src = open(os.path.join(os.path.dirname(__file__), "..", "server_wrapper.py"),
-               encoding="utf-8").read()
+    src = Path(os.path.join(os.path.dirname(__file__), "..", "server_wrapper.py")).read_text(encoding="utf-8")
     main_block = src.split('if __name__ == "__main__":')[1]
     assert "wrapper_mutex.already_exists" not in main_block, (
         "el guard de arranque volvio a decidir por-existencia (usar solo acquire)"
@@ -396,8 +396,7 @@ def test_fin_de_ciclo_sigue_incondicional_en_finally():
     """El marcador bilingue del fin del ciclo (contrato IPC fallback) sigue
     emitiendose en el finally DESPUES de anadir alli la limpieza de temporales
     (la limpieza no debe poder saltarse el print/emit, ni viceversa)."""
-    src = open(os.path.join(os.path.dirname(__file__), "..", "wrapper_backup.py"),
-               encoding="utf-8").read()
+    src = Path(os.path.join(os.path.dirname(__file__), "..", "wrapper_backup.py")).read_text(encoding="utf-8")
     worker = src.split("def execute_backup_worker")[1]
     fin = worker.split("finally:")[1]
     assert '"[Worker] Backup finalizado"' in fin and '"[Worker] Backup finished"' in fin, (
@@ -441,8 +440,7 @@ def test_fachada_no_reexporta_scalares_mutables():
     """`from x import nombre` fija una COPIA del binding al importar: la
     fachada no debe re-exportar escalares mutables (trampa para edits/tests;
     el patron operativo es wrapper_schedule.X / wstate.X)."""
-    src = open(os.path.join(os.path.dirname(__file__), "..", "server_wrapper.py"),
-               encoding="utf-8").read()
+    src = Path(os.path.join(os.path.dirname(__file__), "..", "server_wrapper.py")).read_text(encoding="utf-8")
     assert "\n    last_daily_backup_date,\n" not in src, (
         "re-export stale de un escalar mutable: usar wrapper_schedule.X"
     )
@@ -456,7 +454,6 @@ def test_fachada_no_reexporta_scalares_mutables():
 def test_cierre_crash_comparte_lock_y_tope_del_cierre_normal():
     """El backup de emergencia por crash debe usar el MISMO dominio de lock y
     wait timeout que el de cierre normal (pre-fix: lambda sin external_lock)."""
-    src = open(os.path.join(os.path.dirname(__file__), "..", "server_wrapper.py"),
-               encoding="utf-8").read()
+    src = Path(os.path.join(os.path.dirname(__file__), "..", "server_wrapper.py")).read_text(encoding="utf-8")
     assert 'threading.Thread(target=execute_final_backup, args=("cierre_crash",)' in src
     assert 'auto_backup.create_backup("cierre_crash")' not in src

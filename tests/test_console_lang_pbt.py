@@ -13,7 +13,7 @@ Cubre tres contratos:
   3) i18n.jsx (frontend): las claves y los placeholders de cada mensaje son
      SIMETRICOS entre el bloque es: y el bloque en:.
 """
-import sys, os, re, ast, io, keyword
+import sys, os, re, ast, io, keyword, glob
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest
@@ -218,7 +218,37 @@ L_PY_FILES = [
     "gui_backend/routers/setup.py",
     "gui_backend/routers/system.py",
     "gui_backend/routers/websocket.py",
+    "tools/bds_first_run.py",
+    "tools/verify_backups.py",
 ]
+
+
+def _modulos_python_produccion():
+    """Todos los .py de produccion: raiz, gui_backend/ y tools/ (excluye archived/)."""
+    rutas = sorted(glob.glob(os.path.join(BASE_DIR, "*.py")))
+    rutas += sorted(glob.glob(os.path.join(BASE_DIR, "gui_backend", "**", "*.py"), recursive=True))
+    rutas += sorted(glob.glob(os.path.join(BASE_DIR, "tools", "**", "*.py"), recursive=True))
+    excluido = os.sep + "archived" + os.sep
+    return [
+        os.path.relpath(p, BASE_DIR).replace(os.sep, "/")
+        for p in rutas if excluido not in p
+    ]
+
+
+def test_todos_los_modulos_con_L_estan_listados():
+    """Anti-drift del inventario: si un modulo de produccion llama a L( debe
+    estar en L_PY_FILES; si no, la simetria de placeholders deja de cubrirlo
+    (hallazgo 2026-09-10: tools/bds_first_run.py usaba L() fuera de la lista)."""
+    faltantes = []
+    for rel in _modulos_python_produccion():
+        if rel == "console_lang.py":
+            continue  # define L, no lo llama
+        path = os.path.join(BASE_DIR, rel.replace("/", os.sep))
+        if _find_L_calls(path) and rel not in L_PY_FILES:
+            faltantes.append(rel)
+    assert not faltantes, (
+        "modulos con L() fuera de L_PY_FILES: %s" % ", ".join(sorted(faltantes))
+    )
 
 
 def test_todas_las_L_tienen_mismo_tipo_y_mismos_placeholders():

@@ -215,6 +215,49 @@ def test_ws_command_con_servidor_encendido_escribe_stdin_bajo_lock(monkeypatch):
     assert any(t.startswith("> say hi") for t in tipos)
 
 
+def test_ws_command_apagado_deja_feedback_en_el_log(monkeypatch):
+    """Con el servidor apagado el comando no debe desaparecer en silencio
+    (el HTTP ya responde offline + log): el usuario tiene que ver por que no
+    pasa nada."""
+    escrituras = []
+    proc_falso = type("P", (), {})()
+    proc_falso.stdin = type("S", (), {})()
+    proc_falso.stdin.write = lambda b: escrituras.append(b)
+    proc_falso.stdin.flush = lambda: None
+    proc_falso.poll = lambda: None
+    monkeypatch.setattr(manager, "wrapper_process", proc_falso)
+    monkeypatch.setattr(manager, "is_running", False)
+
+    ws = _WsFalso(entrantes=[json.dumps({"type": "command", "command": "say hola"})])
+    _correr_hasta_desconexion(ws)
+    assert escrituras == []  # apagado: nada llega a stdin
+    with manager.lock:
+        textos = [e["text"] for e in manager.log_history]
+    assert any(t.startswith("> say hola") for t in textos)
+    assert any("APAGADO" in t or "OFF" in t for t in textos), textos
+
+
+def test_ws_command_con_wrapper_muerto_deja_feedback(monkeypatch):
+    """Wrapper presente pero con poll() != None (proceso muerto): mismo
+    tratamiento que apagado, sin escribir a un stdin roto."""
+    escrituras = []
+    proc_falso = type("P", (), {})()
+    proc_falso.stdin = type("S", (), {})()
+    proc_falso.stdin.write = lambda b: escrituras.append(b)
+    proc_falso.stdin.flush = lambda: None
+    proc_falso.poll = lambda: 1  # murio
+    monkeypatch.setattr(manager, "wrapper_process", proc_falso)
+    monkeypatch.setattr(manager, "is_running", True)
+
+    ws = _WsFalso(entrantes=[json.dumps({"type": "command", "command": "list"})])
+    _correr_hasta_desconexion(ws)
+    assert escrituras == []
+    with manager.lock:
+        textos = [e["text"] for e in manager.log_history]
+    assert any(t.startswith("> list") for t in textos)
+    assert any("APAGADO" in t or "OFF" in t for t in textos), textos
+
+
 # ── 4) REGRESION: muerte durante el init ─────────────────────────────
 def test_ws_muerte_durante_init_sale_del_registro():
     """El init va DENTRO de la sesion registrada: si falla su envio o su

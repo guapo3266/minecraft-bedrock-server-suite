@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """Tests para el autodiagnóstico del backup inicial, exclusiones de Defender y backup-inicio."""
-import io
+from pathlib import Path
 import os
 import sys
-import tempfile
-import time
-import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import server_wrapper as sw
@@ -75,8 +72,8 @@ def test_setup_defender_exclusions_script_existe_y_es_valido():
     assert os.path.isfile(ps1_path), "Falta tools/setup_defender_exclusions.ps1"
     assert os.path.isfile(bat_path), "Falta configurar_antivirus.bat"
 
-    ps1_content = open(ps1_path, encoding="utf-8").read()
-    bat_content = open(bat_path, encoding="utf-8").read()
+    ps1_content = Path(ps1_path).read_text(encoding="utf-8")
+    bat_content = Path(bat_path).read_text(encoding="utf-8")
 
     # Verificar componentes críticos en ps1
     assert "Add-MpPreference" in ps1_content

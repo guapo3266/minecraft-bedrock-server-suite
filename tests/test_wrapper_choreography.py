@@ -6,7 +6,6 @@ de extraer el worker a un modulo propio.
 """
 import json
 import multiprocessing
-import os
 
 import pytest
 

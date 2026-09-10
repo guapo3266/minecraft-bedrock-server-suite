@@ -178,7 +178,10 @@ def test_zip_entry_rejects_traversal(name):
 @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
 def test_ensure_local_no_other_exceptions(host):
     """Solo puede lanzar HTTPException 403; los hosts loopback siempre pasan."""
-    if host in ("127.0.0.1", "::1"):
+    # security._is_allowed_client_host acepta tres formas de loopback:
+    # "127.0.0.1", "::1" y "localhost" (el oraculo olvidaba la tercera; el
+    # ejemplo 'localhost' de Hypothesis destapo el falso fallo, F1).
+    if host in ("127.0.0.1", "::1", "localhost"):
         assert sgs._ensure_local(host) is None
         return
     with pytest.raises(HTTPException) as exc:

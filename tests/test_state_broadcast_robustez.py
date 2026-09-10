@@ -113,3 +113,28 @@ def test_lifespan_deja_manager_loop_none_al_apagarse():
     with TestClient(sgs.app, client=("127.0.0.1", 50000)):
         assert manager.loop is not None  # vivo durante la sesion
     assert manager.loop is None  # y None tras el apagado
+
+
+# ── 6) broadcast(): descarta sockets muertos y conserva los vivos ────
+def test_broadcast_descarta_sockets_muertos_y_conserva_vivos(_estado_manager_hermetico):
+    class _Vivo:
+        def __init__(self):
+            self.enviados = []
+
+        async def send_json(self, msg):
+            self.enviados.append(msg)
+
+    class _Muerto:
+        async def send_json(self, msg):
+            raise RuntimeError("socket muerto")
+
+    vivo, muerto = _Vivo(), _Muerto()
+    with manager.lock:
+        manager.active_websockets.clear()
+        manager.active_websockets.update({vivo, muerto})
+
+    asyncio.run(manager.broadcast({"type": "ping"}))
+
+    assert vivo in manager.active_websockets
+    assert muerto not in manager.active_websockets
+    assert vivo.enviados == [{"type": "ping"}]

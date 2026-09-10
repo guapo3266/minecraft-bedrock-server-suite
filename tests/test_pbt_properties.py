@@ -17,8 +17,10 @@ import auto_backup as ab
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Caracteres seguros para rutas de archivo en save query (sin : , [ ] \r \n <)
+# Zs/Zl/Zp: str.strip() elimina TODO separador (incluido U+2028, que el
+# generador colaba antes y rompia el roundtrip; hallazgo 2026-09-10).
 _safe_chars = st.characters(
-    blacklist_categories=('Zs', 'Cc', 'Cs'),
+    blacklist_categories=('Zs', 'Zl', 'Zp', 'Cc', 'Cs'),
     blacklist_characters=":,\r\n/\\<"
 )
 
@@ -154,8 +156,10 @@ _WIN_RESERVED = {"nul", "con", "prn", "aux"} | {f"com{i}" for i in range(1, 10)}
 # Fallback filtrado: el redraw sin filtro podia devolver 'NUL' (os.path.abspath
 # lo normaliza a la ruta de dispositivo relativa '\\.\NUL' y commonpath falla)
 # o '..', rompiendo el test con rutas que un save query real jamas genera.
+# Tampoco 'worlds': activa la rama server-relativa legacy (F1-2026-09-10).
 _safe_fallback = st.text(alphabet=_safe_chars, min_size=1, max_size=12).filter(
     lambda s: s.lower() not in _WIN_RESERVED and s not in (".", "..", "/", "\\", "")
+    and s.lower() != "worlds"
 )
 
 @st.composite
@@ -167,6 +171,12 @@ def valid_world_relative_path(draw):
     if ".." in path.replace("//", "/") or path in ("/", "\\", ""):
         return draw(_safe_fallback)
     if any(seg.lower() in _WIN_RESERVED for seg in path.split("/")):
+        return draw(_safe_fallback)
+    # "worlds/..." (o un unico segmento WORLDS) es la forma server-relativa
+    # legacy: _resolve_snapshot_path la resuelve contra el padre de worlds/ y un
+    # archivo suelto llamado WORLDS queda fuera del mundo -> rechazo correcto
+    # (un save query real jamas emite esa ruta). Ver INFORME_REVIEW_2026-09-10 (F1).
+    if path.split("/", 1)[0].lower() == "worlds":
         return draw(_safe_fallback)
     return path
 

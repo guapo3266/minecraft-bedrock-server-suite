@@ -89,6 +89,13 @@ def test_list_normal_header_y_nombres_en_linea_siguiente(wrapper_env):
     assert wstate.expecting_list_names is False
 
 
+def test_list_cero_limpia_jugadores(wrapper_env):
+    wstate.players_online.update({"Alice", "Bob"})
+    _feed(["There are 0/10 players online:\n"])
+    assert wstate.players_online == set()
+    assert wstate.expecting_list_names is False
+
+
 def test_list_con_ruido_de_logs_entre_header_y_nombres(wrapper_env):
     _feed([
         "There are 2/10 players online:\n",

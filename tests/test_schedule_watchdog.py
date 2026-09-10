@@ -5,6 +5,7 @@ Solo se sustituyen E/S (rutas de config/estado via monkeypatch, arranque del
 wrapper, reloj). Los tests de fuentes (watchdog sin stdin) siguen el estilo
 de inspeccion de test_review_hallazgos.py.
 """
+from pathlib import Path
 import json
 import os
 import re
@@ -426,6 +427,11 @@ def test_start_limpia_stop_requested(monkeypatch):
     # Popen parcheado (no _spawn_wrapper_process): el reset del flag vive DENTRO
     # de la funcion real y el test debe ejecutarla.
     monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *a, **k: fake_proc)
+    # El hilo lector real con un fake cuyo stdout devuelve "" al instante cierra
+    # la sesion antes de estas aserciones (carrera por el GIL: el flake F1). Aqui
+    # solo se verifica el estado que _launch_wrapper deja bajo lock; el hilo
+    # real se ejercita en test_watchdog_simulacion / test_ipc_events.
+    monkeypatch.setattr(supervisor, "run_wrapper_thread", lambda *a, **k: None)
 
     _reset_manager_state()
     gui.manager.stop_requested = True
@@ -626,9 +632,9 @@ def test_pbt_gui_save_wrapper_load_coherentes(interval, t1, t2, only_players, au
 def test_watchdog_no_escribe_stdin():
     """El watchdog re-arranca procesos; jamas escribe al stdin del wrapper.
     Mantiene el invariante writes==6 de test_review_hallazgos."""
-    src = open(os.path.join(BASE_DIR, "gui_backend", "services", "watchdog.py"), encoding="utf-8").read()
+    src = Path(os.path.join(BASE_DIR, "gui_backend", "services", "watchdog.py")).read_text(encoding="utf-8")
     assert "stdin" not in src
     # lifecycle: restart_wrapper (1) + stop_and_wait compartido con update y
     # rollback (1). El total global sigue siendo 6 (test_review_hallazgos).
-    lifecycle_src = open(os.path.join(BASE_DIR, "gui_backend", "services", "lifecycle.py"), encoding="utf-8").read()
+    lifecycle_src = Path(os.path.join(BASE_DIR, "gui_backend", "services", "lifecycle.py")).read_text(encoding="utf-8")
     assert lifecycle_src.count("manager.wrapper_process.stdin.write") == 2

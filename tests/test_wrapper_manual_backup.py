@@ -8,7 +8,6 @@ No toca BDS ni el mundo real: solo la maquina de estados.
 """
 import os
 import sys
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import server_wrapper as sw

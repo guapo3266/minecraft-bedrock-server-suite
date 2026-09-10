@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gui_backend.security as sec
 import zip_safety as zs
 import wrapper_schedule
-from hypothesis import given, strategies as st, settings, HealthCheck, assume, example
+from hypothesis import given, strategies as st, settings, HealthCheck, example
 from unittest.mock import Mock
 
 import pytest

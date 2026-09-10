@@ -13,7 +13,6 @@ Cubren:
 import io
 import os
 import sys
-import threading
 import time
 import zipfile
 
@@ -275,7 +274,7 @@ def test_complete_escribe_marcador_y_quita_required(monkeypatch, tmp_path):
     """POST /api/setup/complete escribe el marcador y required pasa a False."""
     from fastapi.testclient import TestClient
 
-    base = _fake_install(monkeypatch, tmp_path, with_world=False)
+    _fake_install(monkeypatch, tmp_path, with_world=False)
     with open(config.SERVER_EXE, "wb") as f:
         f.write(b"x")
     with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:

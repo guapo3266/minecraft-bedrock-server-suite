@@ -8,7 +8,6 @@ import zipfile
 import shutil
 import tempfile
 
-import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auto_backup
@@ -124,9 +123,33 @@ def test_restore_inexistente_lanza_filenotfound():
 # ═══════════════════════════════════════════════════════════════════════
 # H3: restore CLI — guard de servidor corriendo
 # ═══════════════════════════════════════════════════════════════════════
+def test_restore_rechaza_zip_que_excede_la_expansion(monkeypatch):
+    """Defensa ante zip-bomb: si el tamaño descomprimido declarado excede el
+    limite, se rechaza ANTES de extraer y el mundo queda intacto."""
+    tmp, fake_bkp, fake_world, old = _setup_env()
+    try:
+        _make_zip(os.path.join(fake_bkp, "auto_backup_test_bomb.zip"),
+                  {"level.dat": b"NUEVO"})
+        with open(os.path.join(fake_world, "level.dat"), "wb") as f:
+            f.write(b"VIEJO")
+        monkeypatch.setattr(auto_backup, "_exceeds_expansion_limit",
+                            lambda *_a, **_k: True)
+
+        try:
+            auto_backup.restore_backup("auto_backup_test_bomb.zip")
+            assert False, "debia rechazar la expansion excesiva"
+        except ValueError:
+            pass
+
+        with open(os.path.join(fake_world, "level.dat"), "rb") as f:
+            assert f.read() == b"VIEJO"
+    finally:
+        _teardown(tmp, old)
+
+
 def test_cli_detecta_servidor_corriendo(monkeypatch):
-    """H3: restore_backup._server_is_running detecta bedrock_server.exe en
-    ejecucion (el CLI no debe tocar el mundo con BDS vivo)."""
+    """H3: restore_backup._server_is_running detecta bedrock_server.exe DE ESTA
+    INSTALACION en ejecucion (el CLI no debe tocar el mundo con BDS vivo)."""
     import restore_backup
 
     if restore_backup.psutil is None:
@@ -134,12 +157,20 @@ def test_cli_detecta_servidor_corriendo(monkeypatch):
         assert restore_backup._server_is_running() is True
         return
 
+    target_exe = os.path.join(restore_backup.BASE_DIR, "bedrock_server.exe")
+
     class FakeProc:
-        def __init__(self, name):
+        def __init__(self, name, exe=None):
             self.info = {"name": name}
+            self._exe = exe
+
+        def exe(self):
+            return self._exe
 
     monkeypatch.setattr(
-        restore_backup.psutil, "process_iter", lambda attrs: [FakeProc("bedrock_server.exe")]
+        restore_backup.psutil,
+        "process_iter",
+        lambda attrs: [FakeProc("bedrock_server.exe", target_exe)],
     )
     assert restore_backup._server_is_running() is True
 
@@ -152,6 +183,43 @@ def test_cli_detecta_servidor_corriendo(monkeypatch):
 
     monkeypatch.setattr(restore_backup.psutil, "process_iter", lambda attrs: [])
     assert restore_backup._server_is_running() is False
+
+
+def test_cli_ignora_bds_de_otra_instalacion(monkeypatch):
+    """Un bedrock_server.exe de OTRA carpeta no debe bloquear este restore
+    (misma regla que la sonda de la GUI: la ruta del ejecutable decide)."""
+    import restore_backup
+
+    if restore_backup.psutil is None:
+        return
+
+    class FakeProc:
+        info = {"name": "bedrock_server.exe"}
+
+        def exe(self):
+            return r"C:\otra\instalacion\bedrock_server.exe"
+
+    monkeypatch.setattr(restore_backup.psutil, "process_iter", lambda attrs: [FakeProc()])
+    assert restore_backup._server_is_running() is False
+
+
+def test_cli_fail_closed_si_no_puede_leer_la_ruta(monkeypatch):
+    """Si no se puede leer la ruta de un proceso bedrock_server.exe
+    (AccessDenied, p. ej. elevado), se asume en ejecucion: es una operacion
+    destructiva y ante la duda no se toca el mundo."""
+    import restore_backup
+
+    if restore_backup.psutil is None:
+        return
+
+    class FakeProc:
+        info = {"name": "bedrock_server.exe"}
+
+        def exe(self):
+            raise restore_backup.psutil.AccessDenied()
+
+    monkeypatch.setattr(restore_backup.psutil, "process_iter", lambda attrs: [FakeProc()])
+    assert restore_backup._server_is_running() is True
 
 
 def test_cli_sin_psutil_aborta_fail_closed(monkeypatch):

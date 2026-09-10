@@ -42,7 +42,7 @@ def _fake_paths(monkeypatch, tmp_path):
 
 
 def test_con_exe_no_pregunta(monkeypatch, tmp_path):
-    base = _fake_paths(monkeypatch, tmp_path)
+    _fake_paths(monkeypatch, tmp_path)
     with open(config.SERVER_EXE, "wb") as f:
         f.write(b"fake")
     mod = _load_first_run()
@@ -69,7 +69,7 @@ def test_sin_exe_responde_no(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("respuesta", ["", "S", "si", "YES"])
 def test_sin_exe_enter_o_si_descarga(monkeypatch, tmp_path, respuesta):
-    base = _fake_paths(monkeypatch, tmp_path)
+    _fake_paths(monkeypatch, tmp_path)
     mod = _load_first_run()
     monkeypatch.setattr("builtins.input", lambda _prompt: respuesta)
     llamadas = {"n": 0}

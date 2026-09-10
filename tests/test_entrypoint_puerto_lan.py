@@ -15,7 +15,6 @@ arranca uvicorn.
 """
 
 import socket
-import unittest.mock
 
 import pytest
 
@@ -119,6 +118,25 @@ def test_puerto_libre_elige_familia_segun_host(monkeypatch, host, familia):
     monkeypatch.setattr(socket, "socket", reg)
     assert sgs._puerto_libre(0, host) is True
     assert reg.familias == [familia]
+
+
+# ─────────────────────────────────────────────────────────────────
+# _url_para_navegador: normalización e IPv6
+# ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("host,esperado", [
+    ("127.0.0.1", "http://127.0.0.1:8000"),
+    ("localhost", "http://127.0.0.1:8000"),
+    ("", "http://127.0.0.1:8000"),
+    ("  0.0.0.0  ", "http://0.0.0.0:8000"),
+    ("192.168.1.70", "http://192.168.1.70:8000"),
+    ("::1", "http://[::1]:8000"),
+    ("[::1]", "http://[::1]:8000"),
+])
+def test_url_para_navegador_normaliza_y_corchetea_ipv6(host, esperado):
+    """Un GUI_HOST IPv6 literal sin corchetes da una URL inválida y
+    webbrowser.open falla en silencio; el helper la deja navegable."""
+    assert sgs._url_para_navegador(host, 8000) == esperado
 
 
 # ─────────────────────────────────────────────────────────────────

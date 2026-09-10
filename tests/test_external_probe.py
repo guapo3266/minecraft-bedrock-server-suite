@@ -2,9 +2,7 @@
 """Pruebas unitarias para la sonda de instancias externas (detect_external_bds)."""
 
 import os
-import sys
 import psutil
-import pytest
 from starlette.testclient import TestClient
 
 import server_gui_server as sgs
@@ -180,3 +178,74 @@ def test_status_y_polling_incluyen_external_instance(monkeypatch):
         data = resp.json()
         assert data["external_instance"] is True
         assert data["external_instance_reason"] == "test_reason"
+
+
+def test_is_descendant_tolera_access_denied():
+    """La cadena de padres puede ser inaccesible (proceso elevado): no debe
+    propagar, solo devolver False."""
+
+    class ProcSinPadre:
+        def parent(self):
+            raise psutil.AccessDenied()
+
+    assert external_probe._is_descendant(ProcSinPadre(), os.getpid()) is False
+
+
+def _mutex_libre(monkeypatch):
+    monkeypatch.setattr(wpg.NamedMutex, "__init__",
+                        lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
+    monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+
+
+class _FakeProcExeRota:
+    def __init__(self, pid, error):
+        self.pid = pid
+        self.info = {"pid": pid, "name": "bedrock_server.exe"}
+        self._error = error
+
+    def parent(self):
+        return None
+
+    def exe(self):
+        raise self._error
+
+
+def test_detect_external_bds_ignora_exe_con_access_denied(monkeypatch):
+    """Un bedrock_server.exe cuya ruta no se puede leer (elevado) no debe
+    bloquear por si solo: nombre+ruta solo deciden cuando la ruta es legible."""
+    sgs.manager.is_running = False
+    _mutex_libre(monkeypatch)
+    fake = _FakeProcExeRota(99999, psutil.AccessDenied())
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [fake])
+    monkeypatch.setattr(psutil, "Process", lambda pid: fake)
+
+    assert external_probe.detect_external_bds() == (False, None)
+
+
+def test_detect_external_bds_ignora_exe_que_desaparece(monkeypatch):
+    sgs.manager.is_running = False
+    _mutex_libre(monkeypatch)
+    fake = _FakeProcExeRota(99999, psutil.NoSuchProcess(pid=99999))
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [fake])
+    monkeypatch.setattr(psutil, "Process", lambda pid: fake)
+
+    assert external_probe.detect_external_bds() == (False, None)
+
+
+def test_update_external_instance_state_avisa_solo_al_cambiar(monkeypatch):
+    from gui_backend.state import manager
+
+    monkeypatch.setattr(manager, "external_instance", False)
+    monkeypatch.setattr(manager, "external_instance_reason", None)
+    avisos = []
+    monkeypatch.setattr(manager, "update_status", lambda: avisos.append(1))
+    monkeypatch.setattr(external_probe, "detect_external_bds",
+                        lambda: (True, "wrapper_mutex"))
+
+    external_probe.update_external_instance_state()
+    assert manager.external_instance is True
+    assert manager.external_instance_reason == "wrapper_mutex"
+    assert len(avisos) == 1
+
+    external_probe.update_external_instance_state()  # mismo estado: sin aviso
+    assert len(avisos) == 1
