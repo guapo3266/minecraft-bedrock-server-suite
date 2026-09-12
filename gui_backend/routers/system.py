@@ -132,6 +132,18 @@ async def send_command(req: CommandRequest, request: Request):
         manager.add_log(L("[SISTEMA] El servidor de Minecraft está APAGADO. Presiona '▶ Iniciar Servidor' primero.", "[SISTEMA] The Minecraft server is OFF. Press '▶ Start Server' first."), "error")
         return {"status": "offline", "message": "El servidor no está en ejecución"}
     
+    # La escritura va primero: 'stop' marca stop_requested SOLO TRAS ENTREGAR
+    # el comando (misma regla que /api/action/stop): si el stdin falla justo
+    # en un stop, el flag quedaba True con el servidor vivo e inhibia al
+    # watchdog ante un crash real.
+    try:
+        with manager.stdin_lock:
+            manager.wrapper_process.stdin.write(cmd + "\n")
+            manager.wrapper_process.stdin.flush()
+    except Exception as e:
+        manager.add_log(L(f"[GUI Backend] Error enviando comando: {e}", f"[GUI Backend] Error sending command: {e}"), "error")
+        return {"status": "error", "message": str(e)}
+
     # 'stop' en consola apaga el wrapper entero (lo intercepta el wrapper,
     # no BDS): es un stop deliberado y el watchdog no debe re-lanzarlo.
     # Se compara por LINEA: un comando multi-linea tipo "list\nstop" tambien
@@ -139,12 +151,5 @@ async def send_command(req: CommandRequest, request: Request):
     if "stop" in {line.strip().lower() for line in cmd.splitlines()}:
         manager.stop_requested = True
 
-    try:
-        with manager.stdin_lock:
-            manager.wrapper_process.stdin.write(cmd + "\n")
-            manager.wrapper_process.stdin.flush()
-        manager.add_log(f"> {cmd}", "command")
-        return {"status": "ok", "command": cmd}
-    except Exception as e:
-        manager.add_log(L(f"[GUI Backend] Error enviando comando: {e}", f"[GUI Backend] Error sending command: {e}"), "error")
-        return {"status": "error", "message": str(e)}
+    manager.add_log(f"> {cmd}", "command")
+    return {"status": "ok", "command": cmd}

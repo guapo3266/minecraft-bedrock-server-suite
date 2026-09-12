@@ -316,9 +316,33 @@ def backup_scheduler():
                             wstate.backup_thread = worker_to_start
                             print(L(f"[Wrapper] Despachando worker (vía timeout de resguardo) con snapshot ({snapshot_len} archivos)...", f"[Wrapper] Dispatching worker (via fallback timeout) with snapshot ({snapshot_len} files)..."))
                             worker_to_start.start()
-                        # Estado HOLDING: verificar Watchdog de 60s
-                        elif (now - wstate.save_hold_timestamp) > wstate.WATCHDOG_HOLDING_TIMEOUT_SEC:
-                            print(L("[Wrapper] [WARN] Servidor no respondio a save query en 60s.", "[Wrapper] [WARN] Server did not respond to save query in 60s."))
+                        # Estado HOLDING: verificar Watchdog de 60s. Dos fallos
+                        # distintos, para no confundirlos:
+                        #   a) BDS NUNCA respondio al save query (mide desde
+                        #      el save hold inicial).
+                        #   b) Respondio "Data saved..." pero la recoleccion
+                        #      quedo estancada SIN ningun archivo (mide desde
+                        #      la ultima actualizacion del snapshot).
+                        # Con archivos ya recolectados NO se aborta aunque el
+                        # listado supere los 60s: mientras sigan llegando
+                        # lineas la recoleccion esta viva (mundos grandes
+                        # tardan mas en listar) y el dispatch ocurre tras 5s
+                        # de silencio. El watchdog anterior abortaba cada
+                        # ciclo con el diagnostico falso de "no respondio"
+                        # aunque el servidor SI hubiera respondido.
+                        elif (
+                            (not wstate.save_query_ready_seen
+                             and (now - wstate.save_hold_timestamp) > wstate.WATCHDOG_HOLDING_TIMEOUT_SEC)
+                            or (
+                                wstate.save_query_ready_seen
+                                and not wstate.last_save_snapshot
+                                and (now - wstate.last_snapshot_update_time) > wstate.WATCHDOG_HOLDING_TIMEOUT_SEC
+                            )
+                        ):
+                            if wstate.save_query_ready_seen:
+                                print(L("[Wrapper] [WARN] La respuesta del save query llego sin archivos y no avanzo en 60s.", "[Wrapper] [WARN] The save query reply arrived without files and made no progress in 60s."))
+                            else:
+                                print(L("[Wrapper] [WARN] Servidor no respondio a save query en 60s.", "[Wrapper] [WARN] Server did not respond to save query in 60s."))
                             print(L("[Wrapper]          Forzando save resume.", "[Wrapper]          Forcing save resume."))
                             wstate.backup_in_progress = False
                             wstate.backup_dispatched = False
@@ -621,10 +645,14 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         initiate_shutdown("Ctrl+C")
 
-        # Esperar cierre del servidor con protección contra doble Ctrl+C
+        # Esperar cierre del servidor con protección contra doble Ctrl+C.
+        # Mismo tope que la ruta normal de 'stop' (BDS_STOP_TIMEOUT_SEC): un
+        # mundo grande puede tardar mas de 15s en volcar sus chunks, y un kill
+        # a mitad del save dejaba un LevelDB sucio (el usuario impaciente
+        # siempre puede forzar con un segundo Ctrl+C).
         try:
             if wstate.server_process:
-                wstate.server_process.wait(timeout=15)
+                wstate.server_process.wait(timeout=wstate.BDS_STOP_TIMEOUT_SEC)
         except subprocess.TimeoutExpired:
             print(L("[Wrapper] [WARN] Servidor no respondio al cierre. Forzando terminacion...", "[Wrapper] [WARN] Server did not respond to shutdown. Forcing termination..."))
             try:

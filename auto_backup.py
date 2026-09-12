@@ -135,6 +135,34 @@ def _cancelled(cancel_event):
     return cancel_event is not None and cancel_event.is_set()
 
 
+def _es_punto_reparse(path):
+    """True si path es un symlink o una junction de Windows (reparse point).
+
+    El modo snapshot valida cada ruta con realpath, pero los tres recorridos
+    con os.walk (mundo tradicional, static_includes y packs de servidor)
+    seguian cualquier junction: una junction dentro de resource_packs/
+    apuntando fuera de la instalacion hacia que el backup tragara contenido
+    externo. En Windows os.walk atraviesa junctions porque is_symlink() no
+    las detecta (si a los symlinks); por eso se mira tambien el atributo
+    FILE_ATTRIBUTE_REPARSE_POINT con lstat.
+    """
+    try:
+        if os.path.islink(path):
+            return True
+        if os.name == "nt":
+            import stat as _stat
+            st = os.lstat(path)
+            return bool(getattr(st, "st_file_attributes", 0) & _stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    except (OSError, AttributeError):
+        return False
+    return False
+
+
+def _poda_reparse_points(root, dirs):
+    """Filtra in-place los subdirectorios que son reparse points del walk."""
+    dirs[:] = [d for d in dirs if not _es_punto_reparse(os.path.join(root, d))]
+
+
 def _resolve_snapshot_path(rel_path):
     if not isinstance(rel_path, str) or not rel_path.strip():
         raise ValueError(L(f"Ruta vacia o invalida en snapshot: {rel_path!r}", f"Empty or invalid path in snapshot: {rel_path!r}"))
@@ -197,10 +225,13 @@ def _write_server_packs(zipf, total_bytes, cancel_event):
             continue
         prefix = _PACK_ZIP_PREFIX + pack_dir + "/"
         for root, dirs, files in os.walk(src_dir):
+            _poda_reparse_points(root, dirs)
             for fname in files:
                 if _cancelled(cancel_event):
                     raise RuntimeError(L("Backup cancelado durante compresion de packs.", "Backup cancelled during pack compression."))
                 full_f = os.path.join(root, fname)
+                if _es_punto_reparse(full_f):
+                    continue
                 arc = prefix + os.path.relpath(full_f, src_dir).replace(os.sep, "/")
                 zipf.write(full_f, arc)
                 total_bytes += os.path.getsize(full_f)
@@ -224,6 +255,10 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
     ipc_mutex = wpg.NamedMutex(f"BDS_Backup_{inst_hash}")
     timeout_ms = int(wait_lock_timeout_sec * 1000) if wait_lock_timeout_sec > 0 else 0
     if not ipc_mutex.acquire(timeout_ms=timeout_ms):
+        # Sin acquire no hay nada que liberar, pero el HANDLE queda abierto
+        # (las demas salidas de esta funcion si cierran): en Windows un handle
+        # vivo por llamada es una fuga que ademas bloquea renombrados.
+        ipc_mutex.close()
         print(L("[ERROR] Ya hay un backup ejecutandose; se cancela esta solicitud.", "[ERROR] A backup is already running; cancelling this request."))
         return False
 
@@ -405,13 +440,15 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                 raise SnapshotDesyncError(
                                     L(f"Snapshot truncado en '{clean_rel_path}': {copied} < {byte_length} bytes.", f"Snapshot truncated at '{clean_rel_path}': {copied} < {byte_length} bytes.")
                                 )
-                    except FileNotFoundError as fnf:
+                    except (FileNotFoundError, PermissionError) as ferr:
                         # TOCTOU entre el exists() y el open(): BDS pudo borrar
-                        # el archivo en ese intervalo. Es desincronizacion del
-                        # snapshot (reintentable), no un error de almacenamiento.
+                        # el archivo en ese intervalo, o el antivirus retenerlo
+                        # un instante. Ambos son desincronizacion transitoria
+                        # del snapshot (reintentable con un save query nuevo),
+                        # no errores de almacenamiento permanentes.
                         raise SnapshotDesyncError(
-                            L(f"Archivo de snapshot desaparecido durante la copia: {clean_rel_path}", f"Snapshot file disappeared during copy: {clean_rel_path}")
-                        ) from fnf
+                            L(f"Archivo de snapshot desaparecido o bloqueado durante la copia: {clean_rel_path}", f"Snapshot file disappeared or got locked during copy: {clean_rel_path}")
+                        ) from ferr
 
                     total_bytes += copied
                     if total_bytes > MAX_BACKUP_BYTES:
@@ -428,8 +465,11 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     if os.path.exists(static_path):
                         if os.path.isdir(static_path):
                             for root, dirs, files in os.walk(static_path):
+                                _poda_reparse_points(root, dirs)
                                 for static_file in files:
                                     full_f = os.path.join(root, static_file)
+                                    if _es_punto_reparse(full_f):
+                                        continue
                                     arc = os.path.relpath(full_f, world_dir).replace("\\", "/")
                                     zipf.write(full_f, arc)
                                     total_bytes += os.path.getsize(full_f)
@@ -438,6 +478,8 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                             L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
                                         )
                         else:
+                            if _es_punto_reparse(static_path):
+                                continue
                             arc = os.path.relpath(static_path, world_dir).replace("\\", "/")
                             zipf.write(static_path, arc)
                             total_bytes += os.path.getsize(static_path)
@@ -453,12 +495,15 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             else:
                 # Backup completo tradicional (usado al inicio, apagar o caída por snapshot incompleto)
                 for root, dirs, files in os.walk(world_dir):
+                    _poda_reparse_points(root, dirs)
                     if _cancelled(cancel_event):
                         raise RuntimeError(L("Backup cancelado durante escaneo tradicional.", "Backup cancelled during traditional scan."))
                     for file in files:
                         if _cancelled(cancel_event):
                             raise RuntimeError(L("Backup cancelado durante compresion tradicional.", "Backup cancelled during traditional compression."))
                         full_path = os.path.join(root, file)
+                        if _es_punto_reparse(full_path):
+                            continue
                         arcname = os.path.relpath(full_path, world_dir).replace("\\", "/")
                         zipf.write(full_path, arcname)
                         total_bytes += os.path.getsize(full_path)
@@ -657,6 +702,11 @@ def restore_backup(filename):
         for entry in zf.infolist():
             if not _is_safe_zip_entry(entry.filename):
                 raise ValueError(L(f"Entrada insegura en el backup: {entry.filename}", f"Unsafe entry in the backup: {entry.filename}"))
+            if entry.filename.replace("\\", "/").endswith("/"):
+                # Entrada de directorio: no contiene datos y ademas una
+                # "server_resource_packs/" suelta clasificaria como mundo,
+                # dejando una carpeta espuria dentro de world_staging.
+                continue
             parsed = _pack_dest(entry.filename)
             if parsed:
                 pack_infos.append((entry, parsed))
@@ -703,10 +753,14 @@ def restore_backup(filename):
                     with zf.open(entry, "r") as src, open(staging_f, "wb") as out:
                         shutil.copyfileobj(src, out)
 
-        # 3. Validar el staging antes del intercambio
-        if world_infos and not os.path.exists(os.path.join(world_staging, "level.dat")):
-            raise RuntimeError(L("El staging no contiene level.dat válido; restauración abortada sin tocar el mundo.",
-                                 "Staging does not contain a valid level.dat; restore aborted without touching the world."))
+        # 3. Validar el staging antes del intercambio. level.dat se exige
+        # SIEMPRE (tambien con world_infos vacio): un ZIP sin entradas de
+        # mundo (vacio o solo-packs) pasaba todas las validaciones previas,
+        # instalaba un staging VACIO como mundo activo y borraba el .bak del
+        # mundo real: perdida total del mundo por un zip ajeno en la carpeta.
+        if not os.path.exists(os.path.join(world_staging, "level.dat")):
+            raise RuntimeError(L("El backup no contiene un mundo valido (sin level.dat); restauración abortada sin tocar el mundo.",
+                                 "The backup does not contain a valid world (no level.dat); restore aborted without touching the world."))
     except Exception as exc:
         # Limpiar staging si falló la extracción previa al intercambio
         shutil.rmtree(world_staging, ignore_errors=True)

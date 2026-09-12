@@ -3,6 +3,7 @@ try:
 except ImportError:
     amulet_nbt = None
 import io
+import shutil
 import struct
 import sys
 import os
@@ -57,6 +58,20 @@ def enable_experiments(file_path):
         new_data += data[trailing_offset:]
         print(f"Appended trailing data of size: {len(data) - trailing_offset}")
         
+    # Resguardo previo: la v1 destruyo un level.dat real y el round-trip de
+    # amulet_nbt puede alterar datos que no sabemos regenerar. copy2 (no
+    # move): el original sigue en su sitio y el resguardo es solo evidencia.
+    # El sufijo evita deliberadamente el patron bak del recuperador: el
+    # recuperador de restauraciones interrumpidas renombra cualquier
+    # *.bak_* de worlds/ como huerfano en el arranque del wrapper.
+    backup_path = file_path + ".respaldo_" + os.urandom(4).hex()
+    try:
+        shutil.copy2(file_path, backup_path)
+        print(f"Resguardo previo guardado como: {backup_path}")
+    except OSError as e:
+        print(f"[ERROR] No se pudo crear el resguardo previo ({e}); se aborta sin tocar el level.dat.")
+        return
+
     # Escritura atomica: open('wb') in-place trunca el original y recien
     # despues escribe; un corte de luz/Ctrl+C/antivirus a mitad dejaba un
     # level.dat truncado sin recuperacion. Con tmp + os.replace el original

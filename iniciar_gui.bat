@@ -86,8 +86,13 @@ call :bootstrap_unlock
 if not exist "gui_frontend\dist\index.html" (
     echo [2/3] dist no encontrado: compilando frontend - requiere Node.js...
     cd gui_frontend
+    if errorlevel 1 (
+        echo [ERROR] No se pudo entrar en gui_frontend.
+        pause
+        exit /b 1
+    )
     call npm run build
-    cd ..
+    cd /d "%~dp0"
 ) else (
     echo [2/3] Frontend React de produccion listo.
 )

@@ -9,6 +9,7 @@ import time
 import auto_backup
 import wrapper_events
 import wrapper_state as wstate
+import windows_process_guard as wpg
 
 from console_lang import L
 
@@ -104,24 +105,48 @@ def _force_kill_compress_process(proc):
 
         try:
             proc.kill()
-            proc.join()
+            # Join acotado: TerminateProcess vuelve en milisegundos, pero un
+            # wait() sin tope que colgara retendria state_lock para siempre.
+            proc.join(timeout=wstate.WORKER_KILL_JOIN_TIMEOUT_SEC)
         except Exception as e:
             print(L(f"[Wrapper] Error forzando kill del proceso de compresión: {e}", f"[Wrapper] Error forcing kill of compression process: {e}"))
 
         wstate.backup_ipc_lock = multiprocessing.Lock()
         wstate.active_compress_process = None
 
-        # El worker muerto pudo dejar un .tmp a medias; se limpia ya bajo el lock.
+        # El worker muerto pudo dejar un .tmp a medias; se limpia ya, pero
+        # SOLO si ningun otro backup esta corriendo (NamedMutex no
+        # bloqueante, el mismo de create_backup): sin el guard, esta limpieza
+        # podia borrar el .tmp a medias de un cold_backup de la GUI lanzado
+        # justo tras la muerte del worker.
         try:
-            import glob as _glob
-            for orphan in _glob.glob(os.path.join(auto_backup.BACKUP_DIR, "*.tmp")):
-                try:
-                    os.remove(orphan)
-                    print(L(f"[Wrapper] Limpieza: eliminado {os.path.basename(orphan)} tras kill.", f"[Wrapper] Cleanup: removed {os.path.basename(orphan)} after kill."))
-                except Exception:
-                    pass
+            inst_hash = wpg.get_installation_hash(auto_backup.BASE_DIR)
+            ipc_mutex = wpg.NamedMutex(f"BDS_Backup_{inst_hash}")
+        except Exception:
+            ipc_mutex = None
+        if ipc_mutex is None:
+            return
+        try:
+            if not ipc_mutex.acquire(timeout_ms=0):
+                print(L("[Wrapper] Limpieza de .tmp omitida: hay otro backup en curso.", "[Wrapper] .tmp cleanup skipped: another backup is running."))
+                return
+            try:
+                import glob as _glob
+                for orphan in _glob.glob(os.path.join(auto_backup.get_backup_dir(), "*.tmp")):
+                    try:
+                        os.remove(orphan)
+                        print(L(f"[Wrapper] Limpieza: eliminado {os.path.basename(orphan)} tras kill.", f"[Wrapper] Cleanup: removed {os.path.basename(orphan)} after kill."))
+                    except Exception:
+                        pass
+            finally:
+                ipc_mutex.release()
         except Exception:
             pass
+        finally:
+            try:
+                ipc_mutex.close()
+            except Exception:
+                pass
 
 
 class _WorkerProcess:

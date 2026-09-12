@@ -7,12 +7,36 @@ import { useI18n } from '../i18n.jsx';
 function CopyButton({ value, label, copiedLabel }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(value);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+        ok = true;
+      }
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      // Contexto no seguro (la GUI LAN se abre via http://IP, donde
+      // navigator.clipboard no existe): fallback clasico con textarea
+      // temporal. Antes el click moria en silencio.
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {
+        ok = false;
+      }
+    }
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // clipboard no disponible: sin accion
     }
   };
   return (

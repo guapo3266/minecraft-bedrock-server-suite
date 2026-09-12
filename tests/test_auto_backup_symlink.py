@@ -22,7 +22,7 @@ def _crear_enlace(link, target):
     if os.name == "nt" and os.path.isdir(target):
         r = subprocess.run(
             ["cmd", "/c", "mklink", "/J", str(link), str(target)],
-            capture_output=True, text=True,
+            capture_output=True, text=True, errors="replace",
         )
         if r.returncode == 0:
             return

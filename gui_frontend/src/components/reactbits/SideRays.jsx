@@ -73,12 +73,19 @@ const SideRays = ({
       cleanupFunctionRef.current = null;
     }
 
+    // Bandera por-corrida: el await de 10 ms de initializeWebGL abre una
+    // ventana en la que el effect puede re-ejecutarse o desmontarse ANTES de
+    // que esta corrida registre su cleanup. Sin la bandera, la corrida vieja
+    // seguiaba tras el await, registraba su cleanup cuando ya nadie lo
+    // llamaria y dejaba un renderer + rAF eternos (fuga por cada toggle).
+    let disposed = false;
+
     const initializeWebGL = async () => {
       if (!containerRef.current) return;
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      if (!containerRef.current) return;
+      if (disposed || !containerRef.current) return;
 
       const renderer = new Renderer({
         dpr: Math.min(window.devicePixelRatio, 2),
@@ -232,6 +239,7 @@ void main() {
     initializeWebGL();
 
     return () => {
+      disposed = true;
       if (cleanupFunctionRef.current) {
         cleanupFunctionRef.current();
         cleanupFunctionRef.current = null;

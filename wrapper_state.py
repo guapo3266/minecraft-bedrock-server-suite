@@ -13,6 +13,9 @@ FINAL_BACKUP_LOCK_WAIT_SEC = 5
 FINAL_BACKUP_TIMEOUT_SEC = 240
 WORKER_COMPRESSION_TIMEOUT_SEC = 120
 WORKER_JOIN_ON_SHUTDOWN_SEC = 135
+# Tope del join tras matar el proceso de compresion (TerminateProcess es
+# inmediato; el tope solo evita que un wait colgado retenga state_lock).
+WORKER_KILL_JOIN_TIMEOUT_SEC = 10
 RETRY_BACKOFF_BASE_SEC = 5
 RETRY_BACKOFF_MAX_SEC = 60
 MAX_CONSECUTIVE_SNAPSHOT_RETRIES = 10

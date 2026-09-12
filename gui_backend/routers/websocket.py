@@ -72,16 +72,29 @@ async def websocket_endpoint(websocket: WebSocket):
                             "[SISTEMA] The Minecraft server is OFF. Press '▶ Start Server' first.",
                         ), "error")
                         continue
+                    try:
+                        with manager.stdin_lock:
+                            manager.wrapper_process.stdin.write(cmd + "\n")
+                            manager.wrapper_process.stdin.flush()
+                    except Exception as e:
+                        # Mismo eco que POST /api/command: antes el error se
+                        # tragaba aqui en silencio y el comando del usuario
+                        # desaparecia sin rastro en la consola.
+                        manager.add_log(f"> {cmd}", "command")
+                        manager.add_log(L(
+                            f"[GUI Backend] Error enviando comando: {e}",
+                            f"[GUI Backend] Error sending command: {e}",
+                        ), "error")
+                        continue
                     # 'stop' en consola apaga el wrapper entero: es un stop
-                    # deliberado y debe marcar stop_requested (igual que
-                    # /api/command) o el watchdog lo tomara por crash y
-                    # re-lanzara el servidor que el usuario acaba de parar.
+                    # deliberado y debe marcar stop_requested SOLO TRAS
+                    # ENTREGAR el comando (misma regla que /api/action/stop
+                    # y /api/command): si el stdin falla justo en un stop, el
+                    # flag quedaba True con el servidor vivo e inhibia al
+                    # watchdog ante un crash real.
                     # Se compara por LINEA: "list\nstop" tambien apaga.
                     if "stop" in {l.strip().lower() for l in cmd.splitlines()}:
                         manager.stop_requested = True
-                    with manager.stdin_lock:
-                        manager.wrapper_process.stdin.write(cmd + "\n")
-                        manager.wrapper_process.stdin.flush()
                     manager.add_log(f"> {cmd}", "command")
                 elif msg.get("type") == "ping":
                     # Medición real de latencia del frontend

@@ -26,8 +26,18 @@ if "%GUI_PORT%"=="" set GUI_PORT=8000
 echo [LAN] GUI_ALLOW_LAN=1 - la GUI sera accesible desde la red local
 echo       Puerto: %GUI_PORT%
 echo       URL local: http://127.0.0.1:%GUI_PORT%
+:: IP LAN: se prefiere un rango domestico (192.168., luego 10.) antes que
+:: "la ultima de ipconfig": con una VPN activa el ultimo adaptador suele ser
+:: el tunel (100.x/172.x de Docker/WSL) y la URL mostrada no seria alcanzable.
+set "LAN_IP="
 for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do (
-    for /f "tokens=1" %%b in ("%%a") do set LAN_IP=%%b
+    for /f "tokens=1" %%b in ("%%a") do echo %%b| findstr /r /c:"^192\.168\." >nul && set "LAN_IP=%%b"
+)
+if not defined LAN_IP for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do (
+    for /f "tokens=1" %%b in ("%%a") do echo %%b| findstr /r /c:"^10\." >nul && set "LAN_IP=%%b"
+)
+if not defined LAN_IP for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do (
+    for /f "tokens=1" %%b in ("%%a") do set "LAN_IP=%%b"
 )
 if defined LAN_IP (
     echo       URL en movil: http://%LAN_IP%:%GUI_PORT%  ^(misma WiFi^)
@@ -102,8 +112,14 @@ call :bootstrap_unlock
 if not exist "gui_frontend\dist\index.html" (
     echo [2/3] dist no encontrado: compilando frontend...
     cd gui_frontend
+    if errorlevel 1 (
+        echo [ERROR] No se pudo entrar en gui_frontend.
+        call :bootstrap_unlock
+        pause
+        exit /b 1
+    )
     call npm run build
-    cd ..
+    cd /d "%~dp0"
 ) else (
     echo [2/3] Frontend React listo.
 )

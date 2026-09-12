@@ -343,6 +343,16 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         # S3: límite de tamaño de descarga para no llenar el disco
         max_bytes = 400 * 1024 * 1024
         dl = requests.get(url, headers=_UA_HEADERS, stream=True, timeout=30)
+        # Un 404/503 del CDN guardaria la pagina de error como zip y fallaria
+        # despues como BadZipFile con un diagnostico enganoso. getattr: los
+        # fakes de tests y respuestas parciales pueden no traer status_code.
+        try:
+            dl_status = int(getattr(dl, "status_code", 0))
+        except (TypeError, ValueError):
+            dl_status = 0
+        if dl_status >= 400:
+            log_fn(L(f"{tag} La descarga devolvió HTTP {dl_status}. Abortando.", f"{tag} The download returned HTTP {dl_status}. Aborting."), "error")
+            return False, None
         content_length = dl.headers.get("Content-Length")
         try:
             if content_length and int(content_length) > max_bytes:

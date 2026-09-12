@@ -29,6 +29,10 @@ def test_tail_events_espera_archivo_drena_y_termina(tmp_path, monkeypatch):
 
     monkeypatch.setattr(manager, "events_alive", False)
     monkeypatch.setattr(manager, "installed_version", None)
+    # _tail_events termina si la sesion caduco (events_file apunta a otro
+    # canal): este test no levanta sesion, asi que aislar el atributo (otros
+    # tests lo dejan seteado sin monkeypatch).
+    monkeypatch.setattr(manager, "events_file", None)
     manager.wrapper_exit_event.clear()
     hilo = threading.Thread(target=sup._tail_events, args=(str(ruta),), daemon=True)
     hilo.start()

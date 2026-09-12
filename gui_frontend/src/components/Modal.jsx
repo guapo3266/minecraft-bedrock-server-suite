@@ -7,6 +7,12 @@ import { motion } from 'framer-motion';
 // y overscroll contenida. Se renderiza via portal a body para que ningún
 // stacking context ancestro (secciones z-10, transforms) lo tapen o desvien.
 // La animacion replica el patron spring que ya usaban los modales originales.
+
+// Pila de modales abiertos en este modulo: con modales apilados, Escape solo
+// cierra el superior. Antes cada instancia escuchaba el mismo keydown de
+// document y una sola tecla cerraba toda la pila en cascada.
+const modalStack = [];
+
 export default function Modal({ onClose, label, children, className = '' }) {
   const cardRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -17,8 +23,12 @@ export default function Modal({ onClose, label, children, className = '' }) {
     restoreFocusRef.current = document.activeElement;
     if (cardRef.current) cardRef.current.focus();
 
+    const entry = { onClose: () => onCloseRef.current() };
+    modalStack.push(entry);
+
     const onKey = (ev) => {
       if (ev.key === 'Escape') {
+        if (modalStack[modalStack.length - 1] !== entry) return;
         onCloseRef.current();
         return;
       }
@@ -46,6 +56,8 @@ export default function Modal({ onClose, label, children, className = '' }) {
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
+      const stackIdx = modalStack.indexOf(entry);
+      if (stackIdx >= 0) modalStack.splice(stackIdx, 1);
       // Devolver el foco a quien abrio el modal (si sigue en el DOM)
       const el = restoreFocusRef.current;
       if (el && el.isConnected && typeof el.focus === 'function') el.focus();

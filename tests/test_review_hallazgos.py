@@ -1012,7 +1012,7 @@ def test_kill_worker_limpia_tmp_huerfanos(monkeypatch, tmp_path):
         def kill(self):
             pass
 
-        def join(self):
+        def join(self, timeout=None):
             pass
 
     fp = FakeProc()
@@ -1380,6 +1380,9 @@ def test_worker_timeout_compresion_mata_proceso_y_libera_estado(monkeypatch, tmp
 
         def kill(self):
             killed["n"] += 1
+
+        def join(self, timeout=None):
+            pass
 
     fake = FakeCompProc()
     monkeypatch.setattr(wrapper_backup.subprocess, "Popen", lambda *a, **k: fake)

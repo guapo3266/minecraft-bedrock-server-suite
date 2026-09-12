@@ -223,6 +223,10 @@ def list_and_restore():
     with zipfile.ZipFile(selected_zip, "r") as zipf:
         world_infos, pack_infos = [], []
         for entry in zipf.infolist():
+            if entry.filename.replace("\\", "/").endswith("/"):
+                # Entrada de directorio: sin datos; y una "server_resource_packs/"
+                # suelta clasificaria como mundo dejando carpeta espuria.
+                continue
             parsed = _pack_dest(entry.filename)
             if parsed:
                 pack_infos.append((entry, parsed))
@@ -263,8 +267,12 @@ def list_and_restore():
                     with zipf.open(entry, "r") as src, open(staging_f, "wb") as out:
                         shutil.copyfileobj(src, out)
 
-        if world_infos and not os.path.exists(os.path.join(world_staging, "level.dat")):
-            raise RuntimeError("El staging no contiene level.dat válido; restauración abortada sin tocar el mundo.")
+        # level.dat se exige SIEMPRE (tambien con world_infos vacio): un ZIP
+        # sin entradas de mundo (vacio o solo-packs) pasaba las validaciones
+        # previas, instalaba un staging VACIO como mundo activo y borraba el
+        # .bak del mundo real (mismo guard que auto_backup.restore_backup).
+        if not os.path.exists(os.path.join(world_staging, "level.dat")):
+            raise RuntimeError("El backup no contiene un mundo valido (sin level.dat); restauración abortada sin tocar el mundo.")
     except Exception as e:
         print(f"[ERROR] Falló la descompresión: {e}. El mundo original NO fue modificado.")
         shutil.rmtree(world_staging, ignore_errors=True)

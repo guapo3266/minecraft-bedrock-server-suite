@@ -139,7 +139,12 @@ def run_wrapper_thread(process=None):
             # limpieza final; en ese momento el mundo ya está quieto, aunque el
             # proceso del wrapper siga vivo haciendo el backup de cierre.
             # (Marcador bilingue: la consola adapta el texto al idioma GUI.)
-            if "BDS stopped" in line_str or "BDS detenido" in line_str:
+            # H-01: mismo gate anti-spoofing que el resto de marcadores — se
+            # evalua solo en la linea sin prefijo y nunca en lineas de chat
+            # (<Jugador>): un jugador escribiendo "BDS stopped" en el chat
+            # seteaba el evento espuriamente y un stop_and_wait/restore
+            # posterior creia el mundo quieto con BDS vivo.
+            if not is_chat and ("BDS stopped" in clean_str or "BDS detenido" in clean_str):
                 manager.server_stopped_event.set()
 
             # Determinar tipo de log para coloreado en la GUI
@@ -315,21 +320,34 @@ def _tail_events(path):
     GUI perderia la fuente autoritativa del estado hasta reiniciarla),
     drena lo pendiente tras la muerte del wrapper y termina cuando
     wrapper_exit_event esta set y no queda nada por leer.
+
+    Ademas termina si la sesion cambio (manager.events_file ya apunta al
+    canal de otro boot): con un restart rapido, el finally del hilo viejo
+    setea wrapper_exit_event pero _spawn_wrapper_process lo limpia tras el
+    Popen; si el poll de 200 ms de este tail caia en medio, quedaba atrapado
+    leyendo el .ndjson muerto para siempre — un hilo y un HANDLE abierto por
+    restart, y en Windows ese handle bloqueaba en silencio la rotacion de 7
+    dias de wrapper_events.
     """
     handle = None
     try:
         while True:
+            # La sesion de este archivo ya fue reemplazada por otra: drenar
+            # no tiene sentido (el tail nuevo ya es la fuente autoritativa).
+            sesion_caducada = (
+                manager.events_file is not None and manager.events_file != path
+            )
             if handle is None:
                 try:
                     handle = open(path, "r", encoding="utf-8", errors="replace")
                 except OSError:
-                    if manager.wrapper_exit_event.is_set():
+                    if manager.wrapper_exit_event.is_set() or sesion_caducada:
                         return
                     time.sleep(0.2)
                     continue
             line = handle.readline()
             if not line:
-                if manager.wrapper_exit_event.is_set():
+                if manager.wrapper_exit_event.is_set() or sesion_caducada:
                     return
                 time.sleep(0.2)
                 continue

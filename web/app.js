@@ -152,11 +152,18 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════════
 // LOGS Y TERMINAL
 // ═══════════════════════════════════════════════════════════════
+// Tope de nodos de la terminal: una sesion larga (logs cada segundo) crecia
+// sin limite y acababa consumiendo cientos de MB del DOM.
+const MAX_LOG_ENTRIES = 800;
+
 function appendLog(text, type = 'info') {
   const entry = document.createElement('div');
   entry.className = `log-entry ${type}`;
   entry.textContent = text;
   terminalBody.appendChild(entry);
+  while (terminalBody.childElementCount > MAX_LOG_ENTRIES) {
+    terminalBody.removeChild(terminalBody.firstChild);
+  }
 
   // Mantener scroll abajo automáticamente
   terminalBody.scrollTop = terminalBody.scrollHeight;
@@ -172,7 +179,19 @@ btnClearLogs.addEventListener('click', () => {
 async function triggerAction(actionName) {
   try {
     const res = await fetch(`/api/action/${actionName}`, { method: 'POST' });
-    const data = await res.json();
+    let data = {};
+    try {
+      data = await res.json();
+    } catch (e) {
+      // cuerpo no JSON: seguir con data vacio y reportar el HTTP
+    }
+    if (!res.ok) {
+      // Un 409/500 trae {"detail": ...} sin "status": antes se logueaba
+      // "solicitada: undefined" y el error parecia un exito.
+      const motivo = data.detail || data.message || ('HTTP ' + res.status);
+      appendLog(`[GUI] Acción '${actionName}' rechazada: ${motivo}`, 'error');
+      return;
+    }
     appendLog(`[GUI] Acción '${actionName}' solicitada: ${data.status}`, 'system');
     fetchBackupsList();
   } catch (e) {
