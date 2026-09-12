@@ -152,7 +152,7 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 - 400 `"Cuerpo JSON invalido"` / `"Nombre de backup invalido"` (basename != nombre).
 - 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`) / `"Hay una instancia externa del servidor en ejecución; restauración cancelada"` (sonda externa bajo `op_lock`).
 - 404: `FileNotFoundError` (texto del error).
-- 500: error genérico.
+- 500: error genérico (extracción/swap). Un ZIP sin `level.dat` en el staging — vacío o solo-packs — se rechaza con `RuntimeError` SIN tocar el mundo (ronda 2026-09-11).
 - 200: `{"status": "ok", "backup": "<filename>"}` + log.
 
 ### `GET /api/backups/{filename}/download`
@@ -194,7 +194,7 @@ Cliente → servidor:
 
 | `type` | Payload | Efecto |
 |---|---|---|
-| `command` | `{"type":"command","command":"<str>"}` | Escribe en stdin del wrapper bajo `stdin_lock` si el servidor corre; con el servidor apagado o el wrapper muerto añade 2 logs (echo `> cmd` + aviso) igual que `POST /api/command`, sin escribir a stdin |
+| `command` | `{"type":"command","command":"<str>"}` | Escribe en stdin del wrapper bajo `stdin_lock` si el servidor corre; con el servidor apagado o el wrapper muerto añade 2 logs (echo `> cmd` + aviso) igual que `POST /api/command`, sin escribir a stdin. Si el write a stdin falla, añade echo + log de error y no marca `stop_requested` (el comando no llegó) |
 | `ping` | `{"type":"ping"}` | Latencia del frontend |
 | `set_lang` | `{"type":"set_lang","lang":"es|en"}` | Cambia `WRAPPER_LANG` en vivo |
 
@@ -204,7 +204,7 @@ Cliente → servidor:
 - `manager.lock`: mutaciones/lecturas de `players_online` y `log_history`.
 - `manager.stdin_lock`: TODAS las escrituras a `wrapper_process.stdin` (API command, WS command, stop/restart/backup/update) — 6 sitios.
 - `manager.op_lock`: exclusión mutua de start/restore/update/backup frío/install.
-- Stop deliberado: `stop_requested` solo se marca DESPUÉS de entregar el `stop` por stdin (router stop, `restart_wrapper`, `stop_and_wait`); si el write falla, la operación se cancela sin inhibir al watchdog.
+- Stop deliberado: `stop_requested` solo se marca DESPUÉS de entregar el `stop` por stdin (router stop, `POST /api/command`, comando WS, `restart_wrapper`, `stop_and_wait`); si el write falla, la operación se cancela sin inhibir al watchdog.
 - Eventos G8: `server_stopped_event` (BDS muerto) ≠ `wrapper_exit_event` (wrapper terminado, backup final incluido).
 - `SERVER_STOP_TIMEOUT_SEC=75`, `WRAPPER_EXIT_TIMEOUT_SEC=450`.
 - `manager` es un singleton global; nunca crear instancias por petición.

@@ -422,15 +422,16 @@ con autorización explícita del usuario para el e2e (C16).
 
 **Hallazgos nuevos (no bloqueantes; documentados en `AGENTS.md`):**
 
-- **O1 (menor, producto)**: `stop_requested` se marca ANTES del write a
-  stdin en `routers/system.py:139-140` (`POST /api/command`) y
-  `gui_backend/routers/websocket.py:80-81` (comando WS) — el mismo defecto
-  que esta ronda corrigió en `actions.py`/`lifecycle.py`. Si el stdin falla
-  justo en un `stop` por consola/WS, el flag queda True con el servidor vivo
-  y el watchdog no re-lanzaría un crash posterior. Fix sugerido: mover el
-  flag tras el write + tests mirror de
+- **O1 (menor, producto) — RESUELTO 2026-09-11**: `stop_requested` se marcaba
+  ANTES del write a stdin en `routers/system.py` (`POST /api/command`) y
+  `gui_backend/routers/websocket.py` (comando WS) — el mismo defecto
+  que esta ronda corrigió en `actions.py`/`lifecycle.py`. Si el stdin fallaba
+  justo en un `stop` por consola/WS, el flag quedaba True con el servidor vivo
+  y el watchdog no re-lanzaría un crash posterior. Alineado en la ronda
+  2026-09-11 (flag tras el write; el WS además ya loguea el error en vez de
+  tragárselo) con tests mirror de
   `test_schedule_watchdog.py::test_stop_stdin_roto_devuelve_500_y_no_marca_flag`
-  para consola y WS.
+  para consola y WS en `tests/test_ronda_2026-09-11.py`.
 - **O2 (higiene, producción)**: `..\Servidor de Guapo` conserva `tests/`
   (42 archivos) y `docs/` (16) de un sync anterior a esta ronda (fechas de
   agosto); el sync del 2026-09-10 no los copió (verificado por hashes).

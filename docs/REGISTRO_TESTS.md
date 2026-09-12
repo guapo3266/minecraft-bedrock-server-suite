@@ -392,3 +392,18 @@ worker; `tools/verify_backups.py`; troubleshooting en README.
 **Verificación Parte 3:** 702 passed, 2 deselected, 0 skips; 10/10 corridas
 consecutivas + base de Hypothesis fresca; `ruff check` limpio; smoke real con
 uvicorn; 0 artefactos nuevos.
+
+### Ronda 2026-09-11 — fixes de revisión multi-pase
+
+Detalle en `docs/INFORME_FIXES_2026-09-11.md`. 16 hallazgos verificados como
+reales corregidos (destacados: restore de ZIP sin `level.dat` ya no destruye
+el mundo activo; el watchdog de backup no aborta la recolección activa con
+diagnóstico falso; el wrapper resiste `server.properties` no-UTF-8; gap O1
+alineado con tests mirror de consola y WS) y 4 descartados como falsos
+positivos. Regresiones nuevas: `tests/test_ronda_2026-09-11.py` (22 tests).
+Ignore puntual de `StarletteDeprecationWarning` (starlette pide `httpx2`)
+en `pytest.ini`: sin él fallaban TODOS los tests con `TestClient` en esta
+máquina.
+
+**Verificación:** 726 passed, 2 deselected, 0 fallos; `ruff check .` limpio;
+`oxlint` 0 errores; `dist/` reconstruido con los cambios de frontend.

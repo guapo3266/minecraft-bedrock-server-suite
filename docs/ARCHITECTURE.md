@@ -160,6 +160,11 @@ vía `manager.add_log`.
   `manager.events_alive` y el parseo de stdout queda como fallback. El lector
   abre con `errors="replace"`: líneas corruptas a nivel JSON **y bytes**
   (UTF-8 truncado por un write interrumpido) se saltan sin matar al hilo.
+  Termina además si la sesión caducó (`manager.events_file` ya apunta al
+  canal de otro boot): con restarts rápidos, el `wrapper_exit_event` que el
+  finally del hilo viejo setea puede ser limpiado por el spawn nuevo antes
+  de que el poll del tail lo vea, y sin ese chequeo el hilo viejo quedaba
+  leyendo el `.ndjson` muerto para siempre (hilo + handle por restart).
 - Contrato y fases: `docs/INFORME_IPC_EVENTOS_NDJSON.md`.
 
 ## Rollback de versión BDS (data/bds_previous)
