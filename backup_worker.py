@@ -72,20 +72,23 @@ def _main():
         raise SystemExit(2)
     snap_path, marker, result_path = sys.argv[1:4]
 
+    # Import unico (antes tardio): el prefijo del contrato worker->wrapper y
+    # create_backup viven en auto_backup; la rama de snapshot ilegible de
+    # abajo ya necesita SNAPSHOT_ERROR_PREFIX.
+    import auto_backup
+
     try:
         file_snapshot = load_snapshot(snap_path)
     except Exception as e:
         # El padre pudo borrar el temporal o el JSON quedar ilegible: se anota
         # como fallo de snapshot (retryable por el wrapper), no como traceback.
-        result = {"zip": None, "error": "Snapshot: no se pudo leer el snapshot: %s" % e}
+        result = {"zip": None, "error": auto_backup.SNAPSHOT_ERROR_PREFIX + ("no se pudo leer el snapshot: %s" % e)}
         try:
             write_result(result_path, result)
         except Exception:
             pass
         print(L("[Worker] Falló la compresión: %s", "[Worker] Compression failed: %s") % result["error"])
         raise SystemExit(1)
-
-    import auto_backup  # import tardio: solo aqui hace falta
 
     t0 = time.time()
     try:
@@ -97,9 +100,10 @@ def _main():
         result = {"zip": zip_path, "error": None}
     except auto_backup.SnapshotDesyncError as e:
         # Snapshot desincronizado/incompleto: un nuevo save query puede dar un
-        # snapshot consistente. El prefijo "Snapshot:" lo marca para que el
-        # wrapper lo reintente con backoff.
-        result = {"zip": None, "error": "Snapshot: %s" % e}
+        # snapshot consistente. El prefijo SNAPSHOT_ERROR_PREFIX lo marca para
+        # que el wrapper lo reintente con backoff (contrato worker->wrapper,
+        # fuente unica en auto_backup).
+        result = {"zip": None, "error": auto_backup.SNAPSHOT_ERROR_PREFIX + str(e)}
     except Exception as e:
         # Errores de almacenamiento/operativos (disco lleno, permisos, creacion
         # del ZIP, cancelacion): un reintento no los resuelve; viajan sin el

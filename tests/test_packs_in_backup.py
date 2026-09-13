@@ -13,6 +13,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auto_backup
+import restore_core
 
 
 def _setup_env():
@@ -132,12 +133,12 @@ def test_restore_rollback_recupera_packs_y_mundo():
             zf.writestr("level.dat", b"WORLD-BACKUP")
             zf.writestr("server_resource_packs/Revolution Vibrant Visuals - Realistic/manifest.json", b'{"v":2}')
 
-        orig = auto_backup._extract_pack_entry
+        orig = restore_core._extract_pack_entry
 
         def raiser(zf, entry, base_dir, rel_path):
             raise OSError("fallo simulado de disco")
 
-        auto_backup._extract_pack_entry = raiser
+        restore_core._extract_pack_entry = raiser
         try:
             try:
                 auto_backup.restore_backup("auto_backup_test_fail.zip")
@@ -145,7 +146,7 @@ def test_restore_rollback_recupera_packs_y_mundo():
             except RuntimeError:
                 pass
         finally:
-            auto_backup._extract_pack_entry = orig
+            restore_core._extract_pack_entry = orig
 
         # mundo y pack recuperados desde los resguardos
         assert Path(os.path.join(fake_world, "level.dat")).read_bytes() == b"CURRENT-WORLD"
@@ -162,13 +163,13 @@ def test_restore_rollback_recupera_packs_y_mundo():
 def test_pack_dest_clasifica_archivo_suelto_como_pack():
     """H3: un archivo en la raiz del pack dir (sin subcarpeta) se clasifica
     como pack con folder raiz, no como mundo."""
-    assert auto_backup._pack_dest("server_resource_packs/notas.txt") == ("resource_packs", "", "notas.txt")
-    assert auto_backup._pack_dest("server_behavior_packs/manifest.json") == ("behavior_packs", "", "manifest.json")
+    assert restore_core._pack_dest("server_resource_packs/notas.txt") == ("resource_packs", "", "notas.txt")
+    assert restore_core._pack_dest("server_behavior_packs/manifest.json") == ("behavior_packs", "", "manifest.json")
     # casos que no cambian
-    assert auto_backup._pack_dest("server_resource_packs/MiPack/manifest.json") == ("resource_packs", "MiPack", "manifest.json")
-    assert auto_backup._pack_dest("level.dat") is None
-    assert auto_backup._pack_dest("server_resource_packs/") is None
-    assert auto_backup._pack_dest("worlds/Bedrock level/db/foo") is None
+    assert restore_core._pack_dest("server_resource_packs/MiPack/manifest.json") == ("resource_packs", "MiPack", "manifest.json")
+    assert restore_core._pack_dest("level.dat") is None
+    assert restore_core._pack_dest("server_resource_packs/") is None
+    assert restore_core._pack_dest("worlds/Bedrock level/db/foo") is None
 
 
 def test_restore_devuelve_archivo_suelto_de_pack_a_carpeta_de_servidor():

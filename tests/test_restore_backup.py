@@ -11,6 +11,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import auto_backup
+import restore_core
 
 
 def _setup_env():
@@ -132,7 +133,7 @@ def test_restore_rechaza_zip_que_excede_la_expansion(monkeypatch):
                   {"level.dat": b"NUEVO"})
         with open(os.path.join(fake_world, "level.dat"), "wb") as f:
             f.write(b"VIEJO")
-        monkeypatch.setattr(auto_backup, "_exceeds_expansion_limit",
+        monkeypatch.setattr(restore_core, "_exceeds_expansion_limit",
                             lambda *_a, **_k: True)
 
         try:

@@ -9,18 +9,12 @@ import re
 
 import windows_process_guard as wpg
 from console_lang import L
-from zip_safety import (
-    _is_safe_zip_entry,
-    _pack_dest,
-    _quarantine_and_restore,
-    _extract_pack_entry,
-    _exceeds_expansion_limit,
-    CORRUPT_MARKERS,
-)
+from zip_safety import CORRUPT_MARKERS
 import zip_safety as _zip_safety
+import restore_core
 
-# Alias historicos para compatibilidad (tests y consumidores siguen
-# importando CORRUPT_MARKERS/_quarantine... desde aqui; la logica vive en
+# Alias historico para compatibilidad (tests y consumidores siguen
+# importando CORRUPT_MARKERS desde aqui; la lista canonica vive en
 # zip_safety, fuente unica anti-drift).
 _CORRUPT_MARKERS = CORRUPT_MARKERS
 
@@ -131,6 +125,28 @@ class SnapshotDesyncError(RuntimeError):
     reintentando y quedan fuera de esta clase.
     """
 
+
+# Contrato worker->wrapper (fuente unica): backup_worker antepone este prefijo
+# SOLO a SnapshotDesyncError; wrapper_backup._is_snapshot_failure lo busca para
+# decidir si el fallo merece reintento con backoff. Cambiarlo aqui lo cambia en
+# ambos lados a la vez.
+SNAPSHOT_ERROR_PREFIX = "Snapshot: "
+
+
+def _enforce_backup_size_limit(total_bytes):
+    """Aborta si el backup acumulado supera MAX_BACKUP_BYTES.
+
+    Fuente unica del chequeo: antes estaba copiado en cinco ramas del
+    empaquetado, con redacciones y traducciones divergentes. El mensaje
+    conserva "exceeds the"/"excede el limite" porque _is_snapshot_failure los
+    usa como defensa en profundidad ademas del prefijo centinela.
+    """
+    if total_bytes > MAX_BACKUP_BYTES:
+        raise RuntimeError(L(
+            f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB (acumulado: {total_bytes / (1024**3):.2f} GB). Abortando.",
+            f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit (accumulated: {total_bytes / (1024**3):.2f} GB). Aborting.",
+        ))
+
 def _cancelled(cancel_event):
     return cancel_event is not None and cancel_event.is_set()
 
@@ -235,10 +251,7 @@ def _write_server_packs(zipf, total_bytes, cancel_event):
                 arc = prefix + os.path.relpath(full_f, src_dir).replace(os.sep, "/")
                 zipf.write(full_f, arc)
                 total_bytes += os.path.getsize(full_f)
-                if total_bytes > MAX_BACKUP_BYTES:
-                    raise RuntimeError(
-                        L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
-                    )
+                _enforce_backup_size_limit(total_bytes)
     return total_bytes
 
 
@@ -451,11 +464,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         ) from ferr
 
                     total_bytes += copied
-                    if total_bytes > MAX_BACKUP_BYTES:
-                        raise RuntimeError(
-                            f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
-                            f"(accumulated: {total_bytes / (1024**3):.2f} GB). Aborting."
-                        )
+                    _enforce_backup_size_limit(total_bytes)
 
                 # Bedrock 'save query' omite la configuracion de shaders/addons y el icono del mundo.
                 # Debemos empacarlos manualmente en el ZIP del backup en caliente.
@@ -473,20 +482,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                     arc = os.path.relpath(full_f, world_dir).replace("\\", "/")
                                     zipf.write(full_f, arc)
                                     total_bytes += os.path.getsize(full_f)
-                                    if total_bytes > MAX_BACKUP_BYTES:
-                                        raise RuntimeError(
-                                            L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
-                                        )
+                                    _enforce_backup_size_limit(total_bytes)
                         else:
                             if _es_punto_reparse(static_path):
                                 continue
                             arc = os.path.relpath(static_path, world_dir).replace("\\", "/")
                             zipf.write(static_path, arc)
                             total_bytes += os.path.getsize(static_path)
-                            if total_bytes > MAX_BACKUP_BYTES:
-                                raise RuntimeError(
-                                    L(f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB. Abortando.", f"Backup exceeds the {MAX_BACKUP_BYTES // (1024**3)} GB limit. Aborting.")
-                                )
+                            _enforce_backup_size_limit(total_bytes)
 
                 # Packs de nivel servidor (mods/addons) tambien van al backup,
                 # con prefijo propio para que la restauracion los devuelva a
@@ -507,11 +510,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         arcname = os.path.relpath(full_path, world_dir).replace("\\", "/")
                         zipf.write(full_path, arcname)
                         total_bytes += os.path.getsize(full_path)
-                        if total_bytes > MAX_BACKUP_BYTES:
-                            raise RuntimeError(
-                                f"Backup excede el limite de {MAX_BACKUP_BYTES // (1024**3)} GB "
-                                f"(accumulated: {total_bytes / (1024**3):.2f} GB). Aborting."
-                            )
+                        _enforce_backup_size_limit(total_bytes)
 
                 # Packs de nivel servidor (mods/addons) tambien van al backup
                 total_bytes = _write_server_packs(zipf, total_bytes, cancel_event)
@@ -670,21 +669,16 @@ def rotate_backups(now=None):
     if deleted_count > 0:
         print(L(f"[*] Limpieza completada. Backups retenidos: {len(keepers)}.", f"[*] Cleanup complete. Backups kept: {len(keepers)}."))
 
-# _is_safe_zip_entry, _pack_dest, _extract_pack_entry, _quarantine_and_restore
-# y CORRUPT_MARKERS centralizados en zip_safety (importados arriba)
+# La coreografia de restauracion (validacion, staging, guard de level.dat,
+# swap con rollback y limpieza) vive en restore_core.py: fuente unica que
+# consumen esta GUI y la CLI restore_backup.py (anti-drift GUI/CLI).
 
 def restore_backup(filename):
-    """
-    Restaura un backup ZIP de forma segura mediante staging e intercambio transaccional:
-    - Extrae el contenido a carpetas temporales de staging (.restore_staging_<nonce>).
-    - Valida la presencia de level.dat en el staging.
-    - Realiza el intercambio atómico/recuperable:
-      1. Resguarda el mundo activo a .bak_<nonce>
-      2. Mueve world_staging al mundo activo
-      3. Aplica lo mismo para las carpetas de packs afectadas
-      4. Si el intercambio falla, revierte mediante aislamiento por cuarentena garantizando restaurar .bak.
-    - Limpia los resguardos solo si todo el intercambio se completó con éxito.
-    Devuelve la ruta del backup restaurado.
+    """Restaura un backup ZIP de forma segura (staging + swap recuperable).
+
+    Resuelve la instalacion activa y delega en restore_core.restore_from_zip:
+    valida el ZIP, extrae a staging, exige level.dat y hace el intercambio con
+    rollback por cuarentena. Devuelve la ruta del backup restaurado.
     """
     if os.path.basename(filename) != filename:
         raise ValueError(L("Nombre de backup invalido", "Invalid backup name"))
@@ -693,163 +687,9 @@ def restore_backup(filename):
     zip_path = os.path.join(active_backup_dir, filename)
     if not os.path.isfile(zip_path):
         raise FileNotFoundError(L("Backup no encontrado", "Backup not found"))
+    return restore_core.restore_from_zip(zip_path, BASE_DIR, active_world_dir)
 
-    # 1. Validar el ZIP antes de tocar el mundo y separar entradas:
-    #    packs de servidor (server_resource_packs/..., server_behavior_packs/...)
-    #    vs entradas del mundo.
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        world_infos, pack_infos = [], []
-        for entry in zf.infolist():
-            if not _is_safe_zip_entry(entry.filename):
-                raise ValueError(L(f"Entrada insegura en el backup: {entry.filename}", f"Unsafe entry in the backup: {entry.filename}"))
-            if entry.filename.replace("\\", "/").endswith("/"):
-                # Entrada de directorio: no contiene datos y ademas una
-                # "server_resource_packs/" suelta clasificaria como mundo,
-                # dejando una carpeta espuria dentro de world_staging.
-                continue
-            parsed = _pack_dest(entry.filename)
-            if parsed:
-                pack_infos.append((entry, parsed))
-            else:
-                world_infos.append(entry)
-        bad = zf.testzip()
-        if bad is not None:
-            raise ValueError(L(f"Backup corrupto (CRC fallido): {bad}", f"Corrupt backup (CRC failed): {bad}"))
-        if _exceeds_expansion_limit(zf.infolist()):
-            raise ValueError(L(
-                "Backup rechazado: su tamaño descomprimido excede el limite de seguridad.",
-                "Backup rejected: its uncompressed size exceeds the safety limit.",
-            ))
 
-    nonce = os.urandom(4).hex()
-    world_staging = active_world_dir + f".restore_staging_{nonce}"
-    pack_dir_stagings = {}   # dest_dir -> staging_dir
-    pack_file_stagings = {}  # dest_file -> staging_file
-
-    for _entry, (kind, folder, rel) in pack_infos:
-        if folder:
-            dest_dir = os.path.normpath(os.path.join(BASE_DIR, kind, folder))
-            if dest_dir not in pack_dir_stagings:
-                pack_dir_stagings[dest_dir] = dest_dir + f".restore_staging_{nonce}"
-        else:
-            dest_file = os.path.normpath(os.path.join(BASE_DIR, kind, rel))
-            if dest_file not in pack_file_stagings:
-                pack_file_stagings[dest_file] = dest_file + f".restore_staging_{nonce}"
-
-    # 2. Extraer a directorios/archivos de staging (el mundo real y los packs reales no se tocan)
-    try:
-        os.makedirs(world_staging, exist_ok=True)
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            for entry in world_infos:
-                zf.extract(entry, world_staging)
-            for entry, (kind, folder, rel) in pack_infos:
-                if folder:
-                    dest_dir = os.path.normpath(os.path.join(BASE_DIR, kind, folder))
-                    _extract_pack_entry(zf, entry, pack_dir_stagings[dest_dir], rel)
-                else:
-                    dest_file = os.path.normpath(os.path.join(BASE_DIR, kind, rel))
-                    staging_f = pack_file_stagings[dest_file]
-                    os.makedirs(os.path.dirname(staging_f), exist_ok=True)
-                    with zf.open(entry, "r") as src, open(staging_f, "wb") as out:
-                        shutil.copyfileobj(src, out)
-
-        # 3. Validar el staging antes del intercambio. level.dat se exige
-        # SIEMPRE (tambien con world_infos vacio): un ZIP sin entradas de
-        # mundo (vacio o solo-packs) pasaba todas las validaciones previas,
-        # instalaba un staging VACIO como mundo activo y borraba el .bak del
-        # mundo real: perdida total del mundo por un zip ajeno en la carpeta.
-        if not os.path.exists(os.path.join(world_staging, "level.dat")):
-            raise RuntimeError(L("El backup no contiene un mundo valido (sin level.dat); restauración abortada sin tocar el mundo.",
-                                 "The backup does not contain a valid world (no level.dat); restore aborted without touching the world."))
-    except Exception as exc:
-        # Limpiar staging si falló la extracción previa al intercambio
-        shutil.rmtree(world_staging, ignore_errors=True)
-        for s_dir in pack_dir_stagings.values():
-            shutil.rmtree(s_dir, ignore_errors=True)
-        for s_file in pack_file_stagings.values():
-            if os.path.exists(s_file):
-                try:
-                    os.remove(s_file)
-                except Exception:
-                    pass
-        raise RuntimeError(L(f"Fallo la extraccion: {exc}", f"Extraction failed: {exc}")) from exc
-
-    # 4. Intercambio recuperable (swap)
-    bak_dir = active_world_dir + f".bak_{nonce}"
-    pack_baks = []  # (active_path, bak_path, is_dir)
-    swap_success = False
-
-    try:
-        # Resguardar el mundo actual (si existe)
-        if os.path.exists(active_world_dir):
-            os.rename(active_world_dir, bak_dir)
-
-        # Resguardar packs actuales (si existen)
-        for dest_dir in sorted(pack_dir_stagings.keys()):
-            if os.path.exists(dest_dir):
-                bak = dest_dir + f".bak_{nonce}"
-                os.rename(dest_dir, bak)
-                pack_baks.append((dest_dir, bak, True))
-
-        for dest_file in sorted(pack_file_stagings.keys()):
-            if os.path.exists(dest_file):
-                bak = dest_file + f".bak_{nonce}"
-                os.rename(dest_file, bak)
-                pack_baks.append((dest_file, bak, False))
-
-        # Mover staging a destinos finales
-        os.rename(world_staging, active_world_dir)
-        for dest_dir, s_dir in pack_dir_stagings.items():
-            if os.path.exists(s_dir):
-                os.makedirs(os.path.dirname(dest_dir), exist_ok=True)
-                os.rename(s_dir, dest_dir)
-        for dest_file, s_file in pack_file_stagings.items():
-            if os.path.exists(s_file):
-                os.makedirs(os.path.dirname(dest_file), exist_ok=True)
-                os.rename(s_file, dest_file)
-
-        swap_success = True
-    except Exception as swap_err:
-        # Rollback del intercambio si falló algún rename
-        print(L(f"[ERROR] Falló el intercambio de restauración: {swap_err}. Iniciando rollback...",
-                f"[ERROR] Swap failed during restore: {swap_err}. Starting rollback..."))
-
-        _quarantine_and_restore(active_world_dir, bak_dir, is_dir=True)
-
-        for active_p, bak_p, is_d in reversed(pack_baks):
-            _quarantine_and_restore(active_p, bak_p, is_dir=is_d)
-
-        shutil.rmtree(world_staging, ignore_errors=True)
-        for s_dir in pack_dir_stagings.values():
-            shutil.rmtree(s_dir, ignore_errors=True)
-        for s_file in pack_file_stagings.values():
-            if os.path.exists(s_file):
-                try:
-                    os.remove(s_file)
-                except Exception:
-                    pass
-
-        raise RuntimeError(L(f"Fallo el intercambio durante la restauracion: {swap_err}",
-                             f"Swap failed during restore: {swap_err}")) from swap_err
-
-    # 5. Limpieza de los resguardos solo tras intercambio exitoso
-    if swap_success:
-        if os.path.exists(bak_dir):
-            try:
-                shutil.rmtree(bak_dir, ignore_errors=True)
-            except Exception:
-                pass
-        for active_p, bak_p, is_d in pack_baks:
-            if os.path.exists(bak_p):
-                try:
-                    if is_d:
-                        shutil.rmtree(bak_p, ignore_errors=True)
-                    else:
-                        os.remove(bak_p)
-                except Exception:
-                    pass
-
-    return zip_path
 
 
 def recover_interrupted_restores(base_dir=None):

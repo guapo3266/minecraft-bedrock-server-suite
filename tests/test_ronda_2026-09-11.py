@@ -151,13 +151,17 @@ def test_restore_zip_valido_sigue_funcionando_y_sin_dir_entry_en_mundo(monkeypat
     assert not os.path.exists(os.path.join(fake_world, "server_resource_packs"))
 
 
-def test_guard_level_dat_presente_en_ambos_restores():
-    """Anti-drift: el guard exige level.dat SIEMPRE (sin `world_infos and`)
-    en auto_backup y en el CLI restore_backup."""
+def test_guard_level_dat_y_swap_viven_solo_en_restore_core():
+    """Anti-drift: el pipeline de restore vive SOLO en restore_core (fuente
+    unica GUI/CLI) y el guard exige level.dat SIEMPRE (sin `world_infos and`);
+    los consumidores no deben re-duplicar staging/swap."""
+    core = Path(os.path.join(BASE_DIR, "restore_core.py")).read_text(encoding="utf-8")
+    assert 'if not os.path.exists(os.path.join(world_staging, "level.dat")):' in core
+    assert "world_infos and not os.path.exists" not in core
     for rel in ("auto_backup.py", "restore_backup.py"):
-        src = Path(os.path.join(BASE_DIR, rel)).read_text(encoding="utf-8")
-        assert 'if not os.path.exists(os.path.join(world_staging, "level.dat")):' in src, rel
-        assert "world_infos and not os.path.exists" not in src, rel
+        consumer = Path(os.path.join(BASE_DIR, rel)).read_text(encoding="utf-8")
+        assert 'if not os.path.exists(os.path.join(world_staging, "level.dat")):' not in consumer, rel
+        assert "os.rename(world_staging, active_world_dir)" not in consumer, rel
 
 
 # ═══════════════════════════════════════════════════════════════════════

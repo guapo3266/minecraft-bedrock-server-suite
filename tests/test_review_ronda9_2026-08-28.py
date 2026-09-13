@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import auto_backup
 import restore_backup
+import restore_core
 import wrapper_backup
 import wrapper_events
 import zip_safety
@@ -313,11 +314,10 @@ def test_ws_stop_multilinea_marca_stop_requested(monkeypatch, tmp_path):
 # ═══════════════════════════════════════════════════════════════════════
 def test_funciones_restauracion_identidad_alias():
     """Misma identidad que el contrato de _is_safe_zip_entry/_pack_dest: la
-    logica de cuarentena/extract vive en zip_safety y ambos modulos son alias."""
-    assert auto_backup._quarantine_and_restore is zip_safety._quarantine_and_restore
-    assert restore_backup._quarantine_and_restore is zip_safety._quarantine_and_restore
-    assert auto_backup._extract_pack_entry is zip_safety._extract_pack_entry
-    assert restore_backup._extract_pack_entry is zip_safety._extract_pack_entry
+    logica de cuarentena/extract vive en zip_safety y restore_core (fuente
+    unica del pipeline que consumen GUI y CLI) la consume por import."""
+    assert restore_core._quarantine_and_restore is zip_safety._quarantine_and_restore
+    assert restore_core._extract_pack_entry is zip_safety._extract_pack_entry
 
 
 def test_corrupt_markers_consenso_guicli_rotacion():

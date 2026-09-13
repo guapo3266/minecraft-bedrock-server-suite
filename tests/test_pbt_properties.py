@@ -558,7 +558,7 @@ def test_rotate_old_survivors_bounded_by_recent_layer(days_ago_list):
 # 7) _is_safe_zip_entry  —  consenso entre las 3 copias (anti-drift)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-import restore_backup as rb
+import restore_core as rc
 import server_gui_server as sgs
 import zip_safety as zs
 import gui_backend.security as sec
@@ -580,11 +580,10 @@ _hostile_zip_name = st.lists(
 @example("C:/Windows/System32")
 @example("a\\..\\b")
 def test_zip_entry_consensus(name):
-    """auto_backup, restore_backup y server_gui_server aplican el mismo guard
-    anti zip-slip: si alguno diverge, hay drift entre las copias."""
+    """restore_core (fuente unica GUI/CLI) y server_gui_server aplican el
+    mismo guard anti zip-slip: si alguno diverge, hay drift."""
     verdicts = {
-        "auto_backup": ab._is_safe_zip_entry(name),
-        "restore_backup": rb._is_safe_zip_entry(name),
+        "restore_core": rc._is_safe_zip_entry(name),
         "server_gui_server": sgs._is_safe_zip_entry(name),
     }
     assert len(set(verdicts.values())) == 1, (
@@ -608,32 +607,27 @@ _pack_rest = st.lists(
 @example("level.dat")
 @example("server_resource_packs/")
 def test_pack_dest_consensus(name):
-    """_pack_dest centralizado: auto_backup, restore_backup y zip_safety coinciden."""
+    """_pack_dest centralizado: restore_core (fuente unica GUI/CLI) y zip_safety coinciden."""
     verdicts = {
-        "auto_backup": ab._pack_dest(name),
-        "restore_backup": rb._pack_dest(name),
+        "restore_core": rc._pack_dest(name),
         "zip_safety": zs._pack_dest(name),
     }
     assert len(set(str(v) for v in verdicts.values())) == 1 or len(set(verdicts.values())) == 1, (
         f"Consenso _pack_dest roto para {name!r}: {verdicts}"
     )
     # ademas, el resultado es el mismo objeto logico (tupla/None)
-    assert verdicts["auto_backup"] == verdicts["restore_backup"] == verdicts["zip_safety"]
+    assert verdicts["restore_core"] == verdicts["zip_safety"]
 
 
 def test_zip_shared_module_identity():
-    """Los tres alias apuntan al mismo objeto de zip_safety (anti-drift por import)."""
-    assert ab._is_safe_zip_entry is zs._is_safe_zip_entry
-    assert rb._is_safe_zip_entry is zs._is_safe_zip_entry
+    """Los alias apuntan al mismo objeto de zip_safety (anti-drift por import)."""
+    assert rc._is_safe_zip_entry is zs._is_safe_zip_entry
     assert sgs._is_safe_zip_entry is zs._is_safe_zip_entry
     assert sec._is_safe_zip_entry is zs._is_safe_zip_entry
-    assert ab._pack_dest is zs._pack_dest
-    assert rb._pack_dest is zs._pack_dest
+    assert rc._pack_dest is zs._pack_dest
     # constantes compartidas
     assert ab.SERVER_PACK_DIRS == zs.SERVER_PACK_DIRS
     assert ab._PACK_ZIP_PREFIX == zs.PACK_ZIP_PREFIX
-    assert rb._SERVER_PACK_DIRS == zs.SERVER_PACK_DIRS
-    assert rb._PACK_ZIP_PREFIX == zs.PACK_ZIP_PREFIX
 
 
 if __name__ == "__main__":

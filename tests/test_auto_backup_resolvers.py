@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Resolucion dinamica de mundo/backups en auto_backup (heuristica H3).
+"""Resolucion dinamica de mundo/backups en auto_backup y restore_backup (H3).
 
 Distingue tres casos: base_dir explicita, global parcheado por tests
 (monkeypatch) y global "stale" de una instalacion longeva cuyo
@@ -8,6 +8,7 @@ server.properties cambio despues del import. Sin tocar la instalacion real.
 import os
 
 import auto_backup as ab
+import restore_backup as rb
 
 
 def _arbol(tmp_path, level_name="Nuevo"):
@@ -62,3 +63,31 @@ def test_resolve_backup_dir_por_instalacion():
 def test_rotate_backups_sin_carpeta_no_lanza(monkeypatch, tmp_path):
     monkeypatch.setattr(ab, "BACKUP_DIR", str(tmp_path / "no_existe"))
     ab.rotate_backups()  # no debe lanzar
+
+
+# ── Paridad del resolver del CLI (H3): misma heuristica que auto_backup ──────
+def test_rb_get_world_dir_con_base_dir_explicita(tmp_path):
+    _arbol(tmp_path, "MundoAlfa")
+    assert rb.get_world_dir(str(tmp_path)) == os.path.join(str(tmp_path), "worlds", "MundoAlfa")
+
+
+def test_rb_get_world_dir_respeta_el_global_parcheado(monkeypatch, tmp_path):
+    _arbol(tmp_path)
+    parcheado = os.path.join(str(tmp_path), "worlds", "Parcheado")
+    monkeypatch.setattr(rb, "WORLD_DIR", parcheado)
+
+    assert rb.get_world_dir() == parcheado
+
+
+def test_rb_get_world_dir_relee_properties_si_el_global_no_es_un_parche(
+    monkeypatch, tmp_path
+):
+    """Global == valor de import (CLI abierta con properties ya cambiado):
+    se debe releer el mundo actual y no restaurar uno stale."""
+    _arbol(tmp_path, "Nuevo")
+    viejo = "C:/viejaSede/worlds/Bedrock level"
+    monkeypatch.setattr(rb, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(rb, "WORLD_DIR", viejo)
+    monkeypatch.setattr(rb, "_IMPORT_TIME_WORLD_DIR", viejo)
+
+    assert rb.get_world_dir() == os.path.join(str(tmp_path), "worlds", "Nuevo")

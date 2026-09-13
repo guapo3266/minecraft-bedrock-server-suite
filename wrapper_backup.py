@@ -48,9 +48,14 @@ def mark_corrupt_zip(zip_filepath, reason="CORRUPTO"):
 
 
 def _is_snapshot_failure(error_msg):
-    """True si el error del worker merece reintento inmediato."""
+    """True si el error del worker merece reintento inmediato.
+
+    El centinela lo antepone backup_worker SOLO a SnapshotDesyncError
+    (SNAPSHOT_ERROR_PREFIX, fuente unica en auto_backup): no se adivina por
+    la redaccion del mensaje.
+    """
     msg = (error_msg or "").lower()
-    if "snapshot" not in msg:
+    if auto_backup.SNAPSHOT_ERROR_PREFIX.lower() not in msg:
         return False
     if "cancelled" in msg or "cancelado" in msg:
         return False

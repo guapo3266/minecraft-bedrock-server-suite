@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import pytest
 import auto_backup
 import backup_worker
+import zip_safety
 import server_wrapper as sw
 import wrapper_state as wstate
 import server_gui_server as sgs
@@ -1126,7 +1127,7 @@ def test_restore_rollback_quarantines_and_recovers_bak_when_active_world_has_loc
         f_active.write(b"PARTIAL_STAGING_CONTENT")
         # Mantener el handle abierto simulando bloqueo de proceso Windows
         with open(locked_file_path, "rb") as _holder:
-            auto_backup._quarantine_and_restore(active_world, bak_world, is_dir=True)
+            zip_safety._quarantine_and_restore(active_world, bak_world, is_dir=True)
 
     # active_world debe haber sido recuperado desde bak_world
     assert os.path.exists(active_world)

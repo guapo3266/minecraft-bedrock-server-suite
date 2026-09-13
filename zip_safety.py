@@ -1,9 +1,10 @@
 """Guards compartidos anti zip-slip y clasificacion de packs (fuente unica).
 
 Centraliza _is_safe_zip_entry y _pack_dest que estaban duplicados en
-auto_backup.py, restore_backup.py y gui_backend/security.py. Los tres
-modulos re-exportan estas funciones para compatibilidad (tests y
-monkeypatches siguen importando desde ellos) pero la logica vive aqui.
+auto_backup.py, restore_backup.py y gui_backend/security.py. La logica vive
+aqui; los consumidores actuales son restore_core.py (pipeline de restore),
+gui_backend/security.py (re-export que usa bds_update) y
+server_gui_server.py (re-export para tests).
 
 Tambien centraliza la recuperacion de restauraciones interrumpidas
 (_quarantine_and_restore, _extract_pack_entry) y la lista canonica de
@@ -11,9 +12,9 @@ marcadores de backup no restaurable (CORRUPT_MARKERS): antes vivian
 duplicadas entre auto_backup.py y restore_backup.py y divergieron (los
 backups _CRASH se ocultaban en la GUI pero no en la CLI).
 
-Anti-drift: cambiar la logica aqui afecta automaticamente a los tres
+Anti-drift: cambiar la logica aqui afecta automaticamente a los
 consumidores sin drift silencioso. Tests en test_pbt_properties.py
-verifican consenso y que los tres alias apuntan a este modulo.
+verifican consenso e identidad de los alias.
 """
 
 import os
@@ -24,9 +25,6 @@ from console_lang import L
 # Carpetas de nivel servidor incluidas en backups junto al mundo.
 SERVER_PACK_DIRS = ("resource_packs", "behavior_packs")
 PACK_ZIP_PREFIX = "server_"
-# Alias historicos para compatibilidad con restore_backup (nombres con _).
-_SERVER_PACK_DIRS = SERVER_PACK_DIRS
-_PACK_ZIP_PREFIX = PACK_ZIP_PREFIX
 
 # Marcadores canonicos de backup NO apto para restaurar ni para las capas
 # recientes/diarias de rotacion (evidencia retenida 7 dias). Unico punto de

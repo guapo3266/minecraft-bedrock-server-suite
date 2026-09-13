@@ -11,6 +11,7 @@ import zipfile
 import pytest
 
 import restore_backup as rb
+import restore_core
 
 
 @pytest.fixture
@@ -149,7 +150,7 @@ def test_cli_fallo_de_extraccion_no_toca_el_mundo(cli_env, monkeypatch):
 def test_cli_rechaza_zip_que_excede_la_expansion(cli_env, monkeypatch):
     _base, world, backups = cli_env
     _zip_backup(backups)
-    monkeypatch.setattr(rb, "_exceeds_expansion_limit", lambda *_a, **_k: True)
+    monkeypatch.setattr(restore_core, "_exceeds_expansion_limit", lambda *_a, **_k: True)
     _responder(monkeypatch, ["1", "SI", ""])
 
     rb.list_and_restore()

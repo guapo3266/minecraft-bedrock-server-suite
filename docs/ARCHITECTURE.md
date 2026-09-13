@@ -13,6 +13,9 @@ wrapper_console.py               # Regex D5, prefijos y parser save query
 wrapper_events.py                # Emisor/rotacion del canal IPC NDJSON
 wrapper_schedule.py              # Configuracion, persistencia y helpers diarios
 wrapper_backup.py                # Worker subprocess, hot backup y cancelacion
+restore_core.py                  # Pipeline unico de restore: validacion, staging,
+                                 #   guard de level.dat, swap con rollback y limpieza
+                                 #   (fuente unica GUI auto_backup / CLI restore_backup)
 zip_safety.py                    # Fuente unica anti-drift: _is_safe_zip_entry, _pack_dest,
                                  #   _extract_pack_entry, _quarantine_and_restore y CORRUPT_MARKERS
 server_properties.py             # Lectura tolerante de server.properties (clave = valor,
@@ -96,7 +99,7 @@ dueño. El detalle de acoplamientos y el inventario del movimiento están en
 ```text
 config ← security ← metrics ← state ← supervisor ← services ← routers ← app
                       (console_lang, server_wrapper, auto_backup,
-                       restore_backup, zip_safety, wrapper_events)
+                       restore_backup, restore_core, zip_safety, wrapper_events)
 ```
 
 Los routers importan servicios y estado; los servicios no conocen `Request`,
