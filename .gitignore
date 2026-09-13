@@ -64,4 +64,4 @@ archived/
 # ── Herramientas externas / generados pesados ────────────
 static_analysis_semgrep_*/
 gui_frontend/node_modules/
-tools/gui_e2e_home.png
+tools/gui_e2e_*.png

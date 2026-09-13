@@ -1,5 +1,9 @@
-fastapi>=0.110
-uvicorn>=0.29
-websockets>=12.0
-psutil>=5.9
-requests>=2.31
+# Topes superiores: versiones validadas por la suite (CI/local, 2026-09-13).
+# fastapi/uvicorn son 0.x y un minor puede romper (el caso real fue la
+# deprecation de starlette que obligo al ignore puntual de pytest.ini): tope
+# al siguiente minor. El resto, a la siguiente major.
+fastapi>=0.110,<0.142
+uvicorn>=0.29,<0.53
+websockets>=12.0,<18
+psutil>=5.9,<8
+requests>=2.31,<3

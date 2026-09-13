@@ -13,13 +13,10 @@ re-exports son superficie publica de facto para tests y gui_backend; los
 accesos canonicos al estado y a los nombres movidos viven en sus modulos.
 """
 
-import json
 import subprocess
 import threading
-import multiprocessing
 import sys
 import time
-import re
 import os
 
 import auto_backup
