@@ -202,9 +202,6 @@ def _find_L_calls(path):
 
 
 L_PY_FILES = [
-    "suite_minecraft.py",
-    "desktop_window.py",
-    "gui_backend/services/desktop_lifecycle.py",
     "server_wrapper.py",
     "wrapper_backup.py",
     "server_gui_server.py",

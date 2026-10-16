@@ -23,13 +23,6 @@ archivo de eventos; solo el wrapper lo hace, tras su propio gate de chat.
 
 ## 2. Contrato del canal
 
-Extension del portable de escritorio (2026-10-15): `final_backup_finished`
-incluye `success` (bool), `zip` (ruta publicada o null) y `error` (texto o null).
-Se emite al terminar `execute_final_backup`, tanto en exito como en fallo.
-La ventana espera el fin del wrapper y lee el evento de ESA sesion antes de
-cerrar. Si no hay confirmacion valida, permanece abierta y permite reintentar.
-Los consumidores anteriores pueden ignorarlo como cualquier evento desconocido.
-
 - Una línea JSON por evento: `{"ts": <ms epoch>, "event": "<nombre>", ...}`.
 - El wrapper abre el archivo en append al primer evento, escribe con flush
   inmediato bajo un lock propio (`_events_lock`); **cualquier fallo del canal

@@ -3,10 +3,9 @@
 import multiprocessing
 import os
 import threading
-import runtime_paths
 
 
-BASE_DIR = runtime_paths.installation_dir()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 WATCHDOG_HOLDING_TIMEOUT_SEC = 60
 LIST_SYNC_INTERVAL_SEC = 60

@@ -3,8 +3,8 @@
 import multiprocessing
 import os
 import subprocess
+import sys
 import time
-import runtime_paths
 
 import auto_backup
 import wrapper_events
@@ -214,10 +214,9 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             if cancel_event is not None and hasattr(cancel_event, "path"):
                 _marker = cancel_event.path
             comp_proc = _WorkerProcess(subprocess.Popen(
-                runtime_paths.process_command("backup-worker", _base, _snap_path, _marker, _result),
+                [sys.executable, "-u", os.path.join(_base, "backup_worker.py"), _snap_path, _marker, _result],
                 cwd=_base,
                 stdin=subprocess.DEVNULL,
-                **runtime_paths.subprocess_options(),
             ))
         except Exception as e:
             print(L(f"[Worker] [WARN] No se pudo lanzar el worker: {e}", f"[Worker] [WARN] Could not launch the worker: {e}"))

@@ -71,10 +71,9 @@ static_analysis_semgrep_*/
 gui_frontend/node_modules/
 tools/gui_e2e_*.png
 
-# Empaquetado local portable (sin datos ni binarios de Mojang)
-.venv-portable/
-build/portable/
-portable/
+# Entornos y resultados de construcción locales
+.venv*/
+/build/
 
 # Artefactos locales de documentacion, QA y experimentos (no son runtime)
 /output/

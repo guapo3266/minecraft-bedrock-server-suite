@@ -13,7 +13,6 @@ from zip_safety import CORRUPT_MARKERS
 import zip_safety as _zip_safety
 import restore_core
 import server_properties
-import runtime_paths
 
 # Alias historico para compatibilidad (tests y consumidores siguen
 # importando CORRUPT_MARKERS desde aqui; la lista canonica vive en
@@ -28,7 +27,7 @@ _PACK_ZIP_PREFIX = _zip_safety.PACK_ZIP_PREFIX
 _backup_lock = multiprocessing.Lock()
 
 # Configuracion (resuelta dinamicamente)
-BASE_DIR = runtime_paths.installation_dir()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # H3: nombre de la instalacion (carpeta del servidor). Cada servidor escribe
 # sus backups en su propia subcarpeta de Backups_Minecraft; sin esto todos
@@ -47,8 +46,11 @@ def get_world_name(base_dir=None):
 
 
 def _resolve_backup_dir(base_dir):
-    """Ruta historica en fuente; backups/ junto al .exe en el portable."""
-    return runtime_paths.backup_dir(base_dir)
+    """Backups por instalacion: Backups_Minecraft/auto_backups/<servidor>."""
+    return os.path.abspath(os.path.join(
+        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
+        os.path.basename(os.path.normpath(base_dir)),
+    ))
 
 
 WORLD_NAME = get_world_name()

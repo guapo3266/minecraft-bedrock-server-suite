@@ -4,11 +4,10 @@ import json
 import os
 import threading
 import time
-import runtime_paths
 
 
 EVENTS_DIR = os.path.join(
-    runtime_paths.installation_dir(), "data", "wrapper_events"
+    os.path.dirname(os.path.abspath(__file__)), "data", "wrapper_events"
 )
 EVENTS_RETENTION_DAYS = 7
 _events_lock = threading.Lock()

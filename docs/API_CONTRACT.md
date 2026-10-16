@@ -235,8 +235,6 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 - Usa una copia de los jugadores online y sanea argumentos antes de construir
   la propuesta. La GUI requiere pulsar Ejecutar, que usa `POST /api/command`.
   El servicio IA no escribe a stdin ni toma esa aprobación por el usuario.
-- El build portable oculta este asistente en el frontend; eso no convierte las
-  rutas del backend en una interfaz de ejecución autónoma.
 
 ## WebSocket `/ws`
 

@@ -4,7 +4,6 @@ import os
 import re
 import socket
 import time
-import runtime_paths
 
 import requests
 from fastapi import APIRouter, Request
@@ -20,12 +19,12 @@ from gui_backend.state import manager, build_public_status
 
 router = APIRouter()
 
-DIST_DIR = runtime_paths.resource_path("gui_frontend", "dist", base_dir=config.BASE_DIR)
+DIST_DIR = os.path.join(config.BASE_DIR, "gui_frontend", "dist")
 
 
 @router.get("/favicon.svg")
 async def get_favicon():
-    favicon_path = runtime_paths.resource_path("gui_frontend", "public", "favicon.svg", base_dir=config.BASE_DIR)
+    favicon_path = os.path.join(config.BASE_DIR, "gui_frontend", "public", "favicon.svg")
     if os.path.exists(favicon_path):
         return FileResponse(favicon_path)
     return FileResponse(os.path.join(config.WEB_DIR, "index.html"))

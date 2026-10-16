@@ -26,10 +26,6 @@ addon_inventory_cli.py           # CLI del inventario (legible / --json / --code
                                  #   codigos de salida documentados (0/1/2/3/4)
 server_gui_server.py            # Punto de entrada: create_app() (middleware de guarda
                                 #   temprana /api/*), lifespan, estáticos, uvicorn
-runtime_paths.py                # Instalacion/datos frente a recursos _internal;
-                                #   comandos de hijos en fuente o congelado
-suite_minecraft.py              # Entrada del portable y despacho interno de hijos
-desktop_window.py               # Ventana Qt WebEngine y cierre supervisado
 gui_backend/
   config.py                     # BASE_DIR, WEB_DIR, SERVER_EXE, PROPS_PATH,
                                 #   SETUP_MARKER, timeouts G8, constantes watchdog
@@ -63,8 +59,6 @@ gui_backend/
                                 #   logs y sesiones; retencion 7d/7d/90d
     addons.py                   # inventario de addons (LECTURA): delegacion fina
                                 #   en addon_inventory (sin reimplementar reglas)
-    desktop_lifecycle.py         # Coordinador de cierre local de la ventana;
-                                #   reutiliza lifecycle, sin endpoints nuevos
   routers/
     system.py                   # /favicon.svg, /, /api/status, /api/command, /api/connectivity (IP LAN/publica + puerto)
     properties.py               # /api/server_properties
@@ -95,19 +89,11 @@ del consejo es `bedrock-appearance-tip-seen`. No hay endpoints para los fondos.
 La arquitectura del material, límites de imágenes y QA están en
 `gui_frontend/README.md` y `docs/PLAN_APARIENCIA_GUI.md`.
 
-En modo fuente, `runtime_paths` conserva datos y backups históricos. En modo
-congelado, los recursos son de solo lectura en `_internal`, y datos/mundos,
-logs y `backups/` pertenecen a la carpeta del ejecutable. `SuiteMinecraft.exe`
-aloja Uvicorn y Qt WebEngine; `SuiteMinecraftHost.exe --internal-wrapper` y
-`--internal-backup-worker` mantienen pipes de consola con ventanas ocultas.
-La entrada fuente equivalente es `python -u server_wrapper.py`/`backup_worker.py`.
-
-`DesktopCloseCoordinator` toma `op_lock`, reutiliza `lifecycle.stop_and_wait` y
-lee `final_backup_finished` del canal NDJSON de esa sesión. Conserva la exclusión
-ante fallo de backup para Reintentar/Salir; un fallo de apagado devuelve al panel.
-No toma un print como confirmación de éxito ni mata un wrapper vivo para cerrar.
-El build portable excluye IA, BDS y datos privados; se describe en
-`packaging/README.md` y no añade rutas HTTP de control de la ventana.
+Las rutas de la instalación se calculan desde los módulos Python, sin depender
+del directorio de trabajo. El backend lanza `server_wrapper.py` y el wrapper
+lanza `backup_worker.py` con el mismo intérprete Python y los canales de
+entrada/salida correspondientes. Los backups se guardan por instalación en
+`../../Backups_Minecraft/auto_backups/<carpeta>`.
 
 ## Wrapper de consola
 

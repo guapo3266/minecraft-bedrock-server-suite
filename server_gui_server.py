@@ -23,7 +23,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 import uvicorn
-import runtime_paths
 
 import auto_backup
 from console_lang import L
@@ -126,7 +125,7 @@ def create_app() -> FastAPI:
                 return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         return await call_next(request)
 
-    DIST_DIR = runtime_paths.resource_path("gui_frontend", "dist", base_dir=config.BASE_DIR)
+    DIST_DIR = os.path.join(config.BASE_DIR, "gui_frontend", "dist")
     STATIC_TARGET = DIST_DIR if os.path.exists(DIST_DIR) else config.WEB_DIR
 
     if not os.path.exists(STATIC_TARGET):
@@ -286,8 +285,7 @@ if __name__ == "__main__":
         print("=================================================================")
         open_url = url
     try:
-        if os.environ.get("GUI_OPEN_BROWSER", "1") != "0":
-            webbrowser.open(open_url)
+        webbrowser.open(open_url)
     except Exception:
         pass  # sin navegador disponible no es crítico
     try:

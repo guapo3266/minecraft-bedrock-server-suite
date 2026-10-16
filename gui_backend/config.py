@@ -1,11 +1,10 @@
 """Rutas, puertos y constantes globales del backend de la GUI."""
 
 import os
-import runtime_paths
 
-# En fuente es la raiz del proyecto; en portable, la carpeta del .exe.
-BASE_DIR = runtime_paths.installation_dir()
-WEB_DIR = runtime_paths.resource_path("web", base_dir=BASE_DIR)
+# Raiz de esta instalacion, calculada desde el modulo y no desde cwd.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEB_DIR = os.path.join(BASE_DIR, "web")
 SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 PROPS_PATH = os.path.join(BASE_DIR, "server.properties")
 SETUP_MARKER = os.path.join(BASE_DIR, "data", "setup_done.json")

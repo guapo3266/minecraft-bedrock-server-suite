@@ -10,14 +10,13 @@ except ImportError:
 import restore_core
 import console_lang
 import server_properties
-import runtime_paths
 from zip_safety import CORRUPT_MARKERS
 
 # Rutas RESUELTAS desde la propia ubicacion del script: cada instalacion
 # restaura SU mundo. (Antes estaban hardcodeadas a "Servidor de Guapo", de
 # modo que ejecutar este script desde otra instalacion sobrescribia el mundo
 # de la vecina.)
-BASE_DIR = runtime_paths.installation_dir()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _world_name(base_dir=None):
@@ -32,7 +31,10 @@ def _world_name(base_dir=None):
 
 
 def _resolve_backup_dir(base_dir):
-    return runtime_paths.backup_dir(base_dir)
+    return os.path.abspath(os.path.join(
+        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
+        os.path.basename(os.path.normpath(base_dir)),
+    ))
 
 
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())

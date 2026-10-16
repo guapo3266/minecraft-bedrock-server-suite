@@ -8,9 +8,9 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
-import runtime_paths
 
 from console_lang import L
 # D5: patrones de deteccion del log de BDS centralizados en server_wrapper
@@ -47,7 +47,7 @@ def _spawn_wrapper_process():
     )
     env["WRAPPER_EVENTS_FILE"] = events_file
     process = subprocess.Popen(
-        runtime_paths.process_command("wrapper", config.BASE_DIR),
+        [sys.executable, "-u", os.path.join(config.BASE_DIR, "server_wrapper.py")],
         cwd=config.BASE_DIR,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -57,7 +57,6 @@ def _spawn_wrapper_process():
         encoding="utf-8",
         errors="replace",
         env=env,
-        **runtime_paths.subprocess_options(),
     )
     # Limpia el estado de salida anterior antes de liberar op_lock. Si no,
     # update_bds puede ver un proceso nuevo pero un evento todavía marcado

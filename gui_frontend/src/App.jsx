@@ -20,8 +20,7 @@ import SetupWizard from './components/SetupWizard';
 import AboutModal from './components/AboutModal';
 import { useI18n } from './i18n.jsx';
 
-// El build privado portable no carga ni muestra el asistente IA.
-const AiDrawer = import.meta.env.VITE_SUITE_PORTABLE === '1' ? null : lazy(() => import('./components/AiDrawer'));
+const AiDrawer = lazy(() => import('./components/AiDrawer'));
 
 export default function App() {
   const { t, lang } = useI18n();
@@ -443,7 +442,7 @@ export default function App() {
       </main>
       <Dock dockRef={dockRef} hidden={!ready} active={activeView} onChange={view => { setActiveView(view); setConsoleExpanded(false); }} players={status.player_count} backups={backups.length} />
     </div>
-    {ready && AiDrawer && <Suspense fallback={null}><AiDrawer onSendCommand={handleSendCommand} isRunning={status.running} /></Suspense>}
+    {ready && <Suspense fallback={null}><AiDrawer onSendCommand={handleSendCommand} isRunning={status.running} /></Suspense>}
     <Appearance open={appearanceOpen} onClose={() => setAppearanceOpen(false)} appearance={appearance} glassStatus={glassStatus} />
     {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     {toast && <div className={`toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'}>

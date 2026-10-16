@@ -41,12 +41,6 @@ Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, 
 
 Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI y seguir usando los scripts de respaldo de siempre.
 
-### Aplicación de escritorio portable (opcional)
-
-El repositorio incluye las fuentes para construir `SuiteMinecraft.exe` y su host auxiliar con Python 3.11 de 64 bits, Node.js y `crear_portable.ps1`. El paquete generado incorpora Python y Qt WebEngine; no requiere Python ni Node en el equipo de destino. Es un build local, no una descarga binaria publicada. No incluye BDS, mundos, packs ni datos privados y no arranca Minecraft al abrir la ventana. El build portable oculta el asistente IA; la GUI web habitual lo conserva.
-
-El cierre normal coordina apagado y backup final; ante un fallo permite reintentar sin afirmar que la copia terminó. Los backups del portable van en `backups/` junto al ejecutable. Construcción, actualización conservando datos y límites del QA: [packaging/README.md](packaging/README.md).
-
 ### ¿Qué hace?
 
 - Backups automáticos en caliente sin molestar a los jugadores (por defecto cada 30 minutos).
@@ -86,8 +80,6 @@ El cierre normal coordina apagado y backup final; ante un fallo permite reintent
 | `configurar_antivirus.bat` | Añade exclusiones de Windows Defender para los backups |
 | `tools/setup_defender_exclusions.ps1` | Script PowerShell de exclusiones (pide administrador la primera vez) |
 | `requirements-dev.txt` | Dependencias de desarrollo/tests (pytest, hypothesis, httpx, pytest-cov) |
-| `suite_minecraft.py`, `desktop_window.py`, `runtime_paths.py` | Entrada de escritorio, ventana Qt y separación de recursos/datos en fuente o portable |
-| `crear_portable.ps1`, `requirements-build.txt`, `packaging/` | Construcción local del portable; herramientas de desarrollo, no binarios BDS |
 | `server.properties.example` | Plantilla de configuración (copiar a `server.properties`) |
 
 ### Arranque inicial lento y Windows Defender
@@ -149,11 +141,11 @@ cd gui_frontend
 npm ci && npm run lint && npm test && npm run build   # frontend: lint (oxlint), tests (vitest) y rebuild del dist/
 ```
 
-La suite Python cubre property-based tests (Hypothesis) del `save query`, versiones, guard anti zip-slip y control de acceso local; inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback, disco lleno); programación + watchdog, jugadores, historial SQLite, rollback de BDS, inventario de addons, canal NDJSON, guards HTTP/WebSocket y runtime/cierre del portable. Usá siempre el filtro `not e2e` si hay una instalación BDS en la carpeta. El detalle histórico vive en `docs/INFORME_*`; las instrucciones locales `AGENTS.md` no se distribuyen en el repo público.
+La suite Python cubre property-based tests (Hypothesis) del `save query`, versiones, guard anti zip-slip y control de acceso local; inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback, disco lleno); programación + watchdog, jugadores, historial SQLite, rollback de BDS, inventario de addons, canal NDJSON, guards HTTP/WebSocket. Usá siempre el filtro `not e2e` si hay una instalación BDS en la carpeta. El detalle histórico vive en `docs/INFORME_*`; las instrucciones locales `AGENTS.md` no se distribuyen en el repo público.
 
 El QA opcional de navegador se ejecuta con `python gui_frontend/tests/appearance-browser-check.py` y requiere Playwright Python y Chrome. Sirve el `dist/` real con API/WS simulados: comprueba fondos, temas, teclado, navegación y reconexión, sin ejecutar BDS. La guía del frontend está en [gui_frontend/README.md](gui_frontend/README.md).
 
-Validación local del 2026-10-15: **1038 pruebas Python aprobadas, 2 e2e excluidas y 88 pruebas frontend aprobadas**, además de lint, build y QA visual con API simulada. Alcance y sincronización: [informe de actualización](docs/INFORME_ACTUALIZACION_2026-10-15.md).
+Validación local del 2026-10-15: **1018 pruebas Python aprobadas, 2 omitidas por requerir una instalación real, 2 e2e excluidas y 88 pruebas frontend aprobadas**, además de lint, build y QA visual con API simulada. Alcance y sincronización: [informe de actualización](docs/INFORME_ACTUALIZACION_2026-10-15.md).
 
 ### Licencia y aviso legal
 
@@ -201,12 +193,6 @@ The original mode: the wrapper reads the server console, detects players, runs a
 
 Both modes share the same wrapper and folder — you can start with the GUI and keep using the same backup scripts as always.
 
-### Optional portable desktop application
-
-The repository contains the sources to build `SuiteMinecraft.exe` and its helper host using 64-bit Python 3.11, Node.js and `crear_portable.ps1`. The generated folder includes Python and Qt WebEngine, so the destination machine does not need Python or Node. This is a local build, not a published binary download. It excludes BDS, worlds, packs and private data, and opening the window does not start Minecraft. The portable build hides the AI assistant; the regular web GUI retains it.
-
-Normal window closure coordinates shutdown and the final backup; a failure offers a retry instead of reporting success. Portable backups are stored in `backups/` beside the executable. Build instructions, data-preserving updates and QA limits: [packaging/README.md](packaging/README.md) (Spanish).
-
 ### What it does
 
 - Automatic hot backups without kicking anyone (every 30 minutes by default).
@@ -246,8 +232,6 @@ Normal window closure coordinates shutdown and the final backup; a failure offer
 | `configurar_antivirus.bat` | Adds Windows Defender exclusions for the backups |
 | `tools/setup_defender_exclusions.ps1` | PowerShell exclusion script (asks for admin the first time) |
 | `requirements-dev.txt` | Development/test dependencies (pytest, hypothesis, httpx, pytest-cov) |
-| `suite_minecraft.py`, `desktop_window.py`, `runtime_paths.py` | Desktop entry, Qt window and source/portable resource and data paths |
-| `crear_portable.ps1`, `requirements-build.txt`, `packaging/` | Local portable build tooling; no Mojang binaries |
 | `server.properties.example` | Config template (copy to `server.properties`) |
 
 ### Slow initial startup and Windows Defender
@@ -309,11 +293,11 @@ cd gui_frontend
 npm ci && npm run lint && npm test && npm run build   # frontend: lint (oxlint), tests (vitest), dist rebuild
 ```
 
-The Python suite covers Hypothesis properties (`save query`, versions, zip-slip and local access), backup fault injection, scheduling/watchdog, players, SQLite history, BDS rollback, addons, NDJSON, HTTP/WebSocket guards and portable runtime/shutdown. Always use `not e2e` when the directory contains a BDS installation. Historical reports live in `docs/INFORME_*`; local `AGENTS.md` instructions are not distributed in the public repository.
+The Python suite covers Hypothesis properties (`save query`, versions, zip-slip and local access), backup fault injection, scheduling/watchdog, players, SQLite history, BDS rollback, addons, NDJSON, HTTP/WebSocket guards. Always use `not e2e` when the directory contains a BDS installation. Historical reports live in `docs/INFORME_*`; local `AGENTS.md` instructions are not distributed in the public repository.
 
 Optional browser QA runs with `python gui_frontend/tests/appearance-browser-check.py` and requires Playwright Python and Chrome. It serves the real `dist/` with mocked API/WS to check backgrounds, themes, keyboard navigation and reconnection without running BDS. See [gui_frontend/README.md](gui_frontend/README.md) (Spanish).
 
-Local validation on 2026-10-15: **1038 Python tests passed, 2 e2e deselected and 88 frontend tests passed**, plus lint, build and browser QA with mocked API. Scope and synchronization: [update report](docs/INFORME_ACTUALIZACION_2026-10-15.md) (Spanish).
+Local validation on 2026-10-15: **1018 Python tests passed, 2 skipped because they require a real installation, 2 e2e deselected and 88 frontend tests passed**, plus lint, build and browser QA with mocked API. Scope and synchronization: [update report](docs/INFORME_ACTUALIZACION_2026-10-15.md) (Spanish).
 
 ### License and disclaimer
 

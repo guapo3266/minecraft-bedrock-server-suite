@@ -4,10 +4,9 @@ import json
 import os
 import re
 import time
-import runtime_paths
 
 
-BASE_DIR = runtime_paths.installation_dir()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCHEDULE_CONFIG_PATH = os.path.join(BASE_DIR, "data", "schedule_config.json")
 SCHEDULE_STATE_PATH = os.path.join(BASE_DIR, "data", "schedule_state_wrapper.json")
 
