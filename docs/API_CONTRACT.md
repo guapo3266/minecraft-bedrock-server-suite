@@ -33,13 +33,14 @@ la coincidencia de Origin con el host del propio request.
 
 ```json
 {
-  "suite_version": "2.0.0",
+  "suite_version": "2.1.0",
   "running": false,
   "players": ["NombreJugador"],
   "player_count": 0,
   "last_backup": "HH:MM:SS | Ninguno",
   "backup_in_progress": false,
   "update_in_progress": false,
+  "suite_update_in_progress": false,
   "external_instance": false,
   "external_instance_reason": null,
   "uptime": 0,
@@ -67,6 +68,25 @@ El frontend incorpora esa misma fuente al compilar y la muestra en Acerca de.
 Tipo especial `session_start`: separador entre el historial precargado y la sesión actual (solo en `WS init`, tras los logs recargados de SQLite). Vive únicamente en memoria — no se persiste ni reaparece en el siguiente arranque; el frontend lo renderiza como divisor, no como línea de log.
 
 ## Endpoints REST
+
+### Actualización de la suite (independiente de BDS)
+
+- `GET /api/suite_update?refresh=1`: consulta Releases estables oficiales; devuelve
+  `state` (`available`, `no_release`, `unavailable`), versiones, `has_update`,
+  enlace verificado, `install_block` (`git_checkout`, `launcher_required` o null)
+  y progreso persistido. I/O en threadpool y caché compartida.
+- `POST /api/suite_update`, body estricto `{"confirmed": true}`: prepara en un
+  hilo, bajo `op_lock`. 400 si no se confirma, 409 si está ocupado/bloqueado,
+  422 si hay campos extra o tipos inválidos. Nunca acepta URLs ni rutas del cliente.
+- `GET /api/suite_update/progress`: fase y resultado sin volver a consultar GitHub.
+- `GET /api/suite_update/health`: versión, token de relevo, PID y versión de Python.
+  Permite comprobar la instancia nueva y liberar el guard tras verificarla.
+
+Los cuatro endpoints tienen guards de IP/Host/Origin. Durante la actualización,
+el middleware bloquea otros POST con 409 y el WS rechaza comandos. La GUI nueva
+mantiene `op_lock` hasta confirmar el arranque. `final_backup_finished` comunica
+el resultado del backup de cierre por NDJSON; `backup_finished` no lo sustituye.
+Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 
 ### `GET /favicon.svg`
 - 200: `FileResponse` de `gui_frontend/public/favicon.svg`; si no existe, `web/index.html`.

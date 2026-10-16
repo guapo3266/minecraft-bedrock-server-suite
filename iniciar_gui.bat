@@ -1,15 +1,23 @@
 @echo off
 chcp 65001 >nul
-title Minecraft Bedrock Wrapper - ReactBits Dashboard
+title Minecraft Bedrock Server Suite
 color 0A
 :: Trabajar SIEMPRE sobre la carpeta de este .bat (rutas relativas a el)
 cd /d "%~dp0"
+if exist "data\suite_updates\recovery\journal.json" (
+    call "%~dp0Recuperar_suite.bat"
+    if errorlevel 1 exit /b 1
+)
+if exist "%~dp0runtime\python.exe" (
+    "%~dp0runtime\python.exe" -B "%~dp0server_gui_server.py"
+    exit /b
+)
 :: Modelo de LM Studio para el asistente IA (ai_assistant.py: LMSTUDIO_MODEL).
 :: Si ya viene definido en el entorno, se respeta el valor existente.
 if not defined LMSTUDIO_MODEL set "LMSTUDIO_MODEL=qwen3-minecraft-v3"
 cls
 echo ================================================================
-echo   MINECRAFT BEDROCK WRAPPER - REACTBITS REACT DASHBOARD
+echo   MINECRAFT BEDROCK SERVER SUITE
 echo ================================================================
 echo.
 

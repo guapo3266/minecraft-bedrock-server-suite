@@ -71,6 +71,8 @@ def _spawn_wrapper_process():
     # al recibir wrapper_started; hasta entonces rige el parseo de stdout).
     manager.events_file = events_file
     manager.events_alive = False
+    with manager.lock:
+        manager.final_backup_result = None
     return process
 
 
@@ -323,6 +325,9 @@ def _apply_event(ev):
         # launch_error/exception viaja en ev["outcome"])
         manager.backup_in_progress = False
         manager.update_status()
+    elif event == "final_backup_finished":
+        with manager.lock:
+            manager.final_backup_result = {"success": ev.get("success") is True, "zip": ev.get("zip")}
     # eventos desconocidos: ignorados (compatibilidad futura)
 
 
@@ -353,6 +358,8 @@ def _tail_events(path):
             sesion_caducada = (
                 manager.events_file is not None and manager.events_file != path
             )
+            if sesion_caducada:
+                return
             if handle is None:
                 try:
                     handle = open(path, "r", encoding="utf-8", errors="replace")

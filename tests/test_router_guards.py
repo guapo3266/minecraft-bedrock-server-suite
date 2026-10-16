@@ -17,6 +17,7 @@ import server_gui_server as sgs
 
 # Plantilla de ruta (la del app) -> URL concreta para sondear.
 _POST_PROBES = {
+    "/api/suite_update": "/api/suite_update",
     "/api/action/{action_name}": "/api/action/start",
     "/api/restore": "/api/restore",
     "/api/backups/{filename}/delete": "/api/backups/dummy.zip/delete",
@@ -30,6 +31,9 @@ _POST_PROBES = {
 }
 
 _GET_PROBES = {
+    "/api/suite_update": "/api/suite_update",
+    "/api/suite_update/progress": "/api/suite_update/progress",
+    "/api/suite_update/health": "/api/suite_update/health",
     "/api/status": "/api/status",
     "/api/connectivity": "/api/connectivity",
     "/api/check_update": "/api/check_update",

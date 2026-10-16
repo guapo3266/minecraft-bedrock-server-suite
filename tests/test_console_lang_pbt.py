@@ -202,6 +202,7 @@ def _find_L_calls(path):
 
 
 L_PY_FILES = [
+    "suite_updater.py",
     "server_wrapper.py",
     "wrapper_backup.py",
     "server_gui_server.py",

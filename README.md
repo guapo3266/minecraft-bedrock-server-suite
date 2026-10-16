@@ -21,6 +21,15 @@ Para preparar la siguiente entrega: [guía de versionado](docs/VERSIONADO.md).
 
 ### Dos formas de usarlo
 
+**ZIP para Windows x64:** la entrega `BedrockSuite-Windows-x64.zip` incluye
+Python y dependencias. Extráela completa y abre `iniciar_gui.bat`; no requiere
+Python, Git ni Node instalados. Las Releases se publican por separado de los
+commits. En la GUI, **Más acciones → Actualizar la suite** comprueba versiones
+y pide confirmación antes de instalar. Conserva mundos y configuración, espera
+el backup final y recupera el código anterior si falla la instalación o el panel.
+En carpetas con Git permite comprobar y descargar, pero no reemplazar el código.
+[Detalles del actualizador y recuperación](docs/ACTUALIZACIONES_SUITE.md).
+
 **1. Con GUI (dashboard web)** — la forma recomendada:
 
 ```
@@ -34,7 +43,7 @@ El botón **Personalizar** de la cabecera abre Apariencia: tema claro/oscuro, tr
 La consola aprovecha la altura disponible y permite **Expandir/Reducir** sin perder filtros, historial ni el comando escrito; **Esc** vuelve a la vista normal. En escritorio, recursos y conectividad tienen scroll propio. El aviso del producto y «Administración local» están en **Más acciones → Acerca de**.
 
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
-- Requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global). Si no se puede crear el `.venv`, usa el Python global.
+- **Desde código fuente:** requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global). Si no se puede crear el `.venv`, usa el Python global.
 - Solo Windows: esta suite solo soporta Windows (el BDS oficial de Mojang existe para Windows y Linux, pero aquí solo se prueba/soporta Windows).
 - El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008). Modo LAN opt-in solo con `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, sin autenticación: solo para red doméstica de confianza). Además de la IP de origen, se valida el header `Host` (anti DNS-rebinding) y el `Origin` debe coincidir con el host de la propia GUI (anti CSRF entre dispositivos de la LAN). Si accedés por nombre de host (no por IP), definí `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
 
@@ -127,7 +136,7 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 - **Ante un apagón a mitad de restauración**: en el próximo arranque (GUI o wrapper) los restos se limpian solos; si ves carpetas `.bak_huerfano_*`, son resguardos conservados a propósito (no se borran solos: revísalos y bórralos cuando confirmes que no los necesitás).
 - **Ante una actualización BDS interrumpida**: la GUI intenta recuperar los binarios al arrancar. Si sigue habiendo errores, conserva las carpetas `bds_update_prev_*`: contienen el manifiesto y los originales pendientes de recuperar.
 
-### Para usarlo
+### Para usarlo desde código fuente
 
 1. Necesitas Python 3.10+ instalado.
 2. Clonás el repo o descargás el zip.
@@ -180,6 +189,15 @@ Maintenance instructions: [versioning guide](docs/VERSIONADO.md) (Spanish).
 
 ### Two ways to use it
 
+**Windows x64 ZIP:** `BedrockSuite-Windows-x64.zip` includes Python and its
+dependencies. Extract it fully and open `iniciar_gui.bat`; no Python, Git or Node
+installation is needed. Releases are published separately from commits.
+**More actions → Update the suite** checks stable releases and requires confirmation
+before installation. It preserves worlds and configuration, waits for the final
+backup and restores previous code if installation or dashboard startup fails.
+Git checkouts allow checks and downloads, but no automatic file replacement.
+[Updater and recovery details](docs/ACTUALIZACIONES_SUITE.md) (Spanish).
+
 **1. With GUI (web dashboard)** — the recommended way:
 
 ```
@@ -193,7 +211,7 @@ The visible **Customize** button opens Appearance: light/dark themes, transparen
 The console uses the available height and supports **Expand/Collapse** without losing filters, command history or draft input; **Esc** restores the normal view. On desktop, resources and connectivity scroll independently. The product disclaimer and local-management notice live under **More actions → About**.
 
 - **No Node.js needed**: the frontend ships prebuilt in `gui_frontend/dist/`.
-- Requires **Python 3.10+**. The `.bat` creates a `.venv` virtual environment isolated from your machine's Python and installs `requirements.txt` there on first run (nothing goes into the global Python). If `.venv` cannot be created, it falls back to the global Python.
+- **When running from source:** requires **Python 3.10+**. The `.bat` creates a `.venv` virtual environment isolated from your machine's Python and installs `requirements.txt` there on first run (nothing goes into the global Python). If `.venv` cannot be created, it falls back to the global Python.
 - Windows only: this suite only supports Windows (Mojang's official BDS exists for Windows and Linux, but only Windows is tested/supported here).
 - The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008). LAN mode is opt-in via `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, no authentication: trusted home network only). Besides the source IP, the `Host` header is validated (anti DNS-rebinding) and the `Origin` must match the GUI's own host (anti cross-device CSRF on the LAN). If you browse by hostname (not IP), set `GUI_ALLOWED_HOSTS=your-hostname` before starting.
 
@@ -286,7 +304,7 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 - **After a blackout mid-restore**: leftovers are cleaned up on the next start (GUI or wrapper); if you see `.bak_huerfano_*` folders they are preserved safety copies on purpose (never auto-deleted: review them and remove them once you are sure).
 - **After an interrupted BDS update**: the GUI attempts to recover the binaries on startup. If errors remain, keep the `bds_update_prev_*` folders: they contain the manifest and originals still awaiting recovery.
 
-### How to use
+### Running from source
 
 1. You need Python 3.10+ installed.
 2. Clone the repo or download the zip.

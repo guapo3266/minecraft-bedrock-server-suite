@@ -1,16 +1,17 @@
 @echo off
 chcp 65001 >nul
-title Minecraft Bedrock Wrapper - ReactBits Dashboard [MODO LAN]
+title Minecraft Bedrock Server Suite [MODO LAN]
 color 0A
 :: Trabajar SIEMPRE sobre la carpeta de este .bat
 cd /d "%~dp0"
 cls
 echo ================================================================
-echo   MINECRAFT BEDROCK WRAPPER - MODO LAN (movil en misma WiFi)
+echo   MINECRAFT BEDROCK SERVER SUITE - MODO LAN (movil en misma WiFi)
 echo ================================================================
 echo.
 
 :: [0/3] Verificar Python
+if exist "%~dp0runtime\python.exe" goto :python_ready
 python --version >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] No se encontro Python 3.
@@ -18,6 +19,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:python_ready
 :: Activar modo LAN: la GUI escuchara en 0.0.0.0 y permitira IPs privadas
 set GUI_ALLOW_LAN=1
 :: Modelo de LM Studio para el asistente IA (ai_assistant.py: LMSTUDIO_MODEL).
@@ -61,6 +63,10 @@ if not errorlevel 1 (
 )
 echo.
 
+if exist "%~dp0runtime\python.exe" (
+    call "%~dp0iniciar_gui.bat"
+    exit /b
+)
 :: Reusar logica de iniciar_gui.bat para venv
 set "VENV_PY=%~dp0.venv\Scripts\python.exe"
 set "RUN_PY=python"

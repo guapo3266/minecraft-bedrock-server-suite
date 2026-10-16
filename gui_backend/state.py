@@ -29,6 +29,8 @@ class ServerManager:
         self.last_backup_time = "Ninguno"
         self.backup_in_progress = False
         self.update_in_progress = False
+        self.suite_update_in_progress = False
+        self.final_backup_result = None
         self.restart_in_progress = False  # guard de reentrada de restart (2026-09-25)
         self.installed_version = None  # FIX F1: version real capturada del log de BDS
         self.wrapper_exit_event = threading.Event()
@@ -149,6 +151,7 @@ def build_public_status(manager, players=None):
         last_backup = manager.last_backup_time
         backup_prog = manager.backup_in_progress
         update_prog = manager.update_in_progress
+        suite_update_prog = manager.suite_update_in_progress
         ext_inst = manager.external_instance
         ext_reason = manager.external_instance_reason
         start_time = manager.start_time
@@ -161,6 +164,7 @@ def build_public_status(manager, players=None):
         "last_backup": last_backup,
         "backup_in_progress": backup_prog,
         "update_in_progress": update_prog,
+        "suite_update_in_progress": suite_update_prog,
         "external_instance": ext_inst,
         "external_instance_reason": ext_reason,
         "uptime": int(time.time() - start_time) if (running and start_time) else 0,

@@ -85,6 +85,10 @@ class Fixtures:
             data = {"required": self.setup_required, "bds_installed": True}
             if self.setup_error:
                 code, data = 503, {"detail": "Fallo de prueba"}
+        elif path == "/api/suite_update":
+            data = {"state": "no_release", "has_update": False, "current_version": "2.1.0", "progress": {"phase": "idle"}}
+        elif path == "/api/suite_update/progress":
+            data = {"phase": "idle"}
         elif path == "/api/connectivity":
             data = {"lan_ip": "192.168.1.20", "public_ip": "198.51.100.44", "port": "19132"}
         elif path == "/api/backups":

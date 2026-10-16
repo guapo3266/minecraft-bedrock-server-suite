@@ -18,12 +18,15 @@ import PropsModal from './components/PropsModal';
 import ScheduleModal from './components/ScheduleModal';
 import SetupWizard from './components/SetupWizard';
 import AboutModal from './components/AboutModal';
+import SuiteUpdateModal from './components/SuiteUpdateModal';
+import useSuiteUpdate from './hooks/useSuiteUpdate';
 import { useI18n } from './i18n.jsx';
 
 const AiDrawer = lazy(() => import('./components/AiDrawer'));
 
 export default function App() {
   const { t, lang } = useI18n();
+  const suiteUpdate = useSuiteUpdate();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [glassStatus, setGlassStatus] = useState('loading');
   const [activeView, setActiveView] = useState('server');
@@ -409,7 +412,8 @@ export default function App() {
       <Navbar headerRef={headerRef} status={status} showServerActions={ready} latency={latency} connectionState={connectionState}
         onOpenUpdate={handleOpenUpdate} onOpenProps={handleOpenProps} onOpenSchedule={handleOpenSchedule}
         onOpenAppearance={() => setAppearanceOpen(true)} onOpenAbout={() => setAboutOpen(true)}
-        appearanceTipEnabled={ready && !appearanceOpen && !aboutOpen && !isUpdateModalOpen && !isPropsModalOpen && !isScheduleModalOpen} />
+        onOpenSuiteUpdate={() => suiteUpdate.setOpen(true)} suiteUpdateAvailable={!!suiteUpdate.info?.has_update}
+        appearanceTipEnabled={ready && !appearanceOpen && !aboutOpen && !suiteUpdate.open && !isUpdateModalOpen && !isPropsModalOpen && !isScheduleModalOpen} />
       <main id="main" className={`main-content ${ready ? activeView === 'server' ? 'server-content' : '' : 'setup-content'}`} tabIndex={-1}>
         {setupInfo === null ? <div className="panel loading-panel">
           <div className="loading-state" role="status"><span className="loading-spinner" aria-hidden="true" />{t('loading')}</div>
@@ -445,6 +449,7 @@ export default function App() {
     {ready && <Suspense fallback={null}><AiDrawer onSendCommand={handleSendCommand} isRunning={status.running} /></Suspense>}
     <Appearance open={appearanceOpen} onClose={() => setAppearanceOpen(false)} appearance={appearance} glassStatus={glassStatus} />
     {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+    {suiteUpdate.open && <SuiteUpdateModal update={suiteUpdate} running={status.running} playerCount={status.player_count} />}
     {toast && <div className={`toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
       {toast.kind === 'error' ? <TriangleAlert size={18} /> : <Check size={18} />}<span>{t(toast.key)}</span>
       <button type="button" aria-label={t('closeMessage')} onClick={() => setToast(null)}><X size={16} /></button>

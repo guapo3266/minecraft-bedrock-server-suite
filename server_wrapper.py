@@ -504,12 +504,15 @@ def execute_final_backup(trigger="cierre"):
     dominio de lock que el backup de cierre normal evita que el de emergencia
     se ejecute sin coordinar con el ipc lock jerarquico.
     """
+    result = None
     try:
         result = auto_backup.create_backup(trigger, file_snapshot=None, wait_lock_timeout_sec=wstate.FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=wstate.backup_ipc_lock)
         if not result:
             print(L("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.", "[Wrapper] The final backup did not produce a valid ZIP or was aborted by timeout."))
     except Exception as e:
         print(L(f"[Wrapper] Falló el backup final: {e}", f"[Wrapper] Final backup failed: {e}"))
+    finally:
+        _emit_event("final_backup_finished", success=bool(result), zip=result or None)
 
 def should_run_initial_backup():
     """Lee backup-inicio de server.properties (default: True).

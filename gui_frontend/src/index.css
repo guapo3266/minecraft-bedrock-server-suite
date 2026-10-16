@@ -145,6 +145,20 @@ small { font-size: 12px; color: var(--muted); line-height: 1.45; }
 .about-dialog > p { color: var(--muted); margin-top: 20px; }
 .about-version strong { color: var(--text); font-variant-numeric: tabular-nums; }
 .about-local { display: flex; align-items: center; gap: 8px; }
+.suite-update-dialog { display: flex; flex-direction: column; max-width: 580px; max-height: calc(100dvh - 24px); }
+.suite-update-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; margin-top: 18px; }
+.suite-update-body > p + p, .suite-update-confirm > p { margin-top: 18px; }
+.suite-update-subtitle, .suite-update-preserve { color: var(--muted); line-height: 1.6; }
+.suite-version-list { display: flex; gap: 16px; flex-wrap: wrap; margin: 22px 0; }
+.suite-version-list > div { flex: 1; min-width: 95px; }
+.suite-version-list dt { font-size: 12px; color: var(--muted); }
+.suite-version-list dd { margin: 4px 0 0; font-size: 22px; font-weight: 700; }
+.suite-update-detail { overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
+.suite-update-dialog .dialog-actions, .suite-update-confirm .dialog-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+.suite-update-dialog > .dialog-actions, .suite-update-dialog > .dialog-heading { flex-shrink: 0; }
+.menu-badge { margin-left: auto; padding: 2px 6px; border-radius: 6px; font-size: 10px; background: var(--acc-soft); color: var(--acc); }
+.nav-more { position: relative; }
+.suite-update-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--acc); }
 .management-view { min-width: 0; }
 .players-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; }
 .players-grid > [aria-live] { grid-column: 1 / -1; }

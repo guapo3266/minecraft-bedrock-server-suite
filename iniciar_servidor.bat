@@ -1,4 +1,13 @@
 @echo off
+cd /d "%~dp0"
+if exist "data\suite_updates\recovery\journal.json" (
+    call "%~dp0Recuperar_suite.bat"
+    if errorlevel 1 exit /b 1
+)
+if exist "%~dp0runtime\python.exe" (
+    "%~dp0runtime\python.exe" -B "%~dp0server_wrapper.py"
+    exit /b
+)
 title Minecraft Bedrock Server Suite
 color 0a
 

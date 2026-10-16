@@ -25,6 +25,8 @@ Se usan versiones estables `MAYOR.MENOR.PARCHE`:
 
 El número se cambia al preparar una entrega, no por cada commit. La primera
 versión común es 2.0.0 y conserva el número previamente declarado por el backend.
+La entrega 2.1.0 añade el ZIP con Python incluido y el actualizador de la suite.
+Ver [descarga, seguridad y recuperación](ACTUALIZACIONES_SUITE.md).
 
 ## Preparar una entrega local
 

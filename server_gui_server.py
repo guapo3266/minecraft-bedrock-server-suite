@@ -37,7 +37,8 @@ from gui_backend.services import external_probe as external_probe_service
 from gui_backend.services import bds_update as bds_update_service
 from gui_backend.services import watchdog as watchdog_service
 from gui_backend.services import history as history_service
-from gui_backend.routers import system, properties, setup, actions, backups, websocket, schedule, players, history, ai, addons
+from gui_backend.services import suite_update as suite_update_service
+from gui_backend.routers import system, properties, setup, actions, backups, websocket, schedule, players, history, ai, addons, suite_update
 
 
 async def hardware_metrics_loop():
@@ -70,6 +71,7 @@ async def hardware_metrics_loop():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     manager.loop = asyncio.get_running_loop()
+    suite_update_service.enter_handoff_guard()
     try:
         auto_backup.recover_interrupted_restores(config.BASE_DIR)
     except Exception as exc:
@@ -122,6 +124,8 @@ def create_app() -> FastAPI:
                 _ensure_local(request.client.host if request.client else "")
                 _ensure_valid_host_header(request)  # anti DNS-rebinding (S1b)
                 _check_origin(request)
+                if manager.suite_update_in_progress and request.method == "POST" and request.url.path != "/api/suite_update":
+                    return JSONResponse(status_code=409, content={"detail": "suite_update_in_progress"})
             except HTTPException as exc:
                 return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         return await call_next(request)
@@ -148,6 +152,7 @@ def create_app() -> FastAPI:
     app.include_router(addons.router)
     app.include_router(websocket.router)
     app.include_router(ai.router)
+    app.include_router(suite_update.router)
 
     return app
 
@@ -272,7 +277,7 @@ if __name__ == "__main__":
         url_local = f"http://127.0.0.1:{puerto}"
         url_lan = f"http://{lan_ip}:{puerto}"
         print("=================================================================")
-        print("  MINECRAFT BEDROCK WRAPPER GUI - REACTBITS DASHBOARD [MODO LAN]")
+        print(L("  MINECRAFT BEDROCK SERVER SUITE [MODO LAN]", "  MINECRAFT BEDROCK SERVER SUITE [LAN MODE]"))
         print(f"  Local : {url_local}")
         print(f"  En LAN: {url_lan}  <- abre esta en el movil (misma WiFi)")
         print("  (GUI_ALLOW_LAN=1 activo: permite IPs privadas 192.168/10/172.16)")
@@ -281,16 +286,19 @@ if __name__ == "__main__":
     else:
         url = _url_para_navegador(gui_host, puerto)
         print("=================================================================")
-        print("  MINECRAFT BEDROCK WRAPPER GUI - REACTBITS DASHBOARD")
+        print("  MINECRAFT BEDROCK SERVER SUITE")
         print(f"  Abriendo en: {url}")
         print("=================================================================")
         open_url = url
     try:
-        webbrowser.open(open_url)
+        if os.environ.get("GUI_OPEN_BROWSER", "1") != "0":
+            webbrowser.open(open_url)
     except Exception:
         pass  # sin navegador disponible no es crítico
     try:
-        uvicorn.run("server_gui_server:app", host=gui_host, port=puerto, reload=False, log_level="info")
+        server = uvicorn.Server(uvicorn.Config(app, host=gui_host, port=puerto, log_level="info"))
+        suite_update_service.configure_runtime(lambda: setattr(server, "should_exit", True), puerto)
+        server.run()
     except OSError:
         print(f"\n[AVISO] El puerto {puerto} se ocupó justo al abrir. Reintentando en el siguiente libre...")
         time.sleep(2)
@@ -301,4 +309,6 @@ if __name__ == "__main__":
         except RuntimeError as exc:
             print(f"[ERROR] {exc}")
             raise SystemExit(1)
-        uvicorn.run("server_gui_server:app", host=gui_host, port=puerto, reload=False, log_level="info")
+        server = uvicorn.Server(uvicorn.Config(app, host=gui_host, port=puerto, log_level="info"))
+        suite_update_service.configure_runtime(lambda: setattr(server, "should_exit", True), puerto)
+        server.run()

@@ -61,6 +61,9 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "command":
+                    if manager.suite_update_in_progress:
+                        await websocket.send_json({"type": "error", "message": "suite_update_in_progress"})
+                        continue
                     cmd = msg.get("command", "").strip()
                     if not cmd:
                         continue

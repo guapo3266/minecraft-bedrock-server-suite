@@ -9,6 +9,30 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 
 Los próximos cambios se documentarán aquí antes de preparar otra versión.
 
+## [2.1.0] - 2026-10-15
+
+### Añadido
+
+- ZIP Windows x64 con CPython y dependencias incluidos, sin Git/Node/Python
+  instalados y sin redistribuir BDS ni datos de ninguna instalación.
+- Actualizador de la suite separado de BDS: comprueba Releases estables al
+  abrir la GUI y mediante un botón manual, y exige confirmación para instalar.
+- Descarga verificada con el SHA-256 de GitHub, manifiesto por archivo, lista
+  positiva de rutas y rechazo de ZIPs inesperados, enlaces y alias NTFS.
+- Reemplazo solo de archivos del programa que cambian, diario persistido,
+  resguardo del código anterior y rollback ante fallo de copia o arranque.
+- Cierre coordinado de Minecraft con comprobación del backup final por NDJSON,
+  relevo a un auxiliar con Python independiente y reinicio del servidor si
+  estaba encendido. Un fallo de reinicio se informa por separado.
+- Recuperación mediante los lanzadores o `Recuperar_suite.bat` tras una
+  interrupción. Los resguardos se conservan si la recuperación no completa.
+
+### Alcance
+
+- Compatible con instalaciones nuevas y con instalaciones previas de scripts.
+  En checkouts Git se permite comprobar y descargar; no reemplazar el código.
+- Preparación y pruebas locales. Publicación y despliegue requieren pedido expreso.
+
 ## [2.0.0] - 2026-10-15
 
 Primera versión unificada de la suite. Esta entrada establece el punto de

@@ -9,6 +9,7 @@ import { useI18n } from '../i18n.jsx';
 export default function ControlsBar({ status, onAction }) {
   const { t } = useI18n();
   const isRunning = status.running;
+  const updatingSuite = !!status.suite_update_in_progress;
   const [confirmAction, setConfirmAction] = useState(null);
 
   const confirmProps = confirmAction === 'stop'
@@ -32,7 +33,7 @@ export default function ControlsBar({ status, onAction }) {
       {/* Solo Iniciar tiene tratamiento primario, y solo si está disponible. */}
       <ConfirmButton
         onClick={() => onAction('start')}
-        disabled={isRunning}
+        disabled={isRunning || updatingSuite}
         variant="emeraldSolid"
         className={`control-start ${isRunning ? '' : 'strong-primary'}`}
       >
@@ -43,7 +44,7 @@ export default function ControlsBar({ status, onAction }) {
       {/* Stop Button */}
       <ConfirmButton
         onClick={() => setConfirmAction('stop')}
-        disabled={!isRunning}
+        disabled={!isRunning || updatingSuite}
         variant="rose"
         className="control-danger"
       >
@@ -54,7 +55,7 @@ export default function ControlsBar({ status, onAction }) {
       {/* Restart Button */}
       <ConfirmButton
         onClick={() => setConfirmAction('restart')}
-        disabled={!isRunning}
+        disabled={!isRunning || updatingSuite}
         variant="purple"
         className="control-secondary"
       >
@@ -67,7 +68,7 @@ export default function ControlsBar({ status, onAction }) {
         onClick={() => onAction('backup')}
         variant="amber"
         className="control-secondary"
-        disabled={status?.backup_in_progress}
+        disabled={status?.backup_in_progress || updatingSuite}
       >
         <Save className="h-4 w-4" />
         <ShinyText text={t('backup')} />

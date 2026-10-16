@@ -10,7 +10,7 @@ import AppearanceTip from './AppearanceTip';
 const APPEARANCE_TIP_KEY = 'bedrock-appearance-tip-seen';
 
 // Configuración y personalización visibles; las herramientas quedan en el menú.
-export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedule, latency = null,
+export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedule, onOpenSuiteUpdate = () => {}, suiteUpdateAvailable = false, latency = null,
   headerRef, onOpenAppearance, onOpenAbout, showServerActions = true, appearanceTipEnabled = false, connectionState = 'connecting' }) {
   const { t, lang, setLang } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -64,6 +64,7 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
       { id: 'schedule', group: 'serverTools', label: t('schedMenu'), icon: <CalendarClock size={16} aria-hidden="true" />, onClick: onOpenSchedule },
       { id: 'update', group: 'serverTools', label: t('updateBds'), icon: <Download size={16} aria-hidden="true" />, onClick: onOpenUpdate }
     ] : []),
+    { id: 'suiteUpdate', group: 'interfaceSettings', label: t('suiteUpdateTitle'), icon: <Download size={16} aria-hidden="true" />, onClick: onOpenSuiteUpdate },
     { id: 'about', group: 'interfaceSettings', label: t('aboutTitle'), icon: <Info size={16} aria-hidden="true" />, onClick: onOpenAbout }
   ];
 
@@ -95,8 +96,9 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
         </button>}
         <button ref={menuTriggerRef} type="button" onClick={toggleMenu} data-nav-menu-trigger="true"
           aria-haspopup="menu" aria-expanded={menuOpen} aria-controls={menuOpen ? 'nav-actions-menu' : undefined}
-          aria-label={t('moreActions')} title={t('moreActions')} className="button icon-button">
+          aria-label={t('moreActions')} title={t('moreActions')} className="button icon-button nav-more">
           <Ellipsis size={20} aria-hidden="true" />
+          {suiteUpdateAvailable && <span className="suite-update-dot" title={t('suiteUpdateBadge')} aria-hidden="true" />}
         </button>
       </div>
       {showTip && <AppearanceTip anchorRef={appearanceRef} onDismiss={dismissTip} onCustomize={customize} />}
@@ -133,6 +135,7 @@ export default function Navbar({ status, onOpenUpdate, onOpenProps, onOpenSchedu
                 >
                   {action.icon}
                   <span>{action.label}</span>
+                  {action.id === 'suiteUpdate' && suiteUpdateAvailable && <span className="menu-badge">{t('suiteUpdateBadge')}</span>}
                 </button>
               </React.Fragment>)}
             </motion.div>
