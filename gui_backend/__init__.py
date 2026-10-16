@@ -6,4 +6,4 @@ Jerarquía de dependencias (sin ciclos):
     config ← security ← metrics ← state ← supervisor ← services ← routers ← app
 """
 
-__version__ = "2.0.0"
+from suite_version import VERSION as __version__  # noqa: F401 (compatibilidad pública)

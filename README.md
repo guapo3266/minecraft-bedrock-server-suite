@@ -12,6 +12,13 @@ Usa los comandos nativos de Minecraft (`save hold`, `save query`, `save resume`)
 
 > 💡 **Nota**: todo este proyecto fue hecho con ayuda de herramientas de IA generativa, usadas como copiloto para el código, los tests y la documentación.
 
+### Versión de la suite
+
+La versión común de backend e interfaz se define en `version.json` y aparece en
+**Más acciones → Acerca de**. Es independiente de la versión de BDS que muestra
+el dashboard. Cambios por versión: [CHANGELOG.md](CHANGELOG.md).
+Para preparar la siguiente entrega: [guía de versionado](docs/VERSIONADO.md).
+
 ### Dos formas de usarlo
 
 **1. Con GUI (dashboard web)** — la forma recomendada:
@@ -163,6 +170,13 @@ A Python suite to manage my **Minecraft Bedrock** server on Windows. I mostly bu
 It uses the native Minecraft commands (`save hold`, `save query`, `save resume`) to do **zero-downtime hot backups** in the background, without restarting the server or bothering players.
 
 > 💡 **Note**: this whole project was built with the help of generative AI tools, used as a copilot for the code, the tests and the documentation.
+
+### Suite version
+
+The backend and UI share the version defined in `version.json`, shown under
+**More actions → About**. It is independent of the BDS version displayed on the
+dashboard. Release history: [CHANGELOG.md](CHANGELOG.md).
+Maintenance instructions: [versioning guide](docs/VERSIONADO.md) (Spanish).
 
 ### Two ways to use it
 

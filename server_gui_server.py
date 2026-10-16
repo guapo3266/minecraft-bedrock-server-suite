@@ -26,6 +26,7 @@ import uvicorn
 
 import auto_backup
 from console_lang import L
+from suite_version import VERSION
 
 from gui_backend import config
 from gui_backend.config import BASE_DIR  # noqa: F401  (re-export: lo usan tests)
@@ -103,7 +104,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Construye la app: lifespan, estáticos y todos los routers."""
-    app = FastAPI(title="ReactBits Minecraft Bedrock Wrapper GUI", lifespan=lifespan)
+    app = FastAPI(title="Minecraft Bedrock Server Suite", version=VERSION, lifespan=lifespan)
 
     @app.middleware("http")
     async def _guard_api_local_only(request, call_next):

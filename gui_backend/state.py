@@ -12,6 +12,7 @@ from typing import Set
 from fastapi import WebSocket
 
 from gui_backend.metrics import get_hardware_metrics
+from suite_version import VERSION
 
 
 class ServerManager:
@@ -153,6 +154,7 @@ def build_public_status(manager, players=None):
         start_time = manager.start_time
         installed = manager.installed_version
     return {
+        "suite_version": VERSION,
         "running": running,
         "players": players,
         "player_count": len(players),

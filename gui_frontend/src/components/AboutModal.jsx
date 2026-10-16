@@ -1,6 +1,7 @@
 import { LockKeyhole, X } from 'lucide-react';
 import Modal from './Modal';
 import { useI18n } from '../i18n.jsx';
+import { version } from '../../../version.json';
 
 export default function AboutModal({ onClose }) {
   const { t } = useI18n();
@@ -9,6 +10,7 @@ export default function AboutModal({ onClose }) {
       <div><span className="eyebrow">{t('aboutTitle')}</span><h2>Minecraft Bedrock Server Suite</h2></div>
       <button type="button" className="button icon-button" onClick={onClose} aria-label={t('close')}><X size={18} /></button>
     </div>
+    <p className="about-version">{t('suiteVersion')}: <strong>{version}</strong></p>
     <p className="about-local"><LockKeyhole size={16} aria-hidden="true" />{t('localManagement')}</p>
     <p>Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</p>
   </Modal>;

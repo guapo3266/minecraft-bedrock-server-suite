@@ -33,6 +33,7 @@ la coincidencia de Origin con el host del propio request.
 
 ```json
 {
+  "suite_version": "2.0.0",
   "running": false,
   "players": ["NombreJugador"],
   "player_count": 0,
@@ -50,6 +51,10 @@ la coincidencia de Origin con el host del propio request.
   "installed_version": null
 }
 ```
+
+`suite_version`: versión de Minecraft Bedrock Server Suite leída de `version.json`.
+Está disponible aunque BDS esté detenido y coincide con `info.version` de OpenAPI.
+El frontend incorpora esa misma fuente al compilar y la muestra en Acerca de.
 
 `installed_version`: versión de BDS capturada al arrancar el servidor (evento NDJSON `version_captured`, fallback stdout). `null` mientras no haya arranque en esta sesión de GUI.
 

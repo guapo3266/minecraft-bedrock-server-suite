@@ -143,6 +143,7 @@ small { font-size: 12px; color: var(--muted); line-height: 1.45; }
 .console-expanded > .controls-panel, .console-expanded .server-insights { display: none; }
 .console-expanded .server-console-grid { grid-template-columns: minmax(0, 1fr); }
 .about-dialog > p { color: var(--muted); margin-top: 20px; }
+.about-version strong { color: var(--text); font-variant-numeric: tabular-nums; }
 .about-local { display: flex; align-items: center; gap: 8px; }
 .management-view { min-width: 0; }
 .players-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; }

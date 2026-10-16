@@ -1,0 +1,67 @@
+# Versionado de Minecraft Bedrock Server Suite
+
+`version.json` es la fuente de la versión del producto en cada repositorio.
+TESTTEST y `minecraft-bedrock-server-suite` comparten el número de versión,
+aunque sus commits y sus archivos específicos pueden ser distintos. La versión
+del servidor BDS sigue siendo independiente.
+
+- Python la lee mediante `suite_version.VERSION`, desde una ruta relativa a
+  `__file__`. `gui_backend.__version__` conserva el acceso compatible.
+- FastAPI la publica en OpenAPI y en `suite_version` del estado HTTP/WS.
+- React importa el mismo JSON y lo incorpora al build de Acerca de. No necesita
+  Git, Node ni una consulta de red para mostrarla en runtime.
+- `package.json` y las dos versiones raíz de `package-lock.json` son copias
+  sincronizadas por la herramienta. El build falla si no coinciden.
+- `CHANGELOG.md` documenta 2.0.0 y las siguientes entregas. El historial anterior
+  permanece en Git y en los informes; no se le asignan versiones retrospectivas.
+
+## Elegir el siguiente número
+
+Se usan versiones estables `MAYOR.MENOR.PARCHE`:
+
+- PARCHE: correcciones compatibles, por ejemplo `2.0.1`.
+- MENOR: funciones nuevas compatibles, por ejemplo `2.1.0`.
+- MAYOR: cambios que rompan un contrato público o requieran migración, por ejemplo `3.0.0`.
+
+El número se cambia al preparar una entrega, no por cada commit. La primera
+versión común es 2.0.0 y conserva el número previamente declarado por el backend.
+
+## Preparar una entrega local
+
+En la raíz de **cada** repositorio, con el mismo número elegido:
+
+```powershell
+python tools/set_version.py 2.0.1
+```
+
+Mover los cambios de `[Sin publicar]` a una sección como
+`## [2.0.1] - AAAA-MM-DD` en `CHANGELOG.md`, con la fecha real de preparación.
+Documentar solo los cambios incluidos en ese árbol. Comprobar los manifiestos:
+
+```powershell
+python tools/set_version.py --check
+python -m ruff check .
+python -m pytest tests -m "not e2e" -q
+npm --prefix gui_frontend run lint
+npm --prefix gui_frontend test
+npm --prefix gui_frontend run build
+```
+
+Revisar el diff y el build antes de crear el commit. La etiqueta se crea en el
+commit aprobado de cada repositorio, con el árbol limpio:
+
+```powershell
+git diff --check
+git status --short
+git commit -m "chore: preparar versión 2.0.1"
+git tag -a v2.0.1 -m "Versión 2.0.1 de Minecraft Bedrock Server Suite"
+```
+
+Seleccionar explícitamente los archivos que se incluirán antes del commit.
+No mover una etiqueta existente para reutilizar un número: una corrección de
+una entrega ya identificada recibe una nueva versión.
+
+Commit, etiqueta, push y despliegue son operaciones separadas. La herramienta
+no hace commits, no crea etiquetas, no publica ni sincroniza instalaciones.
+Para una futura instalación, distribuir también `suite_version.py` y
+`version.json` junto al código y el `dist/` reconstruido.
