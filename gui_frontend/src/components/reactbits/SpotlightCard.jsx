@@ -2,7 +2,7 @@ import React from 'react';
 
 /**
  * Fachada de tarjeta compartida: conserva los consumidores existentes,
- * ahora con el material neutral de Nokia WiFi Manager, sin halos de neón.
+ * ahora con el material neutral de Bedrock Suite, sin halos de neón.
  */
 export default function SpotlightCard({ 
   children, 

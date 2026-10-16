@@ -27,9 +27,10 @@ configs del servidor (ver `.gitignore`).
 
 ## Apariencia y estructura
 
-El sistema visual se adapta de Nokia WiFi Manager (ver
-[`docs/PLAN_APARIENCIA_GUI.md`](../docs/PLAN_APARIENCIA_GUI.md)). Las funciones de
-Minecraft y sus endpoints se conservan; no se incluyen servicios de routers.
+El sistema visual de Minecraft Bedrock Server Suite reúne consola, recursos,
+fondos locales y navegación de la instalación. Diseño e implementación:
+[`docs/PLAN_APARIENCIA_GUI.md`](../docs/PLAN_APARIENCIA_GUI.md). La procedencia de
+los componentes adaptados y sus licencias está en los archivos `NOTICE.md`.
 
 - `src/appearance/`: preferencias validadas, límites/cabeceras de imágenes,
   composición del fondo y protección de lectura con worker.

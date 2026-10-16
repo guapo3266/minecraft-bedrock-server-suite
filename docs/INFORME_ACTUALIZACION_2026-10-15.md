@@ -68,3 +68,25 @@ apagada y se conserva apagada: no hubo reinicio necesario ni ejecución BDS para
 validar la copia. `origin/main` permanece en la referencia local anterior.
 El resguardo externo conserva el código reemplazado, artefactos apartados,
 manifiestos y resultados del sync; no se incorpora a Git.
+
+## Corrección de identidad e instrucciones de los destinos
+
+Se retiraron las etiquetas operativas heredadas de otra aplicación en el motor,
+preferencias, tokens CSS y SpotlightCard. La guía del frontend y los avisos
+identifican el producto como Minecraft Bedrock Server Suite. Los nombres del
+proyecto de origen quedan en la procedencia histórica y en su copyright MIT;
+el texto de las licencias se conserva. El aviso del motor registra además la
+huella SHA-256 del módulo vigente.
+
+El `AGENTS.md` local del repositorio público se revisó completo: reemplaza los
+comandos y contratos antiguos, define su papel como destino de TESTTEST y
+documenta frontend, IA, addons y portable. No se limita a un apéndice nuevo.
+TESTTEST y producción mantienen instrucciones propias; los archivos locales
+de los destinos se resguardan por separado y no se fuerzan al Git público.
+
+Esta corrección cambia comentarios y documentación. Los resultados completos
+de Python indicados arriba corresponden a la integración previa; para esta
+corrección aprobaron lint, las 88 pruebas y el build del frontend. Los 12
+archivos compilados resultaron idénticos por SHA-256 a los anteriores: la
+limpieza de comentarios no cambió el JavaScript/CSS servido. Las licencias
+se compararon con la revisión previa y se conservan sin cambios.

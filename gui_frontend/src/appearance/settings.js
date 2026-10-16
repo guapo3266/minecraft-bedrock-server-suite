@@ -1,5 +1,5 @@
-// Sistema visual adaptado de Nokia WiFi Manager. Claves propias: las
-// preferencias de ambas aplicaciones nunca se mezclan en el mismo navegador.
+// Apariencia de Minecraft Bedrock Server Suite. Las claves de almacenamiento
+// son propias de la suite; procedencia y licencia de la adaptación en NOTICE.md.
 export const SETTINGS_KEY = 'bedrock-appearance';
 export const IMAGE_DB = 'bedrock-appearance';
 export const DEFAULTS = Object.freeze({

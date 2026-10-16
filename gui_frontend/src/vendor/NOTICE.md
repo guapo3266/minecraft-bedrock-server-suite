@@ -1,27 +1,32 @@
-# LiquidGlass local bundle
+# LiquidGlass — Minecraft Bedrock Server Suite
 
-Source: Nokia WiFi Manager, `frontend/src/vendor/liquidglass.js`, snapshot
-adapted to Minecraft Bedrock Server Suite on 2026-10-12. The Nokia snapshot
-itself originated in the local Minecraft liquid-glass reference demo.
-Upstream: https://github.com/ybouane/liquidglass
-Original SHA-256: 9cbe94189fae695b2524b5dc7f750ba7ea8c37c71d3a6f86f34158fe193cc0c4
-Nokia snapshot SHA-256: fe183c67ed33f94640921318bdeb7118968e22a68c8bff6ccdd2bfbb0ef273d9
-Suite snapshot SHA-256: 15315d32259b9f8d64fa5d654618042334ef2cf74d0b281c9fc219d864afede2
+Módulo integrado en `gui_frontend/src/vendor/liquidglass.js` para las superficies
+decorativas de la suite. Se importa como ES module local, sin globals ni CDN.
+No captura contenido de consola, formularios o asistente IA.
 
-The upstream package manifest declares MIT. This snapshot already contains
-local decoding, scheduling and per-element dirty-tracking patches from the
-reference demo. It includes html-to-image (MIT, Copyright 2021 BUBBLE).
-Retain this provenance and all existing source comments when updating.
+## Adaptación mantenida por la suite
 
-NWM changes: ES-module export (no window globals), DPR cap 2, cancellable and
-idempotent lifecycle, event-driven idle rendering, pause/resume, cleanup when WebGL is unavailable, skip
-font embedding and content captures for empty decorative hosts, and a frame
-notification for background-only contrast sampling. Only this
-adapted module is imported; no CDN or network fallback is used.
+El módulo conserva límite de DPR 2, ciclo de vida cancelable e idempotente,
+invalidación por cambios, pausa en segundo plano y limpieza ante fallos WebGL.
+Las superficies estáticas permanecen inactivas hasta una invalidación explícita.
+Se evita incrustar fuentes o capturar contenido de los hosts vacíos. Los eventos
+son propios de la suite y el clonador de textarea usa `textContent`.
 
-Suite adaptation: frame event names are local to this app; textarea cloning
-uses `textContent` rather than interpreting its value as HTML. Hosts remain
-empty decorative surfaces: no server logs, forms or AI content are captured.
+Estos parches incluyen trabajo heredado de las versiones de referencia; esta
+descripción identifica su uso actual, no atribuye su autoría exclusiva a la suite.
+
+## Procedencia histórica
+
+- Proyecto original: https://github.com/ybouane/liquidglass.
+- Copia de referencia local anterior: SHA-256 `9cbe94189fae695b2524b5dc7f750ba7ea8c37c71d3a6f86f34158fe193cc0c4`.
+- Integración intermedia: Nokia WiFi Manager, `frontend/src/vendor/liquidglass.js`,
+  SHA-256 `fe183c67ed33f94640921318bdeb7118968e22a68c8bff6ccdd2bfbb0ef273d9`.
+- Integración inicial en esta suite (2026-10-12): SHA-256 `15315d32259b9f8d64fa5d654618042334ef2cf74d0b281c9fc219d864afede2`.
+- Módulo vigente: SHA-256 `a267575ca1c74a75068ba660330354b78dab0c30e6744f2dd3d4f3bcf685eb33`.
+
+La referencia de origen declara MIT. Incluye html-to-image (MIT,
+Copyright 2021 BUBBLE). Conservar esta procedencia y los avisos de licencia al
+actualizar el motor.
 
 ## MIT license notice
 

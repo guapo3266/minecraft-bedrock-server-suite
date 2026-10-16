@@ -55,7 +55,7 @@ sirviendo únicamente su frontend estático (sin conectar a un router).
 - Restablecer fondo elimina la imagen y reinicia el encuadre sin borrar el idioma
   ni modificar opciones funcionales del servidor.
 - Preferencias en `localStorage` e imagen en IndexedDB con claves propias de esta
-  aplicación, no las claves `nwm-*`. No subir imágenes ni usar URLs remotas.
+  aplicación, separadas del proyecto de origen. No subir imágenes ni usar URLs remotas.
 - Ante cuota, modo privado o almacenamiento bloqueado, aplicar lo posible durante
   la sesión y mostrar un aviso; no afirmar que se guardó si no se confirmó.
 

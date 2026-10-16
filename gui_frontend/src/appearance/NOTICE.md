@@ -1,13 +1,17 @@
-# Sistema visual y apariencia
+# Apariencia — Minecraft Bedrock Server Suite
 
-Adaptado de Nokia WiFi Manager, `frontend/src/`, el 2026-10-12:
-`background.js`, `imageDimensions.js`, `imageLayout.js`, `readability.js`,
-`readabilitySamples.js`, `readability.worker.js`, hook y componentes de apariencia,
-selector y composición de vidrio, y tokens/estructura CSS.
+Componentes locales para preferencias, límites/dimensiones de imágenes,
+composición del fondo, muestreo de contraste, worker, selector y superficies
+decorativas. Usan almacenamiento y eventos propios de la suite.
 
-La adaptación conserva el sistema visual, no contenidos, perfiles, credenciales
-ni servicios de administración de routers. Usa almacenamiento y eventos propios
-de Minecraft Bedrock Server Suite. Fuentes y motor tienen sus avisos separados.
+## Procedencia histórica
+
+La implementación se adaptó el 2026-10-12 desde `frontend/src/` de Nokia WiFi
+Manager: `background.js`, `imageDimensions.js`, `imageLayout.js`, `readability.js`,
+`readabilitySamples.js`, `readability.worker.js`, hook, componentes y tokens CSS.
+Se conservó el sistema visual; no se incorporaron perfiles, credenciales ni
+servicios de administración de routers. El motor y las fuentes tienen sus
+avisos separados. El siguiente copyright pertenece al proyecto de origen.
 
 ## Licencia del proyecto de origen
 

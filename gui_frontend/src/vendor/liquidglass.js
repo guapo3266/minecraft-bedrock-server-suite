@@ -1,5 +1,5 @@
 /* oxlint-disable -- Vendored dependency; local adapter patches documented in NOTICE.md. */
-// Local NWM adaptation; provenance and patches: NOTICE.md
+// Minecraft Bedrock Server Suite adaptation; provenance and patches: NOTICE.md
 // src/defaults.ts
 var DEFAULTS = {
   blurAmount: 0,
@@ -1873,7 +1873,7 @@ var LiquidGlass = class _LiquidGlass {
     this._hasDynamic = this._detectDynamic();
     this._sortedChildren = this._getSortedChildren();
     this._handleResize();
-    // NWM: decorative hosts contain no text or fonts; never capture UI.
+    // Suite: decorative hosts contain no text or fonts; never capture UI.
     if (this._destroyed) return;
     await this._captureGlassContent();
     if (this._destroyed) return;
@@ -2495,7 +2495,7 @@ var LiquidGlass = class _LiquidGlass {
     } catch (err) {
       console.error("LiquidGlass: render error:", err);
     }
-    // NWM: static decorative surfaces sleep until explicitly invalidated.
+    // Suite: static decorative surfaces sleep until explicitly invalidated.
     if (this._hasDynamic || this._drag.active || this._glassDirty.size || this._glassContentDirty.size || this._capturingGlassContent || this._globalDirty || this._userMarkedChanged.size) this._requestFrame();
   }
   _renderFrame() {
@@ -2528,7 +2528,7 @@ var LiquidGlass = class _LiquidGlass {
         renderedThisFrame
       );
     }
-    // NWM: notify once after changed decorative pixels are available in 2D canvases.
+    // Suite: notify once after changed decorative pixels are available in 2D canvases.
     if (renderedThisFrame.length) this.root.dispatchEvent(new Event('suite-glass-frame'));
   }
   /**
