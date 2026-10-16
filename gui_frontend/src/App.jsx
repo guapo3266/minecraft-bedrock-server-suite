@@ -1,19 +1,44 @@
-import React, { useState, useEffect, useRef } from 'react';
-import SideRays from './components/reactbits/SideRays';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { MotionConfig } from 'framer-motion';
+import { X, Check, TriangleAlert } from 'lucide-react';
+import GlassStage from './components/GlassStage';
+import Appearance from './components/Appearance';
+import Dock from './components/Dock';
+import { SECTIONS } from './navigation';
+import { useAppearance } from './hooks/useAppearance';
 import Navbar from './components/Navbar';
 import HardwareMeter from './components/HardwareMeter';
 import ConnectivityCard from './components/ConnectivityCard';
 import ControlsBar from './components/ControlsBar';
 import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
+import { lazy, Suspense } from 'react';
 import UpdateModal from './components/UpdateModal';
 import PropsModal from './components/PropsModal';
 import ScheduleModal from './components/ScheduleModal';
 import SetupWizard from './components/SetupWizard';
+import AboutModal from './components/AboutModal';
 import { useI18n } from './i18n.jsx';
+
+// El build privado portable no carga ni muestra el asistente IA.
+const AiDrawer = import.meta.env.VITE_SUITE_PORTABLE === '1' ? null : lazy(() => import('./components/AiDrawer'));
 
 export default function App() {
   const { t, lang } = useI18n();
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [glassStatus, setGlassStatus] = useState('loading');
+  const [activeView, setActiveView] = useState('server');
+  const [consoleExpanded, setConsoleExpanded] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+  const headerRef = useRef(null), dockRef = useRef(null);
+  const notify = useCallback((key, kind = 'success') => setToast({ key, kind, id: Date.now() }), []);
+  const appearance = useAppearance(notify);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6500);
+    return () => clearTimeout(timer);
+  }, [toast]);
   const tRef = useRef(t);
   tRef.current = t;
   const langRef = useRef(lang);
@@ -43,20 +68,23 @@ export default function App() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateStarted, setUpdateStarted] = useState(false);
   const [latency, setLatency] = useState(null);
+  const [connectionState, setConnectionState] = useState('connecting');
   const wsRef = useRef(null);
   const updateStartedRef = useRef(false);
   const logSeqRef = useRef(0);
   const [setupInfo, setSetupInfo] = useState(null);
+  const [setupFetchError, setSetupFetchError] = useState(false);
   const [setupAttempt, setSetupAttempt] = useState(0);
   const [connectivity, setConnectivity] = useState(null);
 
   const fetchConnectivity = async (refresh = false) => {
     try {
       const res = await fetch(`/api/connectivity${refresh ? '?refresh=1' : ''}`);
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
       const data = await res.json();
       setConnectivity(data);
     } catch (e) {
-      console.error(e);
+      reportFetchError('/api/connectivity', e);
     }
   };
 
@@ -80,17 +108,31 @@ export default function App() {
       return next.length > MAX_CLIENT_LOGS ? next.slice(next.length - MAX_CLIENT_LOGS) : next;
     });
 
+  // Aviso VISIBLE de fallos de lectura de la API: reutiliza el mismo canal
+  // que los handlers de acción (entrada 'error' en la consola de la GUI) en
+  // vez de perderlos en console.error con la UI mostrando datos vacíos.
+  const reportFetchError = (endpoint, err) => {
+    console.error(err);
+    const detail = err?.message || err?.detail || String(err);
+    pushLog(makeLog(tRef.current('fetchError', { endpoint, err: detail }), 'error'));
+  };
+
   // Estado del setup inicial (first-run): el wizard se muestra en
   // instalaciones nuevas; las ya usadas (mundo existente) no lo ven.
+  // Si el backend no responde, la pantalla de carga muestra el error y
+  // permite reintentar (antes quedaba un "Cargando…" eterno sin aviso).
   useEffect(() => {
     let cancelled = false;
+    setSetupFetchError(false);
     (async () => {
       try {
         const res = await fetch('/api/setup_status');
+        if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
         const data = await res.json();
         if (!cancelled) setSetupInfo(data);
       } catch (e) {
         console.error(e);
+        if (!cancelled) setSetupFetchError(true);
       }
     })();
     return () => {
@@ -106,8 +148,10 @@ export default function App() {
 
     const connect = () => {
       if (disposed) return;
+      reconnectTimer = null;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
+      const isCurrent = () => !disposed && wsRef.current === ws;
       let pingTimer = null;
       const pingSentAt = { t: 0 };
 
@@ -119,6 +163,7 @@ export default function App() {
       };
 
       ws.onopen = () => {
+        if (!isCurrent()) return;
         pushLog(makeLog(tRef.current('wsConnected'), 'system'));
         fetchBackups();
         sendPing();
@@ -127,15 +172,20 @@ export default function App() {
       };
 
       ws.onmessage = (event) => {
+        if (!isCurrent()) return;
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'init') {
             if (msg.logs) setLogs(msg.logs);
-            if (msg.status) setStatus(msg.status);
+            if (msg.status) {
+              setStatus(msg.status);
+              setConnectionState('connected');
+            }
           } else if (msg.type === 'log') {
             pushLog(msg.data);
-          } else if (msg.type === 'status') {
+          } else if (msg.type === 'status' && msg.data) {
             setStatus(msg.data);
+            setConnectionState('connected');
           } else if (msg.type === 'pong') {
             setLatency(Date.now() - pingSentAt.t);
           }
@@ -144,9 +194,18 @@ export default function App() {
         }
       };
 
+      ws.onerror = () => {
+        if (!isCurrent()) return;
+        setLatency(null);
+        setConnectionState('reconnecting');
+      };
+
       ws.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
-        if (disposed) return; // el efecto ya se desmontó: no reagendar
+        if (!isCurrent()) return; // sesión caducada o efecto desmontado
+        wsRef.current = null;
+        setLatency(null);
+        setConnectionState('reconnecting');
         pushLog(makeLog(tRef.current('wsDisconnected'), 'error'));
         reconnectTimer = setTimeout(connect, 3000);
       };
@@ -184,27 +243,29 @@ export default function App() {
 
   // Título dinámico de la pestaña del navegador (estado visible en background)
   useEffect(() => {
-    document.title = status.running
-      ? tRef.current('titleRunning', { count: status.player_count })
-      : tRef.current('titleStopped');
-  }, [status.running, status.player_count, lang]);
+    document.title = connectionState !== 'connected'
+      ? `${tRef.current(connectionState === 'connecting' ? 'guiConnecting' : 'guiReconnecting')} · Bedrock Suite`
+      : status.running ? tRef.current('titleRunning', { count: status.player_count }) : tRef.current('titleStopped');
+  }, [status.running, status.player_count, lang, connectionState]);
 
   const fetchBackups = async () => {
     try {
       const res = await fetch('/api/backups');
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
       const data = await res.json();
       if (data.backups) setBackups(data.backups);
     } catch (e) {
-      console.error(e);
+      reportFetchError('/api/backups', e);
     }
   };
 
   const fetchPlayers = async () => {
     try {
       const res = await fetch('/api/players');
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
       setPlayersData(await res.json());
     } catch (e) {
-      console.error(e);
+      reportFetchError('/api/players', e);
     }
   };
 
@@ -218,10 +279,11 @@ export default function App() {
     updateStartedRef.current = false;
     try {
       const res = await fetch('/api/check_update');
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
       const data = await res.json();
       setUpdateInfo(data);
     } catch (e) {
-      console.error(e);
+      reportFetchError('/api/check_update', e);
     }
   };
 
@@ -229,11 +291,12 @@ export default function App() {
     setIsPropsModalOpen(true);
     try {
       const res = await fetch('/api/server_properties');
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
       const data = await res.json();
       setPropsFields(data.fields || {});
       setPropsServerRunning(!!data.server_running);
     } catch (e) {
-      console.error(e);
+      reportFetchError('/api/server_properties', e);
     }
   };
 
@@ -241,9 +304,10 @@ export default function App() {
     setIsScheduleModalOpen(true);
     try {
       const res = await fetch('/api/schedule');
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
       setScheduleConfig(await res.json());
     } catch (e) {
-      console.error(e);
+      reportFetchError('/api/schedule', e);
     }
   };
 
@@ -335,126 +399,60 @@ export default function App() {
     }
   };
 
-  // Loader mientras se determina si hay setup inicial pendiente
-  if (setupInfo === null) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 font-sans text-slate-100">
-        <div className="flex items-center gap-3" role="status">
-          <svg className="h-5 w-5 animate-spin text-emerald-400" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          <span className="animate-pulse text-sm font-bold text-slate-300">{t('loading')}</span>
-        </div>
-      </div>
-    );
-  }
+  const ready = setupInfo !== null && !setupInfo.required;
+  const section = SECTIONS.find(view => view.id === activeView) || SECTIONS[0];
 
-  // Setup inicial: reemplaza el dashboard hasta completarlo (instalaciones nuevas)
-  if (setupInfo && setupInfo.required) {
-    return (
-      <SetupWizard
-        bdsInstalled={!!setupInfo.bds_installed}
-        logs={logs}
-        onDone={() => setSetupAttempt((a) => a + 1)}
-      />
-    );
-  }
-
-  return (
-    <div className="relative min-h-screen text-slate-100 p-5 font-sans">
-      {/* Fondo SideRays (ReactBits OGL): haces volumétricos desde top-right.
-          Intensidad del ejemplo (intensity 2, speed 2.5) para efecto marcado
-          sin tapar las tarjetas (blend/falloff calibrados en oscuro #070a12). */}
-      <SideRays
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          zIndex: 0,
-          pointerEvents: 'none'
-        }}
-        speed={2.5}
-        rayColor1="#EAB308"
-        rayColor2="#96c8ff"
-        intensity={2}
-        spread={2}
-        origin="top-right"
-        tilt={0}
-        saturation={1.5}
-        blend={0.75}
-        falloff={1.6}
-        opacity={1.0}
-      />
-
-      <div className="relative z-10 mx-auto max-w-7xl space-y-5">
-        {/* Cabecera Principal */}
-        <Navbar status={status} onOpenUpdate={handleOpenUpdate} onOpenProps={handleOpenProps} onOpenSchedule={handleOpenSchedule} latency={latency} />
-
-        {/* Botonera de Control con ClickSpark & ConfirmButton */}
-        <ControlsBar status={status} onAction={handleAction} />
-
-        {/* Métricas de Hardware y Conectividad en 2 Columnas */}
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <HardwareMeter hardware={status.hardware} running={status.running} version={status.installed_version} />
-          <ConnectivityCard
-            connectivity={connectivity}
-            running={status.running}
-            onRefresh={() => fetchConnectivity(true)}
-          />
-        </div>
-
-        {/* Área Principal Dividida: Consola Terminal y Panel Lateral por Pestañas (Hover.dev ChipTabs) */}
-        <main className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_340px]">
-          <TerminalConsole
-            logs={logs}
-            onSendCommand={handleSendCommand}
-            onClearLogs={() => setLogs([])}
-            isRunning={status.running}
-          />
-          <aside>
-            <SidebarTabs
-              players={status.players}
-              playersData={playersData}
-              backups={backups}
-              onRefreshBackups={fetchBackups}
-              onRefreshPlayers={fetchPlayers}
-              isRunning={status.running}
-            />
-          </aside>
-        </main>
-
-        <footer className="border-t border-white/10 pt-3 pb-2 text-center text-xs text-slate-400">
-          Minecraft Bedrock Server Suite &bull; Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
-        </footer>
-      </div>
-
-      {/* Modal de Actualización de BDS (Hover.dev SpringModal) */}
-      <UpdateModal
-        isOpen={isUpdateModalOpen}
-        onClose={() => setIsUpdateModalOpen(false)}
-        updateInfo={updateInfo}
-        onConfirmUpdate={handleConfirmUpdate}
-        onRollback={handleRollback}
-        isUpdating={isUpdating}
-      />
-
-      {/* Modal de Configuración (server.properties) */}
-      <PropsModal
-        isOpen={isPropsModalOpen}
-        onClose={() => setIsPropsModalOpen(false)}
-        fields={propsFields}
-        serverRunning={propsServerRunning}
-      />
-
-      {/* Modal de Programación (backups + watchdog) */}
-      <ScheduleModal
-        isOpen={isScheduleModalOpen}
-        onClose={() => setIsScheduleModalOpen(false)}
-        config={scheduleConfig}
-      />
+  return <MotionConfig reducedMotion={appearance.effectiveEffects === 'reduced' ? 'always' : 'user'}>
+    <GlassStage settings={{ ...appearance.settings, effects: appearance.effectiveEffects }} imageUrl={appearance.url}
+      headerRef={headerRef} dockRef={dockRef} onStatus={setGlassStatus} layoutKey={ready} />
+    <div className="app-shell" data-glass={glassStatus}>
+      <a href="#main" className="skip-link">{t('skipContent')}</a>
+      <Navbar headerRef={headerRef} status={status} showServerActions={ready} latency={latency} connectionState={connectionState}
+        onOpenUpdate={handleOpenUpdate} onOpenProps={handleOpenProps} onOpenSchedule={handleOpenSchedule}
+        onOpenAppearance={() => setAppearanceOpen(true)} onOpenAbout={() => setAboutOpen(true)}
+        appearanceTipEnabled={ready && !appearanceOpen && !aboutOpen && !isUpdateModalOpen && !isPropsModalOpen && !isScheduleModalOpen} />
+      <main id="main" className={`main-content ${ready ? activeView === 'server' ? 'server-content' : '' : 'setup-content'}`} tabIndex={-1}>
+        {setupInfo === null ? <div className="panel loading-panel">
+          <div className="loading-state" role="status"><span className="loading-spinner" aria-hidden="true" />{t('loading')}</div>
+          {setupFetchError && <div className="notice error" role="alert">
+            <TriangleAlert size={18} /><span>{t('setupNetError')}</span>
+            <button type="button" className="button" onClick={() => setSetupAttempt(value => value + 1)}>{t('retry')}</button>
+          </div>}
+        </div> : setupInfo.required ? <SetupWizard bdsInstalled={!!setupInfo.bds_installed} logs={logs}
+          onDone={() => setSetupAttempt(value => value + 1)} /> : <>
+          {activeView !== 'server' && <div className="section-heading">
+            <div><span className="eyebrow">Minecraft Bedrock <span className="eyebrow-separator">/</span>{t('localManagement')}</span>
+              <h1>{t(section.label)}</h1><p>{t(section.subtitle)}</p></div>
+            {status.running && <span className="player-count">{t('connectedPlayers', { count: status.player_count })}</span>}
+          </div>}
+          {/* Mantener la consola montada conserva entrada, filtros e historial al navegar. */}
+          <div id="server-panel" role="tabpanel" aria-labelledby="server-tab" hidden={activeView !== 'server'} className={`server-view ${consoleExpanded ? 'console-expanded' : ''}`}>
+            <ControlsBar status={status} onAction={handleAction} />
+            <div className="server-console-grid">
+              <TerminalConsole logs={logs} onSendCommand={handleSendCommand} onClearLogs={() => setLogs([])} isRunning={status.running}
+                expanded={consoleExpanded} onToggleExpand={() => setConsoleExpanded(value => !value)} />
+              <aside className="server-insights" aria-label={t('serverDetails')}>
+                <HardwareMeter hardware={status.hardware} running={status.running} version={status.installed_version} />
+                <ConnectivityCard connectivity={connectivity} running={status.running} onRefresh={() => fetchConnectivity(true)} />
+              </aside>
+            </div>
+          </div>
+          <SidebarTabs activeTab={activeView} showTabs={false} players={status.players} playersData={playersData}
+            backups={backups} onRefreshBackups={fetchBackups} onRefreshPlayers={fetchPlayers} isRunning={status.running} />
+        </>}
+      </main>
+      <Dock dockRef={dockRef} hidden={!ready} active={activeView} onChange={view => { setActiveView(view); setConsoleExpanded(false); }} players={status.player_count} backups={backups.length} />
     </div>
-  );
+    {ready && AiDrawer && <Suspense fallback={null}><AiDrawer onSendCommand={handleSendCommand} isRunning={status.running} /></Suspense>}
+    <Appearance open={appearanceOpen} onClose={() => setAppearanceOpen(false)} appearance={appearance} glassStatus={glassStatus} />
+    {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+    {toast && <div className={`toast ${toast.kind}`} role={toast.kind === 'error' ? 'alert' : 'status'}>
+      {toast.kind === 'error' ? <TriangleAlert size={18} /> : <Check size={18} />}<span>{t(toast.key)}</span>
+      <button type="button" aria-label={t('closeMessage')} onClick={() => setToast(null)}><X size={16} /></button>
+    </div>}
+    <UpdateModal isOpen={isUpdateModalOpen} onClose={() => setIsUpdateModalOpen(false)} updateInfo={updateInfo}
+      onConfirmUpdate={handleConfirmUpdate} onRollback={handleRollback} isUpdating={isUpdating} />
+    <PropsModal isOpen={isPropsModalOpen} onClose={() => setIsPropsModalOpen(false)} fields={propsFields} serverRunning={propsServerRunning} />
+    <ScheduleModal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} config={scheduleConfig} />
+  </MotionConfig>;
 }

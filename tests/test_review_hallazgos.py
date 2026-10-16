@@ -46,7 +46,7 @@ BACKUP_DIR_REAL = auto_backup.BACKUP_DIR
 # ═══════════════════════════════════════════════════════════════════════
 def _fake_env(monkeypatch, tmp_path):
     """Mundo y directorio de backups falsos (mismo patron que el resto de la suite)."""
-    fake_world = os.path.join(str(tmp_path), "world")
+    fake_world = os.path.join(str(tmp_path), "worlds", "Mundo")
     fake_bkp = os.path.join(str(tmp_path), "backups")
     os.makedirs(fake_world)
     os.makedirs(fake_bkp)
@@ -1264,7 +1264,9 @@ def test_restart_doble_simultaneo_no_lanza_dos_wrappers(monkeypatch):
     """H1: dos restarts simultaneos con el servidor apagado lanzan UN solo
     wrapper: do_restart marca is_running bajo op_lock en el spawn (igual que
     start). Antes, la ventana entre spawn y arranque del hilo permitia un
-    doble wrapper pisando el mundo."""
+    doble wrapper pisando el mundo. Contrato 2026-09-25: ademas, el guard de
+    reentrada responde "busy" al segundo clic sin lanzar otro hilo; si la
+    carrera lo deja pasar, el op_lock del spawn sigue garantizando uno solo."""
     pytest.importorskip("httpx")
     import concurrent.futures as cf
     from fastapi.testclient import TestClient
@@ -1287,7 +1289,9 @@ def test_restart_doble_simultaneo_no_lanza_dos_wrappers(monkeypatch):
                 futs = [ex.submit(c.post, "/api/action/restart") for _ in range(2)]
                 results = [f.result().json() for f in futs]
             time.sleep(0.5)  # deja terminar a los hilos do_restart
-        assert all(r["status"] == "restarting" for r in results), results
+        statuses = [r["status"] for r in results]
+        assert all(s in ("restarting", "busy") for s in statuses), results
+        assert "restarting" in statuses, results
         assert spawned["n"] == 1, f"se lanzaron {spawned['n']} wrappers"
     finally:
         _reset_manager_state()

@@ -1,13 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
 import Modal from './Modal';
-import { FolderArchive, RefreshCw, XCircle, Download, Trash2, ShieldCheck } from 'lucide-react';
-import { FilledCheckedIcon, TriangleAlertIcon, HistoryCircleIcon, DotsVerticalIcon } from './hover/AnimatedStatusIcons';
+import { FolderArchive, RefreshCw, XCircle, Download, Trash2, ShieldCheck, CircleCheck as FilledCheckedIcon,
+  TriangleAlert as TriangleAlertIcon, History as HistoryCircleIcon, EllipsisVertical as DotsVerticalIcon } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
+import useActionMenu from '../hooks/useActionMenu';
 
 // Etiqueta del disparador SOLO para mostrar (la rotación usa mtime, no
 // parsea nombres): si el filename no matchea ninguno conocido, cae en
@@ -22,9 +23,7 @@ function triggerLabel(filename, t) {
 
 export default function BackupsSidebar({ backups = [], onRefresh, isRunning = false }) {
   const { t } = useI18n();
-  const successIconRef = useRef(null);
-  const alertIconRef = useRef(null);
-  const menuRef = useRef(null);
+  const menuId = useId();
   const [restoreTarget, setRestoreTarget] = useState(null); // backup a restaurar (confirm)
   const [deleteTarget, setDeleteTarget] = useState(null); // backup a eliminar (confirm)
   const [alertOpen, setAlertOpen] = useState(false); // alerta "apaga el servidor"
@@ -37,66 +36,23 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
   const [menuFor, setMenuFor] = useState(null);
   const [menuRect, setMenuRect] = useState(null);
 
-  const closeMenu = () => {
+  const hideMenu = () => {
     setMenuFor(null);
     setMenuRect(null);
   };
+  const { menuRef, triggerRef: menuTriggerRef, closeMenu } = useActionMenu(Boolean(menuFor), hideMenu);
 
   const openMenu = (backup, e) => {
+    menuTriggerRef.current = e.currentTarget;
     const rect = e.currentTarget.getBoundingClientRect();
     const w = 176;
     const h = 184;
     setMenuRect({
-      top: Math.min(rect.bottom + 4, window.innerHeight - h - 8),
+      top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - h - 8)),
       left: Math.max(8, Math.min(rect.right - w, window.innerWidth - w - 8))
     });
     setMenuFor(backup.filename);
   };
-
-  // Cierra el menu con clic fuera (sin contar el boton que lo abre: evita la
-  // carrera mousedown->click del toggle), Escape, scroll o resize
-  useEffect(() => {
-    if (!menuFor) return;
-    const onDown = (ev) => {
-      if (menuRef.current && menuRef.current.contains(ev.target)) return;
-      if (ev.target && ev.target.closest && ev.target.closest('[data-menu-trigger]')) return;
-      closeMenu();
-    };
-    const onKey = (ev) => {
-      if (ev.key === 'Escape') closeMenu();
-    };
-    document.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', closeMenu, true);
-    window.addEventListener('resize', closeMenu);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', closeMenu, true);
-      window.removeEventListener('resize', closeMenu);
-    };
-  }, [menuFor]);
-
-  // Reproduce la animacion del check al confirmarse una restauracion exitosa
-  useEffect(() => {
-    if (result?.ok && successIconRef.current) {
-      successIconRef.current.startAnimation();
-    }
-  }, [result]);
-
-  // Igual para el feedback de verificacion de integridad
-  useEffect(() => {
-    if (verifyResult?.ok && successIconRef.current) {
-      successIconRef.current.startAnimation();
-    }
-  }, [verifyResult]);
-
-  // Pequena atencion al abrir la alerta de servidor encendido
-  useEffect(() => {
-    if (alertOpen && alertIconRef.current) {
-      alertIconRef.current.startAnimation();
-    }
-  }, [alertOpen]);
 
   const handleRestoreClick = (backup) => {
     if (isRunning) {
@@ -203,7 +159,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                     {b.date ? b.date.slice(0, 16) : b.filename}
                   </p>
                   <p className="truncate font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                    {triggerLabel(b.filename, t)}{b.size_mb != null ? ` · ${b.size_mb}\u00A0MB` : ''}
+                    {triggerLabel(b.filename, t)}{b.size_mb !== null && b.size_mb !== undefined ? ` · ${b.size_mb}\u00A0MB` : ''}
                   </p>
                 </div>
                 <button
@@ -211,6 +167,8 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                   onClick={(e) => (menuFor === b.filename ? closeMenu() : openMenu(b, e))}
                   title={t('actions')}
                   aria-label={t('actions')}
+                  aria-haspopup="menu" aria-expanded={menuFor === b.filename}
+                  aria-controls={menuFor === b.filename ? menuId : undefined}
                   className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition ${
                     menuFor === b.filename
                       ? 'border-amber-500/70 bg-amber-500/25 text-amber-300'
@@ -239,21 +197,24 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.92, y: -4 }}
               transition={{ type: 'spring', stiffness: 400, damping: 26 }}
-              style={{ top: menuRect.top, left: menuRect.left }}
-              className="fixed z-50 w-44 rounded-xl border border-white/10 bg-slate-950 p-1 shadow-2xl"
+              style={{ top: menuRect.top, left: menuRect.left, maxHeight: `calc(100dvh - ${menuRect.top + 8}px)` }}
+              className="glass-menu backup-menu legacy-ui"
+              id={menuId} role="menu" aria-label={t('actions')}
             >
             <a
               href={`/api/backups/${encodeURIComponent(menuFor)}/download`}
-              onClick={closeMenu}
+              role="menuitem" tabIndex={-1}
+              onClick={() => closeMenu(true)}
               className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-cyan-300 transition-colors hover:bg-cyan-500/15"
             >
               <Download className="h-3.5 w-3.5" />
               {t('download')}
             </a>
             <button
+              type="button" role="menuitem" tabIndex={-1}
               onClick={() => {
                 const b = backups.find((x) => x.filename === menuFor);
-                closeMenu();
+                closeMenu(true);
                 if (b) handleVerify(b);
               }}
               disabled={verifying === menuFor}
@@ -267,9 +228,10 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
               {t('verify')}
             </button>
             <button
+              type="button" role="menuitem" tabIndex={-1}
               onClick={() => {
                 const b = backups.find((x) => x.filename === menuFor);
-                closeMenu();
+                closeMenu(true);
                 if (b) handleRestoreClick(b);
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/15"
@@ -278,9 +240,10 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
               {t('restore')}
             </button>
             <button
+              type="button" role="menuitem" tabIndex={-1}
               onClick={() => {
                 const b = backups.find((x) => x.filename === menuFor);
-                closeMenu();
+                closeMenu(true);
                 if (b) handleDeleteClick(b);
               }}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/15"
@@ -305,7 +268,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
           }`}
         >
           {verifyResult.ok ? (
-            <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" />
+            <FilledCheckedIcon size={18} className="text-emerald-400" />
           ) : (
             <XCircle className="h-4 w-4 shrink-0" />
           )}
@@ -319,7 +282,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
           <Modal onClose={() => setAlertOpen(false)} label={t('restoreServerOn')} className="max-w-sm border-rose-500/40">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-500/20 border border-rose-500/50">
-                <TriangleAlertIcon ref={alertIconRef} size={28} color="#fb7185" />
+                <TriangleAlertIcon size={28} className="text-rose-400" />
               </div>
               <div>
                 <h3 className="text-base font-bold text-white">{t('restoreServerOn')}</h3>
@@ -364,7 +327,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                     : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
                 }`}
               >
-                {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                {result.ok ? <FilledCheckedIcon size={18} className="text-emerald-400" /> : <XCircle className="h-4 w-4 shrink-0" />}
                 <span className="break-all">{result.message}</span>
               </div>
             )}
@@ -388,7 +351,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
           <Modal onClose={() => setRestoreTarget(null)} label={t('restoreConfirm')} className="max-w-sm border-amber-500/40">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500/20 border border-amber-500/50">
-                <HistoryCircleIcon size={26} color="#fbbf24" />
+                <HistoryCircleIcon size={26} className="text-amber-400" />
               </div>
               <div>
                 <h3 className="text-base font-bold text-white">{t('restoreConfirm')}</h3>
@@ -411,7 +374,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
                     : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
                 }`}
               >
-                {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                {result.ok ? <FilledCheckedIcon size={18} className="text-emerald-400" /> : <XCircle className="h-4 w-4 shrink-0" />}
                 <span className="break-all">{result.message}</span>
               </div>
             )}

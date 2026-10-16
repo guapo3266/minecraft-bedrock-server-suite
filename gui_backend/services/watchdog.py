@@ -29,6 +29,7 @@ _started = threading.Event()
 # Estado del ciclo a nivel de modulo (reseteable desde tests).
 crash_restarts = 0
 last_crash_restart_at = 0.0
+_crash_restart_cap_notified = False
 last_daily_restart_date = None
 last_daily_cold_backup_date = None
 _gui_state_loaded = False
@@ -152,15 +153,32 @@ def _watchdog_tick(now=None):
 
 
 def _tick_crash_restart(now):
-    global crash_restarts, last_crash_restart_at
+    global crash_restarts, last_crash_restart_at, _crash_restart_cap_notified
     if manager.is_running:
         if manager.start_time and (now - manager.start_time) >= config.WATCHDOG_STABLE_UPTIME_SEC:
             crash_restarts = 0
+            _crash_restart_cap_notified = False
         return
     if manager.stop_requested:
         return
     # En backoff: esperar antes del siguiente intento.
     if crash_restarts > 0 and (now - last_crash_restart_at) < _backoff_sec(crash_restarts):
+        return
+    # Tope de re-arranques (2026-09-25): con un crash persistente se
+    # reintentaba para siempre (cada arranque dispara ademas su backup
+    # inicial). Tras el tope se requiere intervencion manual; el contador se
+    # reinicia cuando el servidor se mantiene estable (arriba).
+    if crash_restarts >= config.WATCHDOG_MAX_CRASH_RESTARTS:
+        if not _crash_restart_cap_notified:
+            _crash_restart_cap_notified = True
+            try:
+                manager.add_log(
+                    L(f"[Watchdog] Tope de {config.WATCHDOG_MAX_CRASH_RESTARTS} re-arranques fallidos alcanzado; se requiere intervención manual (revisa la consola y usa 'Iniciar' cuando el problema esté resuelto).",
+                      f"[Watchdog] Reached the {config.WATCHDOG_MAX_CRASH_RESTARTS} failed-restart cap; manual intervention required (check the console and use 'Start' once the problem is fixed)."),
+                    "error",
+                )
+            except Exception:
+                pass
         return
     try:
         status, _detalle = lifecycle_service.start_wrapper()

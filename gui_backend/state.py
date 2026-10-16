@@ -28,6 +28,7 @@ class ServerManager:
         self.last_backup_time = "Ninguno"
         self.backup_in_progress = False
         self.update_in_progress = False
+        self.restart_in_progress = False  # guard de reentrada de restart (2026-09-25)
         self.installed_version = None  # FIX F1: version real capturada del log de BDS
         self.wrapper_exit_event = threading.Event()
         self.wrapper_exit_event.set()  # Sin wrapper en ejecución al inicio
@@ -137,29 +138,34 @@ def build_public_status(manager, players=None):
     pasa, se lee aquí bajo manager.lock.
     """
     hw = get_hardware_metrics()
-    if players is None:
-        with manager.lock:
+    with manager.lock:
+        if players is None:
             players = list(manager.players_online)
-            ext_inst = manager.external_instance
-            ext_reason = manager.external_instance_reason
-    else:
-        with manager.lock:
-            ext_inst = manager.external_instance
-            ext_reason = manager.external_instance_reason
+        # Snapshot atomico bajo el mismo lock: antes is_running,
+        # backup/update flags, tiempos y version se leian sin lock
+        # (lecturas rasgadas en cada poll /api/status e init de WS).
+        running = manager.is_running
+        last_backup = manager.last_backup_time
+        backup_prog = manager.backup_in_progress
+        update_prog = manager.update_in_progress
+        ext_inst = manager.external_instance
+        ext_reason = manager.external_instance_reason
+        start_time = manager.start_time
+        installed = manager.installed_version
     return {
-        "running": manager.is_running,
+        "running": running,
         "players": players,
         "player_count": len(players),
-        "last_backup": manager.last_backup_time,
-        "backup_in_progress": manager.backup_in_progress,
-        "update_in_progress": manager.update_in_progress,
+        "last_backup": last_backup,
+        "backup_in_progress": backup_prog,
+        "update_in_progress": update_prog,
         "external_instance": ext_inst,
         "external_instance_reason": ext_reason,
-        "uptime": int(time.time() - manager.start_time) if (manager.is_running and manager.start_time) else 0,
+        "uptime": int(time.time() - start_time) if (running and start_time) else 0,
         "hardware": hw,
         # Version de BDS capturada en el arranque (evento version_captured);
         # None hasta que el wrapper arranque el servidor.
-        "installed_version": manager.installed_version
+        "installed_version": installed
     }
 
 

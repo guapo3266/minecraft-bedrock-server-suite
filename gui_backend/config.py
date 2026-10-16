@@ -1,11 +1,11 @@
 """Rutas, puertos y constantes globales del backend de la GUI."""
 
 import os
+import runtime_paths
 
-# Raíz del proyecto (un nivel por encima de este paquete). Se calcula desde
-# __file__ de este módulo, NO del módulo que lo importe.
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WEB_DIR = os.path.join(BASE_DIR, "web")
+# En fuente es la raiz del proyecto; en portable, la carpeta del .exe.
+BASE_DIR = runtime_paths.installation_dir()
+WEB_DIR = runtime_paths.resource_path("web", base_dir=BASE_DIR)
 SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 PROPS_PATH = os.path.join(BASE_DIR, "server.properties")
 SETUP_MARKER = os.path.join(BASE_DIR, "data", "setup_done.json")
@@ -29,3 +29,4 @@ WRAPPER_EXIT_TIMEOUT_SEC = 450    # Fase 2: max segundos esperando al wrapper co
 WATCHDOG_POLL_SEC = 5             # Periodo del ciclo de vigilancia
 WATCHDOG_STABLE_UPTIME_SEC = 600  # Uptime tras el cual se reinicia el backoff de crashes
 WATCHDOG_BACKOFF_SCHEDULE = (30, 60, 120, 300)  # Segundos entre re-arranques consecutivos
+WATCHDOG_MAX_CRASH_RESTARTS = 5   # Tope de re-arranques fallidos seguidos (2026-09-25)

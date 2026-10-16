@@ -23,15 +23,20 @@ export default function ControlsBar({ status, onAction }) {
   };
 
   return (
-    <section className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4 lg:flex">
-      {/* Start Button — accion primaria: solida, sin ShinyText (texto negro) */}
+    <section className="controls-panel panel legacy-ui" aria-label={t('serverControls')}>
+      <div className="controls-context">
+        <h1>{t('serverTab')}</h1>
+        <p>{isRunning ? t('connectedPlayers', { count: status.player_count ?? 0 }) : t('startServerHint')}</p>
+      </div>
+      <div className="controls-actions">
+      {/* Solo Iniciar tiene tratamiento primario, y solo si está disponible. */}
       <ConfirmButton
         onClick={() => onAction('start')}
         disabled={isRunning}
         variant="emeraldSolid"
-        className="w-full py-3.5 text-sm"
+        className={`control-start ${isRunning ? '' : 'strong-primary'}`}
       >
-        <Play className="h-5 w-5 text-black fill-black" />
+        <Play className="h-4 w-4 fill-current" />
         {t('start')}
       </ConfirmButton>
 
@@ -40,9 +45,9 @@ export default function ControlsBar({ status, onAction }) {
         onClick={() => setConfirmAction('stop')}
         disabled={!isRunning}
         variant="rose"
-        className="w-full py-3.5 text-sm"
+        className="control-danger"
       >
-        <Square className="h-5 w-5 text-rose-400 fill-rose-400" />
+        <Square className="h-4 w-4 fill-current" />
         <ShinyText text={t('stop')} />
       </ConfirmButton>
 
@@ -51,9 +56,9 @@ export default function ControlsBar({ status, onAction }) {
         onClick={() => setConfirmAction('restart')}
         disabled={!isRunning}
         variant="purple"
-        className="w-full py-3.5 text-sm"
+        className="control-secondary"
       >
-        <RotateCw className="h-5 w-5 text-purple-400" />
+        <RotateCw className="h-4 w-4" />
         <ShinyText text={t('restart')} />
       </ConfirmButton>
 
@@ -61,12 +66,13 @@ export default function ControlsBar({ status, onAction }) {
       <ConfirmButton
         onClick={() => onAction('backup')}
         variant="amber"
-        className="w-full py-3.5 text-sm"
+        className="control-secondary"
         disabled={status?.backup_in_progress}
       >
-        <Save className="h-5 w-5 text-amber-400" />
+        <Save className="h-4 w-4" />
         <ShinyText text={t('backup')} />
       </ConfirmButton>
+      </div>
 
       {/* Modal de confirmación para acciones destructivas (stop/restart).
           El Modal base vive en portal a body: dentro de la section

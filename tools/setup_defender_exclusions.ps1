@@ -27,10 +27,13 @@ if (-not $isAdmin) {
     Write-Host "=========================================================" -ForegroundColor Cyan
     try {
         $processArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-        Start-Process powershell.exe -Verb RunAs -ArgumentList $processArgs
-        exit 0
+        # -Wait -PassThru: el padre espera al hijo elevado y le propaga su exit
+        # code (sin esto configurar_antivirus.bat nunca veia los fallos reales).
+        $child = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList $processArgs
+        exit $child.ExitCode
     } catch {
         Write-Host "No se pudo elevar privilegios: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Si cancelaste el aviso de UAC, vuelve a ejecutar este script como Administrador." -ForegroundColor Yellow
         exit 1
     }
 }
@@ -108,6 +111,7 @@ try {
 
 $addedCount = 0
 $existingCount = 0
+$errorCount = 0
 
 foreach ($path in $TargetPaths) {
     $normalized = [System.IO.Path]::GetFullPath($path).TrimEnd('\')
@@ -131,6 +135,7 @@ foreach ($path in $TargetPaths) {
             $addedCount++
         } catch {
             Write-Host "  [ERROR]     $path ($($_.Exception.Message))" -ForegroundColor Red
+            $errorCount++
         }
     }
 }
@@ -138,8 +143,14 @@ foreach ($path in $TargetPaths) {
 Write-Host ""
 Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "Resumen: $addedCount exclusiones agregadas, $existingCount ya configuradas previamente." -ForegroundColor White
+if ($errorCount -gt 0) {
+    Write-Host "[AVISO] $errorCount exclusiones no se pudieron aplicar (revisa los errores de arriba)." -ForegroundColor Red
+}
 Write-Host "Los backups iniciales y arranques ahora se ejecutarán a máxima velocidad (6-10 s)." -ForegroundColor Green
 Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
 Write-Host ""
 
 Read-Host "Presiona Enter para cerrar..."
+# Exit code para que configurar_antivirus.bat (y quien lo llame) vea el fallo.
+if ($errorCount -gt 0) { exit 1 }
+exit 0

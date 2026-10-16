@@ -4,6 +4,7 @@ import os
 import re
 import socket
 import time
+import runtime_paths
 
 import requests
 from fastapi import APIRouter, Request
@@ -19,12 +20,12 @@ from gui_backend.state import manager, build_public_status
 
 router = APIRouter()
 
-DIST_DIR = os.path.join(config.BASE_DIR, "gui_frontend", "dist")
+DIST_DIR = runtime_paths.resource_path("gui_frontend", "dist", base_dir=config.BASE_DIR)
 
 
 @router.get("/favicon.svg")
 async def get_favicon():
-    favicon_path = os.path.join(config.BASE_DIR, "gui_frontend", "public", "favicon.svg")
+    favicon_path = runtime_paths.resource_path("gui_frontend", "public", "favicon.svg", base_dir=config.BASE_DIR)
     if os.path.exists(favicon_path):
         return FileResponse(favicon_path)
     return FileResponse(os.path.join(config.WEB_DIR, "index.html"))
@@ -119,6 +120,11 @@ class CommandRequest(BaseModel):
     command: str
 
 
+# Tope anti-DoS: el pipe del wrapper + log_history (500 entradas) + SQLite
+# no deben recibir lineas de MBs desde /api/command o el WS.
+MAX_COMMAND_CHARS = 2000
+
+
 @router.post("/api/command")
 async def send_command(req: CommandRequest, request: Request):
     _ensure_local(request.client.host if request.client else "")
@@ -126,6 +132,10 @@ async def send_command(req: CommandRequest, request: Request):
     cmd = req.command.strip()
     if not cmd:
         return {"status": "ok"}
+    if len(cmd) > MAX_COMMAND_CHARS:
+        manager.add_log(L(f"[GUI Backend] Comando rechazado: excede {MAX_COMMAND_CHARS} caracteres",
+                          f"[GUI Backend] Command rejected: exceeds {MAX_COMMAND_CHARS} chars"), "error")
+        return {"status": "error", "message": f"Comando demasiado largo (max {MAX_COMMAND_CHARS})"}
 
     if not manager.is_running or not manager.wrapper_process or manager.wrapper_process.poll() is not None:
         manager.add_log(f"> {cmd}", "command")
@@ -148,7 +158,10 @@ async def send_command(req: CommandRequest, request: Request):
     # no BDS): es un stop deliberado y el watchdog no debe re-lanzarlo.
     # Se compara por LINEA: un comando multi-linea tipo "list\nstop" tambien
     # termina el wrapper en read_stdin y debe contar como stop deliberado.
-    if "stop" in {line.strip().lower() for line in cmd.splitlines()}:
+    # Mismo criterio de particion que el wrapper (solo \r\n): splitlines()
+    # tambien parte por \v \f \x1c-\x1e \x85 \u2028 \u2029 y un "x\x0bstop"
+    # marcaba stop_requested con el wrapper vivo (2026-09-25).
+    if "stop" in {line.strip().lower() for line in cmd.replace("\r", "\n").split("\n")}:
         manager.stop_requested = True
 
     manager.add_log(f"> {cmd}", "command")

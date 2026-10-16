@@ -44,6 +44,23 @@ def test_extract_pack_entry_rechaza_traversal_sin_tocar_el_zip(tmp_path):
     ("a\\..\\b", False),
     ("a\x00b", False),
     ("\\.\\NUL", False),
+    # ADS de NTFS (H5-2026-09-25): ':' en cualquier segmento, no solo el primero
+    ("db/foo.ldb:stream", False),
+    ("a/b:c", False),
+    ("db/foo.ldb:$DATA", False),
+    # Nombres de dispositivo de Windows: extraerlos escribe al device
+    ("db/NUL", False),
+    ("aux.txt", False),
+    ("server_resource_packs/COM3", False),
+    ("nul", False),
+    # Punto/espacio final: alias de normalizacion NTFS
+    ("db/foo.", False),
+    ("db/foo ", False),
+    ("db/.", False),
+    # Compatibilidad: nombres normales y punto inicial siguen aceptandose
+    (".hidden", True),
+    ("", True),
+    ("db/000001.ldb", True),
 ])
 def test_is_safe_zip_entry_casos_fijos(nombre, esperado):
     assert _is_safe_zip_entry(nombre) is esperado

@@ -194,7 +194,8 @@ function StepIndicator({ step, currentStep, onClickStep, disableStepIndicators }
   };
 
   return (
-    <motion.div onClick={handleClick} className="step-indicator" style={disableStepIndicators ? { pointerEvents: 'none', opacity: 0.5 } : {}} animate={status} initial={false}>
+    <motion.button type="button" onClick={handleClick} className="step-indicator" aria-label={String(step)}
+      aria-current={status === 'active' ? 'step' : undefined} disabled={disableStepIndicators} animate={status} initial={false}>
       <motion.div
         variants={{
           inactive: { scale: 1, backgroundColor: '#222', color: '#a3a3a3' },
@@ -212,7 +213,7 @@ function StepIndicator({ step, currentStep, onClickStep, disableStepIndicators }
           <span className="step-number">{step}</span>
         )}
       </motion.div>
-    </motion.div>
+    </motion.button>
   );
 }
 

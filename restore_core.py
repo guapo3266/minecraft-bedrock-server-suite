@@ -11,8 +11,8 @@ mas destructiva del sistema.
 
 Contrato:
   - Errores de entrada/validacion: `ValueError` (o `BadZipFile` de zipfile).
-  - Fallo de extraccion/intercambio: `RuntimeError`; el mundo original queda
-    intacto o recuperado por rollback.
+  - Fallo de extraccion/intercambio: `RuntimeError`; se intenta rollback.
+    Si Windows impide recuperarlo por completo, el resguardo se conserva.
   - Devuelve la ruta del ZIP restaurado.
   - Mensajes via `console_lang.L`: el CLI es es-only y fija el idioma del
     proceso durante la llamada (restaurandolo despues).
@@ -21,6 +21,7 @@ Contrato:
 import os
 import shutil
 import zipfile
+import server_properties
 
 from console_lang import L
 from zip_safety import (
@@ -45,6 +46,34 @@ def _limpiar_stagings(world_staging, pack_dir_stagings, pack_file_stagings):
                 pass
 
 
+def _fsync_tree_best_effort(root):
+    """Persiste los archivos extraidos en disco antes del swap (H4-2026-09-25).
+
+    Best-effort: sin esto, un corte de luz justo despues del rename podia
+    dejar el mundo activo con datos aun no volcados por el cacheador NTFS.
+    """
+    try:
+        for r, _dirs, files in os.walk(root):
+            for name in files:
+                try:
+                    with open(os.path.join(r, name), "r+b") as f:
+                        f.flush()
+                        os.fsync(f.fileno())
+                except OSError:
+                    continue
+    except OSError:
+        pass
+
+
+def _fsync_file_best_effort(path):
+    try:
+        with open(path, "r+b") as f:
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        pass
+
+
 def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
     """Restaura `zip_path` sobre `world_dir` con staging + swap recuperable.
 
@@ -56,6 +85,7 @@ def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
     falla, `_quarantine_and_restore` devuelve los resguardos a su sitio.
     """
     log = log_fn or print
+    world_dir = server_properties.validate_world_dir(base_dir, world_dir)
 
     # 1. Validar el ZIP y clasificar entradas: mundo vs packs de servidor.
     log(L("[*] Validando backup antes de tocar el mundo...",
@@ -75,15 +105,17 @@ def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
                 pack_infos.append((entry, parsed))
             else:
                 world_infos.append(entry)
-        bad = zf.testzip()
-        if bad is not None:
-            raise ValueError(L(f"Backup corrupto (CRC fallido): {bad}",
-                               f"Corrupt backup (CRC failed): {bad}"))
+        # Limite de expansion ANTES del CRC: testzip() descomprime todo
+        # (zip-bomb CPU). El limite usa solo headers declarados y es barato.
         if _exceeds_expansion_limit(zf.infolist()):
             raise ValueError(L(
                 "Backup rechazado: su tamaño descomprimido excede el limite de seguridad.",
                 "Backup rejected: its uncompressed size exceeds the safety limit.",
             ))
+        bad = zf.testzip()
+        if bad is not None:
+            raise ValueError(L(f"Backup corrupto (CRC fallido): {bad}",
+                               f"Corrupt backup (CRC failed): {bad}"))
 
     nonce = os.urandom(4).hex()
     world_staging = world_dir + f".restore_staging_{nonce}"
@@ -128,6 +160,12 @@ def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
                 "El backup no contiene un mundo valido (sin level.dat); restauración abortada sin tocar el mundo.",
                 "The backup does not contain a valid world (no level.dat); restore aborted without touching the world.",
             ))
+        # Volcar el staging a disco antes del swap (best-effort).
+        _fsync_tree_best_effort(world_staging)
+        for s_dir in pack_dir_stagings.values():
+            _fsync_tree_best_effort(s_dir)
+        for s_file in pack_file_stagings.values():
+            _fsync_file_best_effort(s_file)
     except Exception as exc:
         _limpiar_stagings(world_staging, pack_dir_stagings, pack_file_stagings)
         raise RuntimeError(L(f"Fallo la extraccion: {exc}",
@@ -183,7 +221,22 @@ def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
         raise RuntimeError(L(f"Fallo el intercambio durante la restauracion: {swap_err}",
                              f"Swap failed during restore: {swap_err}")) from swap_err
 
-    # 4. Limpieza de los resguardos solo tras intercambio exitoso.
+    # 4. Verificacion post-swap antes de descartar resguardos (H9-2026-09-25):
+    # si el mundo intercambiado no llego con level.dat (swap parcial o ZIP
+    # logicamente incompleto), se revierte con rollback en vez de borrar el
+    # unico resguardo del mundo previo.
+    if swap_success and not os.path.exists(os.path.join(world_dir, "level.dat")):
+        log(L("[ERROR] El mundo intercambiado no contiene level.dat; revirtiendo al mundo previo...",
+              "[ERROR] The swapped world has no level.dat; rolling back to the previous world..."))
+        _quarantine_and_restore(world_dir, bak_dir, is_dir=True)
+        for active_p, bak_p, is_d in reversed(pack_baks):
+            _quarantine_and_restore(active_p, bak_p, is_dir=is_d)
+        raise RuntimeError(L(
+            "La restauracion dejo un mundo sin level.dat; se intento el rollback. Revisa los resguardos conservados si fallo.",
+            "The restore produced a world without level.dat; rollback was attempted. Check any retained backups if it failed.",
+        ))
+
+    # Limpieza de los resguardos solo tras intercambio exitoso y verificado.
     if swap_success:
         if os.path.exists(bak_dir):
             shutil.rmtree(bak_dir, ignore_errors=True)

@@ -32,22 +32,22 @@ export default function Modal({ onClose, label, children, className = '' }) {
         onCloseRef.current();
         return;
       }
-      if (ev.key !== 'Tab') return;
+      if (ev.key !== 'Tab' || modalStack[modalStack.length - 1] !== entry) return;
       const card = cardRef.current;
       if (!card) return;
-      const focusables = card.querySelectorAll(
+      const focusables = [...card.querySelectorAll(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
+      )].filter(element => !element.disabled && element.getClientRects().length);
       if (focusables.length === 0) {
         ev.preventDefault();
         return;
       }
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
-      if (ev.shiftKey && document.activeElement === first) {
+      if (ev.shiftKey && (document.activeElement === first || document.activeElement === card)) {
         ev.preventDefault();
         last.focus();
-      } else if (!ev.shiftKey && document.activeElement === last) {
+      } else if (!ev.shiftKey && (document.activeElement === last || document.activeElement === card)) {
         ev.preventDefault();
         first.focus();
       }
@@ -65,13 +65,13 @@ export default function Modal({ onClose, label, children, className = '' }) {
   }, []);
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="modal-overlay">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={() => onCloseRef.current()}
-        className="absolute inset-0 bg-black/75 backdrop-blur-md"
+        className="modal-backdrop"
       />
       <motion.div
         ref={cardRef}
@@ -79,11 +79,11 @@ export default function Modal({ onClose, label, children, className = '' }) {
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
-        initial={{ scale: 0.8, opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.8, opacity: 0, y: 20 }}
+        exit={{ opacity: 0, y: 6 }}
         transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-        className={`relative z-10 w-full rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl outline-none overscroll-contain ${className}`}
+        className={`dialog legacy-ui ${className}`}
       >
         {children}
       </motion.div>

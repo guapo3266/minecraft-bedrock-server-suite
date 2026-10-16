@@ -22,7 +22,9 @@ export default function PingIndicator({ status, latency = null }) {
   } else if (isOnline) {
     color = "bg-emerald-400";
     ringColor = "border-emerald-400/50";
-    text = latency != null ? t('latency', { ms: Math.max(latency, 0) }) : t('online');
+    // latency es `null` (sin medir) o número (default del prop garantiza null
+    // ante undefined): comparación explícita con eqeqeq estricto.
+    text = latency === null ? t('online') : t('latency', { ms: Math.max(latency, 0) });
   }
 
   return (

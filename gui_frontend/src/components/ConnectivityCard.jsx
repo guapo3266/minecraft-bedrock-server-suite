@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import SpotlightCard from './reactbits/SpotlightCard';
-import { Globe, Copy, Check, RefreshCw } from 'lucide-react';
-import { WifiIcon, WifiOffIcon } from './hover/AnimatedStatusIcons';
+import { Globe, Copy, Check, RefreshCw, Wifi as WifiIcon, WifiOff as WifiOffIcon } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
 function CopyButton({ value, label, copiedLabel }) {
@@ -60,13 +59,13 @@ export default function ConnectivityCard({ connectivity, running, onRefresh }) {
   const pubAddr = pub ? `${pub}:${port}` : '';
 
   return (
-    <SpotlightCard spotlightColor="rgba(16, 185, 129, 0.15)">
+    <SpotlightCard className="connectivity-panel">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
           {running ? (
-            <WifiIcon size={18} color="#34d399" className="text-emerald-400" />
+            <WifiIcon size={18} className="text-emerald-400" />
           ) : (
-            <WifiOffIcon size={18} color="#94a3b8" className="text-slate-400" />
+            <WifiOffIcon size={18} className="text-slate-400" />
           )}
           <h3>{t('inviteTitle')}</h3>
         </div>

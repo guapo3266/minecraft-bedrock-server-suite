@@ -23,20 +23,21 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 import uvicorn
+import runtime_paths
 
 import auto_backup
 from console_lang import L
 
 from gui_backend import config
 from gui_backend.config import BASE_DIR  # noqa: F401  (re-export: lo usan tests)
-from gui_backend.security import _allow_lan, _ensure_local, _check_origin, _is_allowed_origin, _is_safe_zip_entry  # noqa: F401  (dos ultimos: re-exports para tests)
+from gui_backend.security import _allow_lan, _ensure_local, _check_origin, _ensure_valid_host_header, _is_allowed_origin, _is_safe_zip_entry  # noqa: F401  (dos ultimos: re-exports para tests)
 from gui_backend.metrics import get_hardware_metrics
 from gui_backend.state import manager
 from gui_backend.services import external_probe as external_probe_service
 from gui_backend.services import bds_update as bds_update_service
 from gui_backend.services import watchdog as watchdog_service
 from gui_backend.services import history as history_service
-from gui_backend.routers import system, properties, setup, actions, backups, websocket, schedule, players, history
+from gui_backend.routers import system, properties, setup, actions, backups, websocket, schedule, players, history, ai, addons
 
 
 async def hardware_metrics_loop():
@@ -119,12 +120,13 @@ def create_app() -> FastAPI:
         if request.url.path.startswith("/api/"):
             try:
                 _ensure_local(request.client.host if request.client else "")
+                _ensure_valid_host_header(request)  # anti DNS-rebinding (S1b)
                 _check_origin(request)
             except HTTPException as exc:
                 return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         return await call_next(request)
 
-    DIST_DIR = os.path.join(config.BASE_DIR, "gui_frontend", "dist")
+    DIST_DIR = runtime_paths.resource_path("gui_frontend", "dist", base_dir=config.BASE_DIR)
     STATIC_TARGET = DIST_DIR if os.path.exists(DIST_DIR) else config.WEB_DIR
 
     if not os.path.exists(STATIC_TARGET):
@@ -143,7 +145,9 @@ def create_app() -> FastAPI:
     app.include_router(schedule.router)
     app.include_router(players.router)
     app.include_router(history.router)
+    app.include_router(addons.router)
     app.include_router(websocket.router)
+    app.include_router(ai.router)
 
     return app
 
@@ -282,7 +286,8 @@ if __name__ == "__main__":
         print("=================================================================")
         open_url = url
     try:
-        webbrowser.open(open_url)
+        if os.environ.get("GUI_OPEN_BROWSER", "1") != "0":
+            webbrowser.open(open_url)
     except Exception:
         pass  # sin navegador disponible no es crítico
     try:

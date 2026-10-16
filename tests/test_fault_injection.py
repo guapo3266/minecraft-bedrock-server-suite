@@ -329,10 +329,12 @@ def test_backup_con_disco_lleno_mensaje_especifico(monkeypatch, capsys):
     try:
         _valid_world(fake_world)
 
-        def _write_lleno(self, *args, **kwargs):
+        def _open_lleno(self, *args, **kwargs):
             raise OSError(_errno.ENOSPC, "No space left on device")
 
-        monkeypatch.setattr(zipfile.ZipFile, "write", _write_lleno)
+        # El empaquetado escribe por chunks via ZipFile.open (H8-2026-09-25):
+        # el ENOSPC puede ocurrir al abrir o al escribir la entrada.
+        monkeypatch.setattr(zipfile.ZipFile, "open", _open_lleno)
         result = auto_backup.create_backup("test", file_snapshot=None, external_lock=lock)
         out = capsys.readouterr().out
         assert result is False

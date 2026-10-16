@@ -11,11 +11,18 @@ echo (Si aparece la ventana de Control de Cuentas de Usuario / UAC, selecciona '
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\setup_defender_exclusions.ps1"
+rem El .ps1 espera al proceso elevado y propaga su exit code; aqui se captura
+rem nada mas volver (echo/pause pueden pisar %errorlevel%) para devolverlo.
+set "PS_ERR=%errorlevel%"
 
-if %errorlevel% neq 0 (
+if "%PS_ERR%"=="0" (
     echo.
-    echo [AVISO] Ocurrio un problema al ejecutar PowerShell.
+    echo [OK] Exclusiones de antivirus configuradas.
+) else (
+    echo.
+    echo [AVISO] Ocurrio un problema al configurar las exclusiones. Codigo: %PS_ERR%.
     echo Si cancelaste el aviso de UAC, vuelve a ejecutar este archivo como Administrador.
     echo.
     pause
 )
+exit /b %PS_ERR%

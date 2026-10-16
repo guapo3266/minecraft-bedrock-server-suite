@@ -31,6 +31,53 @@ def _is_private_ip(host: str) -> bool:
         return False
 
 
+def _host_header_hostname(request):
+    """Hostname del header Host del request (sin puerto; IPv6 sin corchetes).
+
+    Duck-typing sobre Request y WebSocket (ambos exponen .headers.get).
+    Devuelve None si el Host falta o es ilegible.
+    """
+    try:
+        host_hdr = (request.headers.get("host") or "").strip()
+    except AttributeError:
+        return None
+    if not host_hdr:
+        return None
+    if host_hdr.startswith("["):
+        end = host_hdr.find("]")
+        return host_hdr[1:end].lower() if end > 0 else None
+    if host_hdr.count(":") == 1:
+        return host_hdr.split(":")[0].lower()
+    return host_hdr.lower()
+
+
+def _es_host_permitido(hostname):
+    """True si el hostname del Host es uno por el que se accede a la GUI.
+
+    Anti DNS-rebinding (2026-09-25): sin este guard, una pagina con el DNS
+    re-bindeado a 127.0.0.1 hacia fetch same-origin (los GET no llevan
+    Origin) y leia /api/status, /api/backups, /api/history/logs, etc.
+    Permitido: loopback/localhost, IP privada con GUI_ALLOW_LAN=1, o lista
+    explicita GUI_ALLOWED_HOSTS (coma-separada; p. ej. para tests o un
+    nombre de host local).
+    """
+    if not hostname:
+        return False
+    if hostname in _LOCAL_ORIGIN_HOSTS:
+        return True
+    if _allow_lan() and _is_private_ip(hostname):
+        return True
+    extra = os.environ.get("GUI_ALLOWED_HOSTS", "")
+    allowed = {h.strip().lower() for h in extra.split(",") if h.strip()}
+    return hostname in allowed
+
+
+def _ensure_valid_host_header(request):
+    """S1b: rechaza requests cuyo Host no sea uno valido de esta GUI."""
+    if not _es_host_permitido(_host_header_hostname(request)):
+        raise HTTPException(status_code=403, detail="Acceso denegado: host no permitido")
+
+
 def _is_allowed_client_host(host: str) -> bool:
     """S1: loopback siempre; privada solo con GUI_ALLOW_LAN=1."""
     if host in ("127.0.0.1", "::1", "localhost"):
@@ -52,7 +99,7 @@ _LOCAL_ORIGIN_HOSTS = ("127.0.0.1", "localhost", "::1")
 _ALLOWED_SCHEMES = ("http", "https", "ws", "wss")
 
 
-def _is_allowed_origin(origin: str | None, expected_port: int | None = None) -> bool:
+def _is_allowed_origin(origin: str | None, expected_port: int | None = None, expected_host: str | None = None) -> bool:
     """S3: True si el header Origin viene de la propia máquina y coincide el puerto esperado.
 
     Los navegadores siempre envían Origin en POST y en el handshake de
@@ -62,6 +109,12 @@ def _is_allowed_origin(origin: str | None, expected_port: int | None = None) -> 
 
     Robustez: maneja Origin malformado, host ausente, esquema ausente y
     valores tipo "null" (privacy) como no permitidos cuando hay Origin.
+
+    `expected_host` (2026-09-25): hostname del Host del request. En modo LAN
+    el Origin con IP privada solo se acepta si es la IP de ESTA GUI (coincide
+    con el Host): una pagina servida por otro dispositivo de la LAN ya no
+    puede hacer CSRF (ni por POST ni por WebSocket) contra la GUI. Si no se
+    provee, se conserva el comportamiento historic (cualquier IP privada).
     """
     if not origin:
         return True
@@ -86,8 +139,11 @@ def _is_allowed_origin(origin: str | None, expected_port: int | None = None) -> 
     if scheme and scheme not in _ALLOWED_SCHEMES:
         return False
     if host not in _LOCAL_ORIGIN_HOSTS:
-        # Modo LAN: permite Origin con IP privada (p.ej. http://192.168.1.70:8000)
+        # Modo LAN: permite Origin con IP privada SOLO si es la IP de esta
+        # misma GUI (host del Origin == host del request).
         if not (_allow_lan() and _is_private_ip(host)):
+            return False
+        if expected_host is not None and host != expected_host.lower():
             return False
     if expected_port is not None:
         try:
@@ -142,7 +198,11 @@ def _get_request_port(request):
 def _check_origin(request: Request):
     """Rechaza peticiones de navegador cuyo Origin no coincida con el host y puerto local."""
     port = _get_request_port(request)
-    if not _is_allowed_origin(request.headers.get("origin"), expected_port=port):
+    if not _is_allowed_origin(
+        request.headers.get("origin"),
+        expected_port=port,
+        expected_host=_host_header_hostname(request),
+    ):
         raise HTTPException(status_code=403, detail="Acceso denegado: origen no permitido")
 
 # _is_safe_zip_entry re-exportado desde zip_safety (fuente unica anti-drift)

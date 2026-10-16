@@ -3,15 +3,40 @@
 import multiprocessing
 import os
 import threading
+import runtime_paths
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = runtime_paths.installation_dir()
 SERVER_EXE = os.path.join(BASE_DIR, "bedrock_server.exe")
 WATCHDOG_HOLDING_TIMEOUT_SEC = 60
 LIST_SYNC_INTERVAL_SEC = 60
 FINAL_BACKUP_LOCK_WAIT_SEC = 5
 FINAL_BACKUP_TIMEOUT_SEC = 240
 WORKER_COMPRESSION_TIMEOUT_SEC = 120
+# Escala de timeouts de backup segun el tamano SIN comprimir (H1-2026-09-25):
+# los valores base estaban calibrados para mundos pequenos y un mundo de
+# varios GB no comprime en 120s (el worker se mataba en cada ciclo) ni cierra
+# en 240s (el backup de cierre, en hilo daemon, se perdia al salir el
+# proceso). El timeout efectivo NUNCA baja de los valores base historicos.
+BACKUP_TIMEOUT_SEC_PER_GB = 120
+BACKUP_TIMEOUT_MAX_SEC = 3600
+
+
+def scaled_backup_timeout_sec(total_bytes, base_sec, sec_per_gb=None):
+    """Timeout de backup proporcional al tamano sin comprimir, con piso y tope.
+
+    Fuente unica de la escala: la usan el wait del worker de compresion
+    (wrapper_backup.execute_backup_worker) y el join del backup de cierre
+    (server_wrapper). Con tamano desconocido (<=0) devuelve el base.
+    """
+    if sec_per_gb is None:
+        sec_per_gb = BACKUP_TIMEOUT_SEC_PER_GB
+    if not isinstance(total_bytes, int) or total_bytes <= 0:
+        return base_sec
+    extra = int((total_bytes / float(1024 ** 3)) * sec_per_gb)
+    return min(max(base_sec, base_sec + extra), BACKUP_TIMEOUT_MAX_SEC)
+
+
 WORKER_JOIN_ON_SHUTDOWN_SEC = 135
 # Tope del join tras matar el proceso de compresion (TerminateProcess es
 # inmediato; el tope solo evita que un wait colgado retenga state_lock).

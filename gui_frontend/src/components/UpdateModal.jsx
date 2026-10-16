@@ -5,15 +5,20 @@ import Magnet from './reactbits/Magnet';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import Modal from './Modal';
-import { DownloadMotionIcon, ShieldMotionIcon } from './hover/HardwareMotionIcons';
-import { X, CheckCircle, History, TriangleAlert } from 'lucide-react';
+import { X, CheckCircle, History, TriangleAlert, Download as DownloadMotionIcon, ShieldCheck as ShieldMotionIcon } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
 export default function UpdateModal({ isOpen, onClose, updateInfo, onConfirmUpdate, onRollback, isUpdating }) {
   const { t } = useI18n();
   const [confirmRollback, setConfirmRollback] = useState(false);
   if (!isOpen) return null;
-  const versionUnavailable = !updateInfo || updateInfo.has_update == null || updateInfo.unavailable;
+  // "Sin versión verificable": sin datos, con has_update null/undefined o con
+  // el backend marcando unavailable (comparación explícita, eqeqeq estricto).
+  const versionUnavailable =
+    !updateInfo ||
+    updateInfo.has_update === null ||
+    updateInfo.has_update === undefined ||
+    !!updateInfo.unavailable;
 
   return (
     <div>

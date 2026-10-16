@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+from urllib.parse import urljoin, urlsplit
 
 import requests
 
@@ -38,6 +39,51 @@ def _version_tuple(version: str):
 MOJANG_DOWNLOAD_API = "https://net-secondary.web.minecraft-services.net/api/v1.0/download/links"
 MOJANG_DOWNLOAD_PAGE = "https://www.minecraft.net/en-us/download/server/bedrock"
 _UA_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+_BDS_DOWNLOAD_HOSTS = frozenset({"www.minecraft.net", "minecraft.net"})
+
+
+def _is_official_bds_url(url: str) -> bool:
+    """HTTPS al host oficial, puerto 443 y nombre del ZIP de BDS.
+
+    La lista cerrada falla de forma segura si Mojang cambia de dominio;
+    no se amplia a dominios arbitrarios por compatibilidad con mocks.
+    """
+    if not isinstance(url, str) or any(ord(c) <= 32 for c in url) or "\\" in url:
+        return False
+    try:
+        parts = urlsplit(url)
+        allowed = (
+            parts.scheme == "https" and parts.hostname in _BDS_DOWNLOAD_HOSTS
+            and parts.port in (None, 443) and parts.username is None
+            and parts.password is None and not parts.fragment
+        )
+    except ValueError:
+        return False
+    return allowed and re.search(
+        r"(?:^|/)bedrock-server-\d+\.\d+\.\d+\.\d+\.zip$", parts.path
+    ) is not None
+
+
+def _open_bds_download(url):
+    """Abre el stream validando CADA salto antes de contactar su destino."""
+    for _hop in range(6):
+        if not _is_official_bds_url(url):
+            raise ValueError(L("URL de descarga BDS fuera de los hosts oficiales", "BDS download URL outside the official hosts"))
+        response = requests.get(
+            url, headers=_UA_HEADERS, stream=True, timeout=30, allow_redirects=False,
+        )
+        if getattr(response, "status_code", 0) not in (301, 302, 303, 307, 308):
+            return response
+        try:
+            location = response.headers.get("Location")
+            if not location:
+                raise ValueError(L("Redireccion BDS sin destino", "BDS redirect without a destination"))
+            url = urljoin(url, location)
+        finally:
+            close = getattr(response, "close", None)
+            if close is not None:
+                close()
+    raise ValueError(L("Demasiadas redirecciones en la descarga BDS", "Too many redirects in the BDS download"))
 
 
 def _fetch_latest_bedrock_download():
@@ -47,6 +93,9 @@ def _fetch_latest_bedrock_download():
     (/api/v1.0/download/links), que devuelve JSON con los links oficiales
     (verificado en vivo 2026-08-04). El HTML de la pagina ya no expone el
     link del zip, asi que el scrape queda solo como ultimo recurso.
+
+    Toda URL candidata pasa por `_is_official_bds_url`: un JSON/HTML
+    comprometido o un MITM que devuelva otro host/esquema no se descarga.
     """
     try:
         r = requests.get(MOJANG_DOWNLOAD_API, headers=_UA_HEADERS, timeout=5)
@@ -55,7 +104,7 @@ def _fetch_latest_bedrock_download():
                 if link.get("downloadType") == "serverBedrockWindows":
                     url = link.get("downloadUrl") or ""
                     match = re.search(r"bedrock-server-(\d+\.\d+\.\d+\.\d+)\.zip", url)
-                    if match:
+                    if match and _is_official_bds_url(url):
                         return url, match.group(1)
     except Exception:
         pass
@@ -65,7 +114,9 @@ def _fetch_latest_bedrock_download():
         if r.status_code == 200:
             match = re.search(r'https://[^\s"]+?bedrock-server-(\d+\.\d+\.\d+\.\d+)\.zip', r.text)
             if match:
-                return match.group(0), match.group(1)
+                url = match.group(0)
+                if _is_official_bds_url(url):
+                    return url, match.group(1)
     except Exception:
         pass
     return None, None
@@ -151,21 +202,29 @@ def recover_interrupted_updates(base_dir=None):
             if not isinstance(entries, list):
                 raise ValueError("manifiesto no es una lista")
 
+            # Validar TODO antes de mover nada; un manifiesto parcialmente
+            # invalido tampoco debe provocar una recuperacion parcial.
+            validated = []
             for entry in entries:
                 rel = entry.get("path") if isinstance(entry, dict) else None
                 had_previous = entry.get("had_previous") if isinstance(entry, dict) else None
-                if not isinstance(rel, str) or not isinstance(had_previous, bool) or not _is_safe_zip_entry(rel):
+                if not isinstance(rel, str) or not rel or not isinstance(had_previous, bool) or not _is_safe_zip_entry(rel):
                     raise ValueError("entrada invalida en manifiesto")
                 target = os.path.abspath(os.path.join(base_dir, rel.replace("/", os.sep)))
                 if os.path.commonpath([os.path.abspath(base_dir), target]) != os.path.abspath(base_dir):
                     raise ValueError("ruta fuera de la instalacion")
-                if os.path.isfile(target):
-                    os.remove(target)
+                validated.append((target, os.path.join(prev_dir, rel.replace("/", os.sep)), had_previous))
+            for target, old_path, had_previous in validated:
                 if had_previous:
-                    old_path = os.path.join(prev_dir, rel.replace("/", os.sep))
                     if os.path.isfile(old_path):
                         os.makedirs(os.path.dirname(target), exist_ok=True)
                         os.replace(old_path, target)
+                    elif not os.path.isfile(target):
+                        raise RuntimeError(f"Falta el original y su resguardo: {target}")
+                    # Sin old_path, el original no se movio todavia O ya fue
+                    # recuperado. Conservar target hace el recovery idempotente.
+                elif os.path.isfile(target):
+                    os.remove(target)
             shutil.rmtree(prev_dir, ignore_errors=True)
         except Exception as exc:
             # No borrar un resguardo que no se pudo interpretar: conserva la
@@ -233,6 +292,7 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
     prev_dir = tempfile.mkdtemp(prefix="bds_update_prev_", dir=base_dir)
     applied = []  # rutas relativas ya movidas del staging al destino
     failed = False
+    rollback_complete = False
     try:
         manifest = []
         for root, _dirs, names in os.walk(staging_dir):
@@ -250,6 +310,8 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
         manifest_tmp = os.path.join(prev_dir, _UPDATE_MANIFEST_NAME + ".tmp")
         with open(manifest_tmp, "w", encoding="utf-8") as f:
             json.dump(manifest, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(manifest_tmp, os.path.join(prev_dir, _UPDATE_MANIFEST_NAME))
 
         # Fase 1: resguardar los actuales que seran reemplazados
@@ -280,6 +342,7 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
                 applied.append(rel)
     except Exception:
         failed = True
+        return_failed = False
         # Rollback del rollback: los aplicados vuelven AL STAGING (no se
         # borran). En el flujo update el staging se descarta igual en el
         # finally; en el flujo rollback el staging es el resguardo y asi
@@ -290,28 +353,35 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
                 os.makedirs(os.path.dirname(staging_back), exist_ok=True)
                 os.replace(os.path.join(base_dir, rel), staging_back)
             except OSError:
-                # Sin poder devolverlo, la restauracion de prev_dir de abajo
-                # pisa el destino con el archivo original: base queda igual.
-                pass
-        for root, _dirs, names in os.walk(prev_dir):
-            for n in names:
-                rel = os.path.relpath(os.path.join(root, n), prev_dir)
-                if rel.replace("\\", "/") == _UPDATE_MANIFEST_NAME:
-                    continue
-                target = os.path.join(base_dir, rel)
+                # Todavia se intenta reponer el original; conservar el journal
+                # para cualquier archivo nuevo que no haya podido retirarse.
+                return_failed = True
+        # El journal enumera los originales: no depender de un os.walk que
+        # puede omitir silenciosamente una carpeta inaccesible del resguardo.
+        for entry in manifest:
+            if not entry["had_previous"]:
+                continue
+            rel = entry["path"].replace("/", os.sep)
+            old_path = os.path.join(prev_dir, rel)
+            target = os.path.join(base_dir, rel)
+            if os.path.isfile(old_path):
                 os.makedirs(os.path.dirname(target), exist_ok=True)
-                os.replace(os.path.join(root, n), target)
+                os.replace(old_path, target)
+            elif not os.path.isfile(target):
+                raise RuntimeError(f"Falta el original y su resguardo: {target}")
+        rollback_complete = not return_failed
         raise
     finally:
         if failed and preserve_staging_on_failure:
-            # El staging es el resguardo anterior: conservarlo integro.
+            # El staging es el resguardo anterior: conservar lo recuperable.
             pass
         else:
             shutil.rmtree(staging_dir, ignore_errors=True)
         if keep_prev_dir and not failed:
             _save_prev_dir(prev_dir, keep_prev_dir, prev_version)
-        else:
+        elif not failed or rollback_complete:
             shutil.rmtree(prev_dir, ignore_errors=True)
+        # Si el rollback falla, prev_dir + manifiesto quedan para recuperacion.
 
 
 def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
@@ -333,6 +403,7 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
     temp_zip = os.path.join(config.BASE_DIR, "bds_update.zip")
     staging_dir = None
     downloaded_version = None
+    dl = None
     try:
         url, downloaded_version = _fetch_latest_bedrock_download()
         if not url:
@@ -342,7 +413,11 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         log_fn(L(f"{tag} Descargando binarios desde Mojang...", f"{tag} Downloading binaries from Mojang..."), "system")
         # S3: límite de tamaño de descarga para no llenar el disco
         max_bytes = 400 * 1024 * 1024
-        dl = requests.get(url, headers=_UA_HEADERS, stream=True, timeout=30)
+        try:
+            dl = _open_bds_download(url)
+        except ValueError as exc:
+            log_fn(L(f"{tag} Descarga rechazada: {exc}", f"{tag} Download rejected: {exc}"), "error")
+            return False, None
         # Un 404/503 del CDN guardaria la pagina de error como zip y fallaria
         # despues como BadZipFile con un diagnostico enganoso. getattr: los
         # fakes de tests y respuestas parciales pueden no traer status_code.
@@ -396,10 +471,12 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         with zipfile.ZipFile(temp_zip, "r") as z:
             for item in z.infolist():
                 name = item.filename
-                # S2: anti zip-slip — rechazar rutas con '..', absolutas o con backslash malicioso
+                # S2: anti zip-slip — un zip parcialmente malicioso no se
+                # aplica a medias: se aborta antes de tocar la instalacion.
                 if not _is_safe_zip_entry(name):
-                    log_fn(L(f"{tag} Entrada insegura en el zip ignorada: {name}", f"{tag} Unsafe zip entry ignored: {name}"), "error")
-                    continue
+                    log_fn(L(f"{tag} Entrada insegura en el zip, actualizacion abortada: {name}", f"{tag} Unsafe zip entry, update aborted: {name}"), "error")
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+                    return False, None
                 z.extract(item, staging_dir)
                 extracted += 1
                 # Progreso de extraccion (el zip oficial tiene ~9700 entradas)
@@ -413,8 +490,7 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         # Aplica con rollback: si algo falla a mitad, la instalacion
         # vuelve a los binarios anteriores (sin versiones mezcladas). El
         # resguardo queda en data/bds_previous para volver con un clic.
-        # Nota: si la aplicacion FALLA, el resguardo se descarta (la
-        # instalacion queda intacta via rollback interno).
+        # Si falla tambien el rollback, se conserva bds_update_prev_*.
         _apply_staged_update(update_root, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
                              keep_prev_dir=PREVIOUS_VERSION_DIR,
                              prev_version=manager.installed_version)
@@ -422,6 +498,10 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
             manager.installed_version = downloaded_version
         return True, downloaded_version
     finally:
+        if dl is not None:
+            close = getattr(dl, "close", None)
+            if close is not None:
+                close()
         if os.path.exists(temp_zip):
             try:
                 os.remove(temp_zip)
@@ -453,7 +533,7 @@ def rollback_bds(tag="[Rollback BDS]", log_fn=None):
                              prev_version=manager.installed_version,
                              preserve_staging_on_failure=True)
     except Exception as exc:
-        log_fn(L(f"{tag} Error al restaurar; la instalación quedó como estaba: {exc}", f"{tag} Error restoring; the installation was left as it was: {exc}"), "error")
+        log_fn(L(f"{tag} Error al restaurar; revisa los resguardos de recuperación: {exc}", f"{tag} Error restoring; check the recovery backups: {exc}"), "error")
         return False, None
     manager.installed_version = restore_version
     log_fn(L(f"{tag} Versión anterior restaurada ({version_label}). La versión que se dejó de usar ahora es la recuperable.", f"{tag} Previous version restored ({version_label}). The version just left behind is now the recoverable one."), "system")

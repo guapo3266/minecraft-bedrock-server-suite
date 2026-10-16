@@ -46,8 +46,16 @@ def verify_all(backup_dir):
         try:
             with zipfile.ZipFile(path) as zf:
                 bad = zf.testzip()
+                names = zf.namelist()
         except zipfile.BadZipFile:
             bad = L("<cabecera invalida>", "<invalid header>")
+            names = []
+        if not bad and "level.dat" not in names:
+            # Sin level.dat el restore lo rechazara igual (guard de
+            # restore_core): no es un backup restaurable aunque el CRC pase
+            # (H3-2026-09-25). Se marca con el mismo marcador que la GUI y la
+            # rotacion usan para no ofrecerlo ni contarlos como bueno.
+            bad = L("sin level.dat (no restaurable)", "missing level.dat (not restorable)")
         if bad:
             print(L(f"[CORRUPTO] {name}: {bad}", f"[CORRUPT] {name}: {bad}"))
             mark_corrupt_zip(path, "CORRUPTO")

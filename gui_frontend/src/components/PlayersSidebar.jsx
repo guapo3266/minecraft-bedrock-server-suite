@@ -4,8 +4,7 @@ import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
 import Modal from './Modal';
-import { Gamepad2, UserX, Ban, UserCog, ListPlus, ListX, TriangleAlert, XCircle } from 'lucide-react';
-import { FilledCheckedIcon } from './hover/AnimatedStatusIcons';
+import { Gamepad2, UserX, Ban, UserCog, ListPlus, ListX, TriangleAlert, XCircle, CircleCheck as FilledCheckedIcon } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 
 const ONLINE_ACTIONS = [
@@ -31,7 +30,6 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
   const [busyKey, setBusyKey] = useState(null); // `${actionId}:${player}` en curso
   const [banTarget, setBanTarget] = useState(null); // jugador a banear (confirm)
   const [sessionTotals, setSessionTotals] = useState({}); // name -> segundos jugados (7d)
-  const successIconRef = useRef(null);
   const timerRef = useRef(null);
 
   // Tiempo de juego de los ultimos 7 dias (historial SQLite; refresca con la
@@ -61,9 +59,6 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
   };
 
   useEffect(() => {
-    if (result?.ok && successIconRef.current) {
-      successIconRef.current.startAnimation();
-    }
     if (result) {
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setResult(null), 6000);
@@ -166,7 +161,7 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
   const allowListOff = playersData && playersData.allow_list_enabled === false;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="players-grid legacy-ui">
       <SpotlightCard spotlightColor="rgba(6, 182, 212, 0.15)">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
           <Gamepad2 className="h-4 w-4 text-cyan-400" />
@@ -302,7 +297,7 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
               : 'border-rose-500/40 bg-rose-500/10 text-rose-300'
           }`}
         >
-          {result.ok ? <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" /> : <XCircle className="h-4 w-4 shrink-0" />}
+          {result.ok ? <FilledCheckedIcon size={18} className="text-emerald-400" /> : <XCircle className="h-4 w-4 shrink-0" />}
           <span className="break-all">{result.message}</span>
         </div>
       )}

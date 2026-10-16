@@ -12,6 +12,7 @@ from gui_backend import config
 from gui_backend.security import _ensure_local, _check_origin
 from gui_backend.services import setup as setup_service
 from gui_backend.services import bds_update as bds_update_service
+from gui_backend.services import external_probe
 from gui_backend.state import manager
 
 router = APIRouter()
@@ -32,8 +33,8 @@ async def setup_install_bds(request: Request):
     """Instala el BDS oficial desde cero (instalacion nueva, sin servidor).
 
     Reusa el pipeline de actualizacion (_download_and_install_bds) bajo
-    op_lock; rechaza con 409 si el servidor esta corriendo y con 'busy' si
-    hay otra operacion en curso. El progreso se sigue por los logs ([Setup]).
+    op_lock; rechaza con 409 si el servidor esta corriendo (propio o externo)
+    y con 'busy' si hay otra operacion. El progreso se sigue por logs ([Setup]).
     """
     _ensure_local(request.client.host if request.client else "")
     _check_origin(request)
@@ -41,6 +42,17 @@ async def setup_install_bds(request: Request):
         raise HTTPException(status_code=409, detail="El servidor esta en ejecucion; detenlo antes de instalar")
     if not manager.op_lock.acquire(blocking=False):
         return {"status": "busy", "message": "Operación en curso (actualización/restauración/backup)"}
+    try:
+        # Re-chequear bajo op_lock antes de despachar: un start pudo ganar
+        # entre el primer chequeo y la adquisicion del lock.
+        if manager.is_running:
+            raise HTTPException(status_code=409, detail="El servidor esta en ejecucion; detenlo antes de instalar")
+        is_ext, _ = external_probe.detect_external_bds()
+        if is_ext:
+            raise HTTPException(status_code=409, detail="Hay una instancia externa del servidor en ejecución; instalación cancelada")
+    except Exception:
+        manager.op_lock.release()
+        raise
 
     def do_install():
         try:
@@ -55,7 +67,11 @@ async def setup_install_bds(request: Request):
         finally:
             manager.op_lock.release()
 
-    threading.Thread(target=do_install, daemon=True).start()
+    try:
+        threading.Thread(target=do_install, daemon=True).start()
+    except Exception:
+        manager.op_lock.release()
+        raise
     return {"status": "install_dispatched"}
 
 

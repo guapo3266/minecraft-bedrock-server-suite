@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "base_dir": "C:/tmp/instalacion-sintetica",
+  "complete": false,
+  "partial_reasons": ["MANIFEST_JSON_INVALID"],
+  "active_world": "Alfa",
+  "supported": {
+    "manifest_format_versions": [2],
+    "manifest_format_versions_not_analyzed": {"1": "skin packs", "3": "preview"},
+    "locations": ["behavior_packs", "resource_packs"],
+    "excluded_locations": ["development_behavior_packs"],
+    "documented_module_types": ["resources", "data", "world_template", "script"],
+    "world_reference_files": ["world_behavior_packs.json", "world_resource_packs.json"]
+  },
+  "scopes": [
+    {"id": "compartido:behavior", "origin": "compartido", "kind": "behavior", "root": "behavior_packs", "exists": true},
+    {"id": "compartido:resource", "origin": "compartido", "kind": "resource", "root": "resource_packs", "exists": true},
+    {"id": "sistema:behavior", "origin": "sistema", "kind": "behavior", "root": "system_behavior_packs", "exists": true},
+    {"id": "mundo:Alfa:behavior", "origin": "mundo", "kind": "behavior", "root": "worlds/Alfa/behavior_packs", "exists": true},
+    {"id": "mundo:Beta:behavior", "origin": "mundo", "kind": "behavior", "root": "worlds/Beta/behavior_packs", "exists": true},
+    {"id": "mundo:Alfa:resource", "origin": "mundo", "kind": "resource", "root": "worlds/Alfa/resource_packs", "exists": true}
+  ],
+  "packs": [
+    {
+      "id": "behavior_packs/CompartidoBP", "folder": "behavior_packs/CompartidoBP",
+      "manifest": "behavior_packs/CompartidoBP/manifest.json", "kind": "behavior",
+      "origin": "compartido", "world": null, "scope": "compartido:behavior",
+      "status": "ok", "unsupported_reason": null, "name": "Compartido BP", "description": null,
+      "format_version": 2, "header_uuid": "11111111-1111-1111-1111-111111111111",
+      "version": [1, 0, 0], "min_engine_version": [1, 20, 0], "pack_scope": null,
+      "json_tolerant": false, "modules": [], "pack_dependencies": [], "script_dependencies": [],
+      "referenced_by_worlds": ["Alfa"], "dependency_resolution": [],
+      "scripting_compatibility": "no_determinada", "diagnostic_codes": []
+    },
+    {
+      "id": "system_behavior_packs/SysBP", "folder": "system_behavior_packs/SysBP",
+      "manifest": "system_behavior_packs/SysBP/manifest.json", "kind": "behavior",
+      "origin": "sistema", "world": null, "scope": "sistema:behavior",
+      "status": "ok", "unsupported_reason": null, "name": "Sistema BP", "description": null,
+      "format_version": 2, "header_uuid": "22222222-2222-2222-2222-222222222222",
+      "version": [1, 0, 0], "min_engine_version": [1, 20, 0], "pack_scope": null,
+      "json_tolerant": false, "modules": [], "pack_dependencies": [], "script_dependencies": [],
+      "referenced_by_worlds": [], "dependency_resolution": [],
+      "scripting_compatibility": "no_determinada", "diagnostic_codes": []
+    },
+    {
+      "id": "worlds/Alfa/behavior_packs/AlfaBP", "folder": "worlds/Alfa/behavior_packs/AlfaBP",
+      "manifest": "worlds/Alfa/behavior_packs/AlfaBP/manifest.json", "kind": "behavior",
+      "origin": "mundo", "world": "Alfa", "scope": "mundo:Alfa:behavior",
+      "status": "ok", "unsupported_reason": null, "name": "Alfa BP", "description": null,
+      "format_version": 2, "header_uuid": "33333333-3333-3333-3333-333333333333",
+      "version": [1, 0, 0], "min_engine_version": [1, 20, 0], "pack_scope": null,
+      "json_tolerant": false, "modules": [], "pack_dependencies": [], "script_dependencies": [],
+      "referenced_by_worlds": ["Alfa"], "dependency_resolution": [],
+      "scripting_compatibility": "no_determinada", "diagnostic_codes": []
+    },
+    {
+      "id": "worlds/Beta/behavior_packs/BetaBP", "folder": "worlds/Beta/behavior_packs/BetaBP",
+      "manifest": "worlds/Beta/behavior_packs/BetaBP/manifest.json", "kind": "behavior",
+      "origin": "mundo", "world": "Beta", "scope": "mundo:Beta:behavior",
+      "status": "ok", "unsupported_reason": null, "name": "Beta BP", "description": null,
+      "format_version": 2, "header_uuid": "44444444-4444-4444-4444-444444444444",
+      "version": [1, 0, 0], "min_engine_version": [1, 20, 0], "pack_scope": null,
+      "json_tolerant": false, "modules": [], "pack_dependencies": [], "script_dependencies": [],
+      "referenced_by_worlds": [], "dependency_resolution": [],
+      "scripting_compatibility": "no_determinada", "diagnostic_codes": []
+    },
+    {
+      "id": "resource_packs/CompartidoRes", "folder": "resource_packs/CompartidoRes",
+      "manifest": "resource_packs/CompartidoRes/manifest.json", "kind": "resource",
+      "origin": "compartido", "world": null, "scope": "compartido:resource",
+      "status": "ok", "unsupported_reason": null, "name": "Compartido Res", "description": null,
+      "format_version": 2, "header_uuid": "55555555-5555-5555-5555-555555555555",
+      "version": [1, 0, 0], "min_engine_version": [1, 20, 0], "pack_scope": null,
+      "json_tolerant": false, "modules": [], "pack_dependencies": [], "script_dependencies": [],
+      "referenced_by_worlds": ["Alfa"], "dependency_resolution": [],
+      "scripting_compatibility": "no_determinada", "diagnostic_codes": []
+    }
+  ],
+  "worlds": [
+    {"name": "Alfa", "path": "worlds/Alfa", "active": true, "has_level_dat": true, "ref_files": [], "references": [], "pack_dirs": {}, "diagnostic_codes": []},
+    {"name": "Beta", "path": "worlds/Beta", "active": false, "has_level_dat": true, "ref_files": [], "references": [], "pack_dirs": {}, "diagnostic_codes": []}
+  ],
+  "not_analyzed": [
+    {"path": "behavior_packs/roto", "reason_code": "MANIFEST_JSON_INVALID", "detail": null}
+  ],
+  "diagnostics": [
+    {"code": "UNO", "severity": "error", "source": "F1", "determined": true, "source_file": "behavior_packs/CompartidoBP/manifest.json", "scope": "compartido:behavior", "pack": "behavior_packs/CompartidoBP", "world": null, "field": "header.uuid", "ref": null, "message_es": "uno", "message_en": "one"},
+    {"code": "DOS", "severity": "aviso", "source": "F1", "determined": false, "source_file": "worlds/Beta/behavior_packs/BetaBP/manifest.json", "scope": "mundo:Beta:behavior", "pack": "worlds/Beta/behavior_packs/BetaBP", "world": "Beta", "field": null, "ref": null, "message_es": "dos", "message_en": "two"},
+    {"code": "TRES", "severity": "info", "source": "F2", "determined": true, "source_file": "server.properties", "scope": null, "pack": null, "world": null, "field": null, "ref": null, "message_es": "tres", "message_en": "three"},
+    {"code": "CUATRO", "severity": "aviso", "source": "F3", "determined": true, "source_file": "worlds/Alfa/world_behavior_packs.json", "scope": "mundo:Alfa:behavior", "pack": "worlds/Alfa/behavior_packs/AlfaBP", "world": "Alfa", "field": "[0].pack_id", "ref": null, "message_es": "cuatro", "message_en": "four"}
+  ],
+  "summary": {
+    "packs_total": 5, "packs_analizados": 5, "packs_behavior": 4, "packs_resource": 1,
+    "packs_compartidos": 2, "packs_de_sistema": 1, "packs_de_mundo": 2,
+    "packs_sin_analizar": 0, "packs_ilegibles": 0, "packs_invalidos": 0,
+    "mundos_total": 2, "referencias_total": 0, "referencias_resueltas": 0,
+    "referencias_sin_resolver": 0, "referencias_ambiguas": 0, "referencias_sin_version": 0,
+    "diagnosticos_total": 4, "errores": 1, "avisos": 2, "informativos": 1, "complete": false
+  }
+}

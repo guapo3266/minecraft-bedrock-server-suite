@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Save, TriangleAlert, CalendarClock } from 'lucide-react';
-import { FilledCheckedIcon } from './hover/AnimatedStatusIcons';
+import { X, Save, TriangleAlert, CalendarClock, CircleCheck as FilledCheckedIcon } from 'lucide-react';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import ShinyText from './reactbits/ShinyText';
@@ -9,8 +8,7 @@ import Magnet from './reactbits/Magnet';
 import Modal from './Modal';
 import { useI18n } from '../i18n.jsx';
 
-const inputClass =
-  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition';
+const inputClass = 'settings-input';
 
 function SectionTitle({ children }) {
   return (
@@ -48,13 +46,6 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
   const [values, setValues] = useState({});
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null); // { ok, message }
-  const successIconRef = useRef(null);
-
-  useEffect(() => {
-    if (result?.ok && successIconRef.current) {
-      successIconRef.current.startAnimation();
-    }
-  }, [result]);
 
   // Hora vacia = null (sin hora fijada); se normaliza en ambos sentidos
   useEffect(() => {
@@ -127,7 +118,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                 <div className="grid grid-cols-1 gap-3">
                   <SectionTitle>{t('schedBackupsSection')}</SectionTitle>
 
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="settings-field">
                     <label
                       htmlFor="sched-interval"
                       className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400"
@@ -141,11 +132,11 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                       max={1440}
                       value={values.backup_interval_min ?? ''}
                       onChange={(e) => setValue('backup_interval_min', e.target.value)}
-                      className={inputClass + ' w-1/2'}
+                      className={inputClass}
                     />
                   </div>
 
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="settings-field">
                     <label
                       htmlFor="sched-only-players"
                       className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400"
@@ -159,7 +150,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                     />
                   </div>
 
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="settings-field">
                     <label
                       htmlFor="sched-daily-backup"
                       className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400"
@@ -171,13 +162,13 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                       type="time" autoComplete="off"
                       value={values.daily_backup_time ?? ''}
                       onChange={(e) => setValue('daily_backup_time', e.target.value)}
-                      className={inputClass + ' w-1/2 font-mono [color-scheme:dark]'}
+                      className={inputClass}
                     />
                   </div>
 
                   <SectionTitle>{t('schedWatchdogSection')}</SectionTitle>
 
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="settings-field">
                     <label
                       htmlFor="sched-auto-restart"
                       className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400"
@@ -191,7 +182,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                     />
                   </div>
 
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="settings-field">
                     <label
                       htmlFor="sched-daily-restart"
                       className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400"
@@ -203,7 +194,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                       type="time" autoComplete="off"
                       value={values.daily_restart_time ?? ''}
                       onChange={(e) => setValue('daily_restart_time', e.target.value)}
-                      className={inputClass + ' w-1/2 font-mono [color-scheme:dark]'}
+                      className={inputClass}
                     />
                   </div>
                 </div>
@@ -220,7 +211,7 @@ export default function ScheduleModal({ isOpen, onClose, config }) {
                 }`}
               >
                 {result.ok ? (
-                  <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" />
+                  <FilledCheckedIcon size={18} className="text-emerald-400" />
                 ) : (
                   <TriangleAlert className="h-4 w-4 shrink-0" />
                 )}

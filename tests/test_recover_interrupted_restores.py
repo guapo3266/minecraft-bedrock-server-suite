@@ -20,7 +20,7 @@ def _mundo(tmp_path, nombre="Mundo"):
 
 def test_staging_archivo_se_elimina_y_se_registra(tmp_path):
     _mundo(tmp_path)
-    staging = tmp_path / "worlds" / "Mundo.restore_staging_abc"
+    staging = tmp_path / "worlds" / "Mundo.restore_staging_abcdef12"
     staging.write_text("resto", encoding="utf-8")
 
     acciones = ab.recover_interrupted_restores(str(tmp_path))
@@ -31,7 +31,7 @@ def test_staging_archivo_se_elimina_y_se_registra(tmp_path):
 
 def test_rollback_cuando_falta_el_original(tmp_path):
     (tmp_path / "worlds").mkdir()
-    bak = tmp_path / "worlds" / "Mundo.bak_abc"
+    bak = tmp_path / "worlds" / "Mundo.bak_abcdef12"
     bak.write_bytes(b"RESGUARDO")
 
     acciones = ab.recover_interrupted_restores(str(tmp_path))
@@ -43,7 +43,7 @@ def test_rollback_cuando_falta_el_original(tmp_path):
 
 def test_original_y_bak_existen_se_cuarentena_como_huerfano(tmp_path):
     original = _mundo(tmp_path)
-    bak = tmp_path / "worlds" / "Mundo.bak_abc"
+    bak = tmp_path / "worlds" / "Mundo.bak_abcdef12"
     bak.write_bytes(b"RESGUARDO")
 
     acciones = ab.recover_interrupted_restores(str(tmp_path))
@@ -67,7 +67,7 @@ def test_huerfano_previo_no_se_reprocesa(tmp_path):
 
 def test_rollback_con_rename_fallido_no_pierde_el_bak(tmp_path, monkeypatch):
     (tmp_path / "worlds").mkdir()
-    bak = tmp_path / "worlds" / "Mundo.bak_abc"
+    bak = tmp_path / "worlds" / "Mundo.bak_abcdef12"
     bak.write_bytes(b"RESGUARDO")
 
     def _rename_falla(*_a, **_k):
@@ -82,7 +82,7 @@ def test_rollback_con_rename_fallido_no_pierde_el_bak(tmp_path, monkeypatch):
 
 def test_huerfano_con_rename_fallido_no_lanza(tmp_path, monkeypatch):
     _mundo(tmp_path)
-    bak = tmp_path / "worlds" / "Mundo.bak_abc"
+    bak = tmp_path / "worlds" / "Mundo.bak_abcdef12"
     bak.write_bytes(b"RESGUARDO")
 
     def _rename_falla(*_a, **_k):
@@ -106,3 +106,35 @@ def test_listdir_inaccesible_no_lanza(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ab.os, "listdir", _listdir_falla)
     assert ab.recover_interrupted_restores(str(tmp_path)) == []
+
+
+def test_nombres_legitimos_con_marcadores_no_se_tocan(tmp_path):
+    """H2-2026-09-25: solo el formato exacto <base>.restore_staging_<8hex> y
+    <base>.bak_<8hex> es debris. Un mundo legitimo cuyo nombre contiene esos
+    textos NO se borra ni se renombra."""
+    mundos = [
+        _mundo(tmp_path, "MiMundo.restore_staging_viejo"),
+        _mundo(tmp_path, "prueba.bak_vieja"),
+        _mundo(tmp_path, "Mundo.restore_staging_abc"),      # nonce != 8 hex
+        _mundo(tmp_path, "Mundo.bak_abc"),                  # nonce != 8 hex
+    ]
+
+    acciones = ab.recover_interrupted_restores(str(tmp_path))
+
+    assert acciones == [], f"no debio tocar nada: {acciones}"
+    for m in mundos:
+        assert m.exists(), f"mundo legitimo eliminado/renombrado: {m.name}"
+        assert (m / "level.dat").read_bytes() == b"X"
+
+
+def test_staging_de_formato_real_no_se_confunde_con_mundo_legitimo(tmp_path):
+    """El debris con formato real si se limpia, incluso junto a legitimos."""
+    legitimo = _mundo(tmp_path, "Mundo.restore_staging_viejo")
+    debris = tmp_path / "worlds" / "Mundo.restore_staging_abcdef12"
+    debris.mkdir()
+
+    acciones = ab.recover_interrupted_restores(str(tmp_path))
+
+    assert not debris.exists()
+    assert legitimo.exists()
+    assert any(a.startswith("staging_removed:") for a in acciones)

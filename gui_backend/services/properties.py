@@ -23,18 +23,20 @@ PROPS_FIELDS = {
 
 
 def _read_props_values():
-    """{clave: valor} de las lineas activas (no comentadas) de server.properties."""
+    """{clave: valor} de las lineas activas (no comentadas) de server.properties.
+
+    Delega en server_properties.read_value (fuente unica de tolerancia del
+    suite: `clave = valor`, comentarios `#`/`;` y bytes no UTF-8): el parser
+    propio de aqui era UTF-8 estricto (500 ante un byte cp1252) e ignoraba
+    solo `#` (2026-09-25).
+    """
     values = {}
     if os.path.exists(config.PROPS_PATH):
-        with open(config.PROPS_PATH, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, val = line.partition("=")
-                key = key.strip()
-                if key in PROPS_FIELDS:
-                    values[key] = val.strip()
+        from server_properties import read_value
+        for key in PROPS_FIELDS:
+            val = read_value(config.PROPS_PATH, key)
+            if val is not None:
+                values[key] = val
     return values
 
 

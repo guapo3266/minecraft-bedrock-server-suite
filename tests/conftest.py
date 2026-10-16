@@ -77,6 +77,18 @@ def _watchdog_de_fondo_desactivado():
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _host_header_de_tests_permitido():
+    """El TestClient de Starlette manda `Host: testserver`; el guard anti
+    DNS-rebinding (S1b, 2026-09-25) rechaza hostnames que no son loopback/
+    IP privada, asi que la suite lo habilita explicitamente. En produccion
+    GUI_ALLOWED_HOSTS no se define y el guard solo admite loopback (o IP
+    privada con GUI_ALLOW_LAN=1)."""
+    os.environ["GUI_ALLOWED_HOSTS"] = "testserver"
+    yield
+    os.environ.pop("GUI_ALLOWED_HOSTS", None)
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _recuperaciones_no_tocan_la_instalacion_real():
     """Los lifespans de TestClient no recuperan residuos de la instalacion real.
 

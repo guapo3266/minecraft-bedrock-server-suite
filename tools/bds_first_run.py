@@ -64,8 +64,11 @@ def main():
     try:
         ok, version = bds_update._download_and_install_bds(tag="[Setup]", log_fn=_console_log)
     except Exception as e:
-        print(L(f"[Setup] Error durante la descarga o instalacion: {e}",
-                f"[Setup] Error during download or installation: {e}"))
+        print(L("[Setup] No se pudo descargar ni instalar BDS (fallo de red o de la descarga). "
+                "Revisa tu conexion a internet y vuelve a intentarlo.",
+                "[Setup] BDS could not be downloaded or installed (network or download failure). "
+                "Check your internet connection and try again."))
+        print(L(f"[Setup] Detalle tecnico: {e!r}", f"[Setup] Technical detail: {e!r}"))
         return 1
     if not ok:
         print(L("[Setup] No se pudo instalar BDS (sin red o descarga invalida). Revisa los mensajes anteriores.",

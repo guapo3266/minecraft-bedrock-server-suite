@@ -52,3 +52,9 @@ jobs:
       - name: Lint (oxlint)
         working-directory: gui_frontend
         run: npm run lint
+      - name: Tests frontend (vitest)
+        working-directory: gui_frontend
+        run: npm test
+      - name: Build (vite)
+        working-directory: gui_frontend
+        run: npm run build

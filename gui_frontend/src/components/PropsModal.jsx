@@ -1,32 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Save, TriangleAlert } from 'lucide-react';
-import { ServerMotionIcon } from './hover/AnimatedIcons';
-import { FilledCheckedIcon } from './hover/AnimatedStatusIcons';
+import { X, Save, TriangleAlert, Server as ServerMotionIcon, CircleCheck as FilledCheckedIcon } from 'lucide-react';
 import SpotlightCard from './reactbits/SpotlightCard';
 import TiltCard from './hover/TiltCard';
 import ShinyText from './reactbits/ShinyText';
 import Magnet from './reactbits/Magnet';
 import Modal from './Modal';
+import GlassSelect from './GlassSelect';
 import { useI18n } from '../i18n.jsx';
 import { FIELDS } from '../propsFields';
 
-const inputClass =
-  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition';
+const inputClass = 'settings-input';
 
 export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
   const { t } = useI18n();
   const [values, setValues] = useState({});
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null); // { ok, message }
-  const successIconRef = useRef(null);
-
-  // Animacion del check al guardar correctamente (mismo patron que BackupsSidebar)
-  useEffect(() => {
-    if (result?.ok && successIconRef.current) {
-      successIconRef.current.startAnimation();
-    }
-  }, [result]);
 
   useEffect(() => {
     if (isOpen) {
@@ -89,7 +79,7 @@ export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
               <SpotlightCard spotlightColor="rgba(6, 182, 212, 0.12)">
                 <div className="grid grid-cols-1 gap-3">
                   {FIELDS.map((f) => (
-                    <div key={f.key} className="flex items-center justify-between gap-3">
+                    <div key={f.key} className="settings-field">
                       <label
                         htmlFor={`props-${f.key}`}
                         className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400"
@@ -118,18 +108,13 @@ export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
                           />
                         </button>
                       ) : f.type === 'select' ? (
-                        <select
+                        <GlassSelect
                           id={`props-${f.key}`}
+                          label={t(f.label)}
                           value={values[f.key] || ''}
-                          onChange={(e) => setValue(f.key, e.target.value)}
-                          className={inputClass + ' w-1/2'}
-                        >
-                          {f.options.map((o) => (
-                            <option key={o} value={o} className="bg-slate-900">
-                              {o}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={value => setValue(f.key, value)}
+                          options={f.options.map(value => ({ id: value, label: value }))}
+                        />
                       ) : (
                         <input
                           id={`props-${f.key}`}
@@ -138,7 +123,7 @@ export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
                           max={f.max}
                           value={values[f.key] || ''}
                           onChange={(e) => setValue(f.key, e.target.value)}
-                          className={inputClass + ' w-1/2'}
+                          className={inputClass}
                         />
                       )}
                     </div>
@@ -158,7 +143,7 @@ export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
                 }`}
               >
                 {result.ok ? (
-                  <FilledCheckedIcon ref={successIconRef} size={18} color="#6ee7b7" />
+                  <FilledCheckedIcon size={18} className="text-emerald-400" />
                 ) : (
                   <TriangleAlert className="h-4 w-4 shrink-0" />
                 )}

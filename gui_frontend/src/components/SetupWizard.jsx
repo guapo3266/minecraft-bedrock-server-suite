@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { TriangleAlert, Download, Save } from 'lucide-react';
 import Stepper, { Step } from './reactbits/Stepper';
+import GlassSelect from './GlassSelect';
 import { FIELDS } from '../propsFields';
 import { useI18n } from '../i18n.jsx';
 
@@ -17,8 +18,27 @@ const WIZARD_DEFAULTS = {
   'max-players': '10'
 };
 
-const inputClass =
-  'w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none placeholder:text-slate-400 focus:border-cyan-500/50 transition';
+const inputClass = 'settings-input';
+
+// ── Detección del fin de la instalación ──────────────────────────────────
+// El backend reporta el desenlace por logs "[Setup] ..." en ES/EN
+// (gui_backend/routers/setup.py, hilo do_install):
+//   éxito:   "[Setup] BDS instalado correctamente (v...)" / "BDS installed successfully"
+//   fallo:   "[Setup] No se pudo completar la instalacion..." / "The installation could not be completed..."
+//   excepción: "[Setup] Error durante la instalacion: ..." / "Error during installation: ..."
+// Matchers centralizados y documentados: si el backend cambia la redacción,
+// basta con actualizar estas constantes (antes eran literales en línea).
+const INSTALL_SUCCESS_MATCHERS = ['instalado correctamente', 'installed successfully'];
+const INSTALL_FAILURE_MATCHERS = ['No se pudo completar', 'could not be completed', 'Error durante', 'Error during'];
+
+// Fallback cuando el WS no conecta (los logs no llegan): el contrato expone
+// GET /api/setup_status → {"required", "bds_installed"} (docs/API_CONTRACT.md)
+// y bds_installed pasa a true en cuanto bedrock_server.exe existe en disco.
+const INSTALL_STATUS_ENDPOINT = '/api/setup_status';
+const INSTALL_POLL_MS = 5000;
+// Sin confirmación en este tiempo se avisa "sigue en progreso" con
+// comprobación/reintento MANUAL (la instalación nunca se relanza sola).
+const INSTALL_SLOW_NOTICE_MS = 90000;
 
 export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const { t, lang, setLang } = useI18n();
@@ -30,6 +50,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const [installed, setInstalled] = useState(!!bdsInstalled);
   const [installing, setInstalling] = useState(false);
   const [installResult, setInstallResult] = useState(null);
+  const [installSlow, setInstallSlow] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState(null);
   const [attempt, setAttempt] = useState(0);
@@ -70,20 +91,57 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
 
   // El fin de la instalacion se detecta por los logs del backend ([Setup] ...)
   // SOLO los posteriores al inicio del intento en curso (ver installStartIdRef).
+  // Matchers centralizados en INSTALL_SUCCESS/FAILURE_MATCHERS.
   useEffect(() => {
     if (!installing) return;
     const texts = setupLogs
       .filter((l) => typeof l.id === 'number' && l.id > installStartIdRef.current)
       .map((l) => l.text);
-    if (texts.some((x) => x.includes('instalado correctamente') || x.includes('installed successfully'))) {
+    if (texts.some((x) => INSTALL_SUCCESS_MATCHERS.some((m) => x.includes(m)))) {
       setInstalled(true);
       setInstalling(false);
       setInstallResult({ ok: true, message: t('setupInstallOk') });
-    } else if (texts.some((x) => x.includes('No se pudo completar') || x.includes('could not be completed') || x.includes('Error durante') || x.includes('Error during'))) {
+    } else if (texts.some((x) => INSTALL_FAILURE_MATCHERS.some((m) => x.includes(m)))) {
       setInstalling(false);
       setInstallResult({ ok: false, message: t('setupInstallError') });
     }
   }, [setupLogs, installing, t]);
+
+  // Fallback sin logs (WS sin conectar / logs perdidos): se sondea
+  // GET /api/setup_status y se considera completada cuando bds_installed
+  // pasa a true (el ejecutable ya existe en disco). Si en
+  // INSTALL_SLOW_NOTICE_MS no hay confirmacion por ningun canal, se avisa
+  // "sigue en progreso" con comprobacion/reintento manual (nunca automatico).
+  useEffect(() => {
+    if (!installing) return;
+    let cancelled = false;
+
+    const checkStatus = async () => {
+      try {
+        const res = await fetch(INSTALL_STATUS_ENDPOINT);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.bds_installed) {
+          setInstalled(true);
+          setInstalling(false);
+          setInstallResult({ ok: true, message: t('setupInstallOk') });
+        }
+      } catch {
+        // sin backend ahora mismo: se reintenta en el siguiente tick
+      }
+    };
+
+    checkStatus();
+    const pollTimer = setInterval(checkStatus, INSTALL_POLL_MS);
+    const slowTimer = setTimeout(() => {
+      if (!cancelled) setInstallSlow(true);
+    }, INSTALL_SLOW_NOTICE_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(pollTimer);
+      clearTimeout(slowTimer);
+    };
+  }, [installing, t]);
 
   const setValue = (key, v) => setValues((prev) => ({ ...prev, [key]: v }));
 
@@ -117,17 +175,44 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
     );
     setInstalling(true);
     setInstallResult(null);
+    setInstallSlow(false);
     try {
       const res = await fetch('/api/setup/install_bds', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.status === 'busy') {
+      if (!res.ok) {
         setInstalling(false);
         setInstallResult({ ok: false, message: data.detail || data.message || t('setupInstallError') });
+      } else if (data.status === 'busy') {
+        // Otra operacion tiene el op_lock (puede ser la propia instalacion en
+        // curso si el usuario reintentó): se muestra el aviso pero se MANTIENE
+        // la observacion de logs/estado en vez de dar el intento por muerto.
+        setInstallResult({ ok: false, message: data.message || t('setupInstallError') });
       }
-      // dispatch ok: installing sigue en true hasta que el log confirme el fin
+      // install_dispatched: installing sigue en true hasta que el log o el
+      // fallback de estado confirmen el fin
     } catch (e) {
       setInstalling(false);
       setInstallResult({ ok: false, message: String(e) });
+    }
+  };
+
+  // Comprobacion manual del fallback de estado (sin relanzar la instalacion)
+  const handleCheckInstallStatus = async () => {
+    try {
+      const res = await fetch(INSTALL_STATUS_ENDPOINT);
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.bds_installed) {
+        setInstalled(true);
+        setInstalling(false);
+        setInstallSlow(false);
+        setInstallResult({ ok: true, message: t('setupInstallOk') });
+      } else {
+        // sigue en curso: se mantiene el aviso "en progreso"
+        setInstallResult({ ok: false, message: t(installing ? 'setupInstallSlow' : 'setupBdsNotFoundManual') });
+      }
+    } catch (e) {
+      setInstallResult({ ok: false, message: t('setupNetError') + ` (${String(e)})` });
     }
   };
 
@@ -167,8 +252,8 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
   const wizardFields = FIELDS.filter((f) => WIZARD_KEYS.includes(f.key));
 
   return (
-    <div className="relative min-h-screen text-slate-100 font-sans">
-      <div className="mx-auto mt-8 w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+    <div className="setup-view legacy-ui">
+      <div className="panel setup-panel">
         <Stepper
           key={attempt}
           initialStep={resetStep}
@@ -211,23 +296,18 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
               </div>
 
               {wizardFields.map((f) => (
-                <div key={f.key} className="flex items-center justify-between gap-3">
+                <div key={f.key} className="settings-field">
                   <label htmlFor={`setup-${f.key}`} className="w-1/2 text-xs font-semibold uppercase tracking-wide text-slate-400">
                     {t(f.label)}
                   </label>
                   {f.type === 'select' ? (
-                    <select
+                    <GlassSelect
                       id={`setup-${f.key}`}
+                      label={t(f.label)}
                       value={values[f.key] || ''}
-                      onChange={(e) => setValue(f.key, e.target.value)}
-                      className={inputClass + ' w-1/2'}
-                    >
-                      {f.options.map((o) => (
-                        <option key={o} value={o} className="bg-slate-900">
-                          {o}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={value => setValue(f.key, value)}
+                      options={f.options.map(value => ({ id: value, label: value }))}
+                    />
                   ) : (
                     <input
                       id={`setup-${f.key}`}
@@ -236,7 +316,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                       max={f.max}
                       value={values[f.key] || ''}
                       onChange={(e) => setValue(f.key, e.target.value)}
-                      className={inputClass + ' w-1/2'}
+                      className={inputClass}
                     />
                   )}
                 </div>
@@ -282,10 +362,41 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                   {installing ? t('setupInstalling') : installed ? t('setupBdsPresent') : t('setupInstall')}
                 </button>
 
+                {!installed && !installing && <button type="button" onClick={handleCheckInstallStatus}
+                  className="button secondary w-full">{t('setupCheckManual')}</button>}
+
                 {installResult && (
                   <div aria-live="polite" className={`rounded-lg border px-3 py-2 text-xs font-semibold ${installResult.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/40 bg-rose-500/10 text-rose-300'}`}>
                     {!installResult.ok && <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />}
                     {installResult.message}
+                  </div>
+                )}
+
+                {/* Sin confirmacion tras INSTALL_SLOW_NOTICE_MS: "sigue en
+                    progreso" + comprobacion/reintento MANUAL (el backend nunca
+                    se relanza automaticamente desde aqui) */}
+                {installing && installSlow && (
+                  <div role="status" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+                    <p className="font-semibold text-amber-300">
+                      <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />
+                      {t('setupInstallSlow')}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCheckInstallStatus}
+                        className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 font-bold text-slate-200 transition hover:bg-white/15 hover:text-white"
+                      >
+                        {t('setupCheckStatus')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleInstall}
+                        className="rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 font-bold text-amber-200 transition hover:bg-amber-500/25"
+                      >
+                        {t('setupInstallRetry')}
+                      </button>
+                    </div>
                   </div>
                 )}
 

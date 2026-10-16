@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.hypothesis/
+.ruff_cache/
 .coverage
 .coverage.*
 htmlcov/
@@ -12,7 +14,10 @@ venv/
 .codewhale/
 .zcode/
 .playwright-mcp/
+.commandcode/
 whatsapp-web-qr.png
+# Logs de runtime en la raiz (gui_restart*.log, uvicorn...): no son del proyecto.
+*.log
 
 # ── Rulesets locales (no se publican) ────────────────────
 # AGENTS.md está trackeado en el repo de desarrollo (esta carpeta es la
@@ -65,3 +70,16 @@ archived/
 static_analysis_semgrep_*/
 gui_frontend/node_modules/
 tools/gui_e2e_*.png
+
+# Empaquetado local portable (sin datos ni binarios de Mojang)
+.venv-portable/
+build/portable/
+portable/
+
+# Artefactos locales de documentacion, QA y experimentos (no son runtime)
+/output/
+/tmp/
+/videos/
+/anime_assets/
+/_qa_*.png
+/diff_changes.txt

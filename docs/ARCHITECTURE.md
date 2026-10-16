@@ -19,9 +19,17 @@ restore_core.py                  # Pipeline unico de restore: validacion, stagin
 zip_safety.py                    # Fuente unica anti-drift: _is_safe_zip_entry, _pack_dest,
                                  #   _extract_pack_entry, _quarantine_and_restore y CORRUPT_MARKERS
 server_properties.py             # Lectura tolerante de server.properties (clave = valor,
-                                 #   comentarios #/;): fuente unica de los parsers de props
+                                 #   comentarios #/;) + resolver/guard del mundo en worlds/
+addon_inventory.py               # Analizador compartido de addons (SIN FastAPI): inventario
+                                 #   y diagnosticos de BP/RP + filter_payload. SOLO LECTURA
+addon_inventory_cli.py           # CLI del inventario (legible / --json / --codes) con
+                                 #   codigos de salida documentados (0/1/2/3/4)
 server_gui_server.py            # Punto de entrada: create_app() (middleware de guarda
                                 #   temprana /api/*), lifespan, estáticos, uvicorn
+runtime_paths.py                # Instalacion/datos frente a recursos _internal;
+                                #   comandos de hijos en fuente o congelado
+suite_minecraft.py              # Entrada del portable y despacho interno de hijos
+desktop_window.py               # Ventana Qt WebEngine y cierre supervisado
 gui_backend/
   config.py                     # BASE_DIR, WEB_DIR, SERVER_EXE, PROPS_PATH,
                                 #   SETUP_MARKER, timeouts G8, constantes watchdog
@@ -53,6 +61,10 @@ gui_backend/
                                 #   + permissions.json + allowlist.json
     history.py                  # SQLite data/gui_history.db: metricas (30s),
                                 #   logs y sesiones; retencion 7d/7d/90d
+    addons.py                   # inventario de addons (LECTURA): delegacion fina
+                                #   en addon_inventory (sin reimplementar reglas)
+    desktop_lifecycle.py         # Coordinador de cierre local de la ventana;
+                                #   reutiliza lifecycle, sin endpoints nuevos
   routers/
     system.py                   # /favicon.svg, /, /api/status, /api/command, /api/connectivity (IP LAN/publica + puerto)
     properties.py               # /api/server_properties
@@ -61,9 +73,41 @@ gui_backend/
     backups.py                  # /api/backups*, /api/restore (+ download/delete/verify, listado filtra _CORRUPTO/_EXCEDIDO/_CRASH)
     schedule.py                 # /api/schedule (GET/POST)
     players.py                  # /api/players (GET, solo lectura)
+    addons.py                   # /api/addons (GET, solo lectura; analisis en threadpool)
     history.py                  # /api/history/{metrics,logs,sessions} (GET, retencion 1/6/24h y 7d/90d)
     websocket.py                # /ws (Origin puerto-estricto, stdin_lock 6/6)
 ```
+
+## Frontend y aplicación de escritorio
+
+La GUI React/Vite se distribuye compilada en `gui_frontend/dist/`; Node solo
+interviene en desarrollo/build. `App.jsx` conserva una sesión WS y mantiene
+`TerminalConsole` montado al navegar y expandir. El modo expandido cambia el
+layout, no crea otra consola ni reinicia filtros, borrador o historial. El panel
+de recursos y conectividad usa scroll propio en escritorio; en móvil se apila.
+
+`Navbar.jsx` expone Personalizar y Configuración. `Appearance.jsx` contiene tema,
+imagen local, encuadre, transparencia y efectos. `AppearanceTip.jsx` ofrece un
+consejo no modal una sola vez por almacenamiento del navegador, después del
+wizard; no mueve el foco ni abre el diálogo automáticamente. Las preferencias
+usan `bedrock-appearance` en localStorage y la imagen IndexedDB; el indicador
+del consejo es `bedrock-appearance-tip-seen`. No hay endpoints para los fondos.
+La arquitectura del material, límites de imágenes y QA están en
+`gui_frontend/README.md` y `docs/PLAN_APARIENCIA_GUI.md`.
+
+En modo fuente, `runtime_paths` conserva datos y backups históricos. En modo
+congelado, los recursos son de solo lectura en `_internal`, y datos/mundos,
+logs y `backups/` pertenecen a la carpeta del ejecutable. `SuiteMinecraft.exe`
+aloja Uvicorn y Qt WebEngine; `SuiteMinecraftHost.exe --internal-wrapper` y
+`--internal-backup-worker` mantienen pipes de consola con ventanas ocultas.
+La entrada fuente equivalente es `python -u server_wrapper.py`/`backup_worker.py`.
+
+`DesktopCloseCoordinator` toma `op_lock`, reutiliza `lifecycle.stop_and_wait` y
+lee `final_backup_finished` del canal NDJSON de esa sesión. Conserva la exclusión
+ante fallo de backup para Reintentar/Salir; un fallo de apagado devuelve al panel.
+No toma un print como confirmación de éxito ni mata un wrapper vivo para cerrar.
+El build portable excluye IA, BDS y datos privados; se describe en
+`packaging/README.md` y no añade rutas HTTP de control de la ventana.
 
 ## Wrapper de consola
 
@@ -179,8 +223,15 @@ vía `manager.add_log`.
   (swap simétrico: la versión que se deja de usar pasa a ser la nueva
   "anterior"; deshacer un rollback es otro rollback). `PRESERVE_FILES/PRESERVE_DIRS`
   protegen worlds/properties/permissions/allowlist en ambos sentidos.
-- Si la aplicación falla, el rollback interno restaura la instalación y el
-  resguardo existente NO se pisa con uno incompleto.
+- Si la aplicación falla, se intenta rollback interno. Si también falla la
+  recuperación, `bds_update_prev_*` y su manifiesto se conservan. El recovery
+  valida el manifiesto completo antes de tocar archivos, reemplaza destinos
+  con los originales resguardados y conserva originales aún no movidos o ya
+  recuperados; así permite reintentos tras interrupciones durante cualquier fase.
+- La descarga valida HTTPS y hosts exactos `www.minecraft.net`/`minecraft.net`
+  tanto en el metadato como antes de cada petición/redirección (máximo 5 saltos).
+  No verifica firmas ni hashes del binario; un cambio de dominio exige actualizar
+  la lista tras comprobar la fuente oficial.
 - `lifecycle.stop_and_wait(tag)` centraliza el stop + espera en dos fases G8
   que comparten update_bds y rollback_bds (misma escritura stdin, conteo 6/6).
 
@@ -260,6 +311,45 @@ vía `manager.add_log`.
   los targets de `monkeypatch.setattr` y los tests que leen el texto fuente,
   y ejecuta `pytest tests -m "not e2e"` completo.
 
+## Inventario y diagnóstico de addons (addon_inventory.py, 2026-10-06)
+
+- **Solo lectura**: abre `manifest.json` y `world_*_packs.json` en modo lectura;
+  nunca escribe. No instala, activa ni modifica addons (otra fase). Los tests
+  fotografían el árbol (tamaño + `mtime_ns` + sha256) antes y después.
+- **Independiente de FastAPI**: la CLI (`addon_inventory_cli.py`) y la GUI
+  (`services/addons.py` → `routers/addons.py`) consumen el MISMO analizador; la
+  GUI no reimplementa ninguna validación. El payload es determinista (sin fechas
+  ni duraciones) para que la equivalencia CLI/GUI se pueda comprobar por
+  igualdad exacta (`tests/test_addon_router.py`).
+- **Reglas con fuente**: cada validación del catálogo
+  (`addon_inventory.CATALOGO`) declara `severity`, `source` (F1..F5,
+  `BDS-howto`) y `determined` (False = la documentación no fija la
+  consecuencia). La tabla de `docs/INFORME_ADDONS.md` se compara con el catálogo
+  en `tests/test_addon_inventory_fuentes.py`: cambiar una gravedad sin
+  actualizar el informe rompe la suite.
+- **Rutas seguras**: reutiliza `auto_backup._es_punto_reparse` (convención de
+  monkeypatch del repo) para no seguir junctions/reparse points en raíces,
+  entradas, mundos ni manifiestos, y valida con `realpath` que cada elemento
+  analizado siga dentro de su raíz. Un elemento excluido por seguridad deja el
+  inventario en `complete: false` con su motivo.
+- **JSON tolerante**: los manifiestos oficiales de Mojang traen comentarios
+  (`behavior_packs/chemistry/manifest.json`); el analizador reintenta con un
+  limpiador que respeta las cadenas y reporta `MANIFEST_JSON_TOLERANT` (info) en
+  vez de declarar corrupto el pack.
+- **Ámbitos separados**: `compartido` (`behavior_packs/`, `resource_packs/`),
+  `sistema` (`system_behavior_packs/`, `system_resource_packs/`) y
+  `mundo:<nombre>`; el ámbito efectivo de un mundo es el suyo + compartidos +
+  sistema (F2/E4–E5). Los packs de un mundo no resuelven referencias de otro.
+- **Espejo en JS del filtro**: `gui_frontend/src/addonsLogic.js` replica
+  `filter_payload` **incluido el resumen de la vista** (`resumenDeVista`; el de
+  la instalación se conserva en `summary_installation`) y expone
+  `resolucionDe(pack, dep)`, que empareja la resolución por `uuid` **y**
+  `version` (buscar solo por `uuid` mostraba el estado de otra dependencia del
+  mismo UUID con versión distinta). `CLAVES_RESOLUCION` debe cubrir todo estado
+  que emita el analizador: lo exige
+  `test_addon_inventory_fuentes.py::test_estados_de_resolucion_tienen_clave_en_la_gui`
+  (un estado sin clave se pinta como "pendiente", una afirmación falsa).
+
 ## Tests que inspeccionan texto fuente (actualizados durante el refactor)
 
 - `test_review_hallazgos.py`:
@@ -275,7 +365,14 @@ vía `manager.add_log`.
 - `test_router_guards.py` → inventario OpenAPI de rutas POST/GET de API y 403
   con cliente/Origin externos (la guarda temprana es middleware).
 - `test_console_lang_pbt.py` `L_PY_FILES` → lista explícita de archivos con
-  llamadas `L(es, en)`; añadir ahí cualquier módulo nuevo con cadenas i18n.
+  llamadas `L(es, en)`; añadir ahí cualquier módulo nuevo con cadenas i18n
+  (incluye `addon_inventory_cli.py` y `gui_backend/routers/addons.py`).
+- `test_addon_inventory_fuentes.py` → compara el catálogo de diagnósticos
+  (`addon_inventory.CATALOGO`) con la tabla y los códigos de salida declarados en
+  `docs/INFORME_ADDONS.md`, y exige que las ubicaciones soportadas del payload
+  estén documentadas.
+- `test_addon_router.py::test_el_router_no_ejecuta_el_analisis_en_el_event_loop`
+  → el router usa `run_in_threadpool` y el servicio no importa FastAPI.
 
 ## Arranque
 

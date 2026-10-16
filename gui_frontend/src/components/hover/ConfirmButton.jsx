@@ -17,14 +17,14 @@ export default function ConfirmButton({
   const { t } = useI18n();
 
   const variantStyles = {
-    emerald: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.25)]',
-    // Variante solida para la accion primaria (Iniciar): destaca sobre las
-    // ghost y usa texto negro (ShinyText blanco no daria contraste).
-    emeraldSolid: 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)]',
-    rose: 'bg-rose-500/20 text-rose-300 border-rose-500/50 hover:bg-rose-500/30 shadow-[0_0_20px_rgba(244,63,94,0.25)]',
-    purple: 'bg-purple-500/20 text-purple-300 border-purple-500/50 hover:bg-purple-500/30 shadow-[0_0_20px_rgba(168,85,247,0.25)]',
-    amber: 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.25)]',
-    cyan: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 hover:bg-cyan-500/30 shadow-[0_0_20px_rgba(6,182,212,0.25)]'
+    emerald: 'primary',
+    // El nombre histórico se conserva; ahora la acción primaria usa el borde
+    // y texto de acento, con el mismo material neutral que la referencia.
+    emeraldSolid: 'primary',
+    rose: 'danger',
+    purple: '',
+    amber: '',
+    cyan: 'primary'
   };
 
   const defaultSparkColors = {
@@ -56,16 +56,11 @@ export default function ConfirmButton({
   return (
     <ClickSpark sparkColor={currentSparkColor} disabled={isBtnDisabled} sparkCount={10}>
       <motion.button
-        whileHover={isBtnDisabled ? {} : { scale: 1.03 }}
-        whileTap={isBtnDisabled ? {} : { scale: 0.94 }}
+        whileTap={isBtnDisabled ? {} : { y: 1 }}
         transition={{ type: 'spring', stiffness: 400, damping: 17 }}
         onClick={handleClick}
         disabled={isBtnDisabled}
-        className={`relative flex items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-bold transition duration-200 ${
-          isBtnDisabled
-            ? 'opacity-60 cursor-not-allowed border-slate-700 bg-slate-900/50 text-slate-400'
-            : variantStyles[variant] || variantStyles.emerald
-        } ${className}`}
+        className={`button ${variantStyles[variant] ?? variantStyles.emerald} ${className}`}
         {...props}
       >
         {isCoolingDown ? (

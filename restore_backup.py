@@ -9,13 +9,15 @@ except ImportError:
 
 import restore_core
 import console_lang
+import server_properties
+import runtime_paths
 from zip_safety import CORRUPT_MARKERS
 
 # Rutas RESUELTAS desde la propia ubicacion del script: cada instalacion
 # restaura SU mundo. (Antes estaban hardcodeadas a "Servidor de Guapo", de
 # modo que ejecutar este script desde otra instalacion sobrescribia el mundo
 # de la vecina.)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = runtime_paths.installation_dir()
 
 
 def _world_name(base_dir=None):
@@ -30,10 +32,7 @@ def _world_name(base_dir=None):
 
 
 def _resolve_backup_dir(base_dir):
-    return os.path.abspath(os.path.join(
-        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
-        os.path.basename(os.path.normpath(base_dir)),
-    ))
+    return runtime_paths.backup_dir(base_dir)
 
 
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())
@@ -59,7 +58,7 @@ def get_world_dir(base_dir=None):
         current_global = globals()["WORLD_DIR"]
         if current_global != _IMPORT_TIME_WORLD_DIR:
             return current_global  # monkeypatch de tests: respetar
-    return os.path.join(bdir, "worlds", _world_name(bdir))
+    return server_properties.resolve_world_dir(bdir)
 
 
 def get_backup_dir(base_dir=None):
@@ -196,9 +195,17 @@ def list_and_restore():
     previo = os.environ.get("WRAPPER_LANG")
     console_lang.set_lang("es")
     try:
+        # Recuperar residuos de restauraciones interrumpidas ANTES de crear
+        # residuos nuevos (H6-2026-09-25). Se llama por atributo de modulo
+        # (convencion de monkeypatch del repo). Best-effort.
+        import auto_backup
+        try:
+            auto_backup.recover_interrupted_restores()
+        except Exception as e_rec:
+            print(f"[AVISO] No se pudo recuperar restauraciones interrumpidas: {e_rec}")
         restore_core.restore_from_zip(selected_zip, BASE_DIR, get_world_dir())
     except Exception as e:
-        print(f"[ERROR] Falló la restauración: {e}. El mundo original NO fue modificado.")
+        print(f"[ERROR] Falló la restauración: {e}. Revisa los resguardos conservados si el rollback no pudo completarse.")
         input("\nPresiona Enter para salir...")
         return
     finally:

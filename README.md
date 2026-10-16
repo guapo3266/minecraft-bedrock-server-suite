@@ -20,12 +20,16 @@ Usa los comandos nativos de Minecraft (`save hold`, `save query`, `save resume`)
 iniciar_gui.bat     ← doble clic en Windows (crea un entorno virtual .venv aislado e instala dependencias solo la primera vez)
 ```
 
-Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola en vivo, botones de iniciar/detener/reiniciar, backups, jugadores online (con permisos, allowlist y kick/ban), medidores de RAM/CPU/disco con gráficas de las últimas 24 horas, la versión instalada de BDS, programación de backups y watchdog, actualizador oficial de Mojang con vuelta atrás a la versión anterior y una tarjeta con tu IP para invitar amigos. Frontend animado con fondo fluido WebGL.
+Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola en vivo, botones de iniciar/detener/reiniciar, backups, jugadores online (con permisos, allowlist y kick/ban), medidores de RAM/CPU/disco con gráficas de las últimas 24 horas, la versión instalada de BDS, programación de backups y watchdog, actualizador oficial de Mojang con vuelta atrás a la versión anterior y una tarjeta con tu IP para invitar amigos. Interfaz de vidrio con cabecera flotante y navegación inferior: Servidor, Jugadores, Backups y Addons.
+
+El botón **Personalizar** de la cabecera abre Apariencia: tema claro/oscuro, transparencia, efectos completos/reducidos y un fondo propio (JPEG/PNG/WebP, hasta 10 MB), con zoom, encuadre, oscurecimiento y modos integrado/libre. La primera visita al panel muestra un consejo descartable para descubrirlo; no abre el diálogo automáticamente. **Lectura protegida** adapta el material para mantener legible el texto. La imagen y las preferencias se guardan solo en ese navegador, no se suben al servidor; otro navegador o puerto tiene sus propias preferencias. Si WebGL no está disponible, se usa vidrio suave. No necesita internet para fuentes ni efectos.
+
+La consola aprovecha la altura disponible y permite **Expandir/Reducir** sin perder filtros, historial ni el comando escrito; **Esc** vuelve a la vista normal. En escritorio, recursos y conectividad tienen scroll propio. El aviso del producto y «Administración local» están en **Más acciones → Acerca de**.
 
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
 - Requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global). Si no se puede crear el `.venv`, usa el Python global.
 - Solo Windows: esta suite solo soporta Windows (el BDS oficial de Mojang existe para Windows y Linux, pero aquí solo se prueba/soporta Windows).
-- El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008). Modo LAN opt-in solo con `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, sin autenticación: solo para red doméstica de confianza).
+- El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008). Modo LAN opt-in solo con `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, sin autenticación: solo para red doméstica de confianza). Además de la IP de origen, se valida el header `Host` (anti DNS-rebinding) y el `Origin` debe coincidir con el host de la propia GUI (anti CSRF entre dispositivos de la LAN). Si accedés por nombre de host (no por IP), definí `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
 
 **2. Sin GUI (solo consola)** — el wrapper clásico:
 
@@ -36,6 +40,12 @@ iniciar_servidor.bat     ← doble clic y el servidor arranca con la consola
 Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, hace backups automáticos cada 30 minutos por defecto (configurable desde la GUI; más uno al arrancar y otro al apagar) y mantiene los últimos 15 backups. Para forzar un backup caliente al instante, escribí `backup` en la consola del wrapper. Si falta `bedrock_server.exe`, el `.bat` pregunta y lo descarga solo desde Mojang.
 
 Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI y seguir usando los scripts de respaldo de siempre.
+
+### Aplicación de escritorio portable (opcional)
+
+El repositorio incluye las fuentes para construir `SuiteMinecraft.exe` y su host auxiliar con Python 3.11 de 64 bits, Node.js y `crear_portable.ps1`. El paquete generado incorpora Python y Qt WebEngine; no requiere Python ni Node en el equipo de destino. Es un build local, no una descarga binaria publicada. No incluye BDS, mundos, packs ni datos privados y no arranca Minecraft al abrir la ventana. El build portable oculta el asistente IA; la GUI web habitual lo conserva.
+
+El cierre normal coordina apagado y backup final; ante un fallo permite reintentar sin afirmar que la copia terminó. Los backups del portable van en `backups/` junto al ejecutable. Construcción, actualización conservando datos y límites del QA: [packaging/README.md](packaging/README.md).
 
 ### ¿Qué hace?
 
@@ -50,6 +60,8 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 - Restauración fácil: desde la GUI (restaurar/verificar/borrar) o con la CLI interactiva `python restore_backup.py`. Los accesos directos `.bat` de esta instalación viven en la carpeta local `backups/` y no se distribuyen con el repo.
 - Script para abrir los puertos del firewall (`configurar_firewall.bat`; ejecútalo como administrador: sin permisos avisa y aborta en vez de fingir éxito).
 - Desde la GUI: consola de comandos en vivo, métricas, forzar backup, restaurar/verificar/borrar backups y una tarjeta con tu IP local/pública para invitar amigos.
+- **Asistente de comandos IA con aprobación humana**: traduce peticiones en lenguaje natural en español (ej. "teletransporta a steva a juan", "haz de día", "dame 64 diamantes") a comandos Bedrock mediante LM Studio local (`http://127.0.0.1:1234/v1`). La IA **solo propone** el comando; requiere aprobación explícita del operador con el botón [Ejecutar].
+- **Inventario y diagnóstico de addons (solo lectura)**: la pestaña *Addons* de la GUI y la CLI `python addon_inventory_cli.py` (con `--json` y códigos de salida documentados) listan los behavior packs y resource packs de la instalación y de cada mundo, sus módulos, dependencias de packs y de scripting, la versión mínima del motor y los mundos que los referencian, junto con los problemas que demuestran sus metadatos (JSON inválido, UUID duplicados, dependencias ausentes, referencias de mundo sin candidato o ambiguas…). No instala, activa ni modifica nada; detalle en `docs/INFORME_ADDONS.md`.
 
 ### Archivos
 
@@ -61,15 +73,21 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 | `server_wrapper.py` | Script principal: lee la consola, detecta jugadores, maneja los backups |
 | `backup_worker.py` | Worker de compresión en proceso separado (subprocess, arranque rápido) |
 | `tools/bds_first_run.py` | Primer arranque por consola: descarga BDS si falta (pregunta S/n) |
-| `tools/verify_backups.py` | Verifica el CRC de todos los backups y marca los corruptos con `_CORRUPTO` |
+| `tools/verify_backups.py` | Verifica los backups (CRC + presencia de `level.dat`) y marca los no restaurables con `_CORRUPTO` |
 | `auto_backup.py` | Comprime la base de datos a ZIP |
 | `restore_backup.py` | Restaura un backup |
-| `gui_frontend/` | Frontend React (código fuente + `dist/` compilado, listo para usar) |
+| `addon_inventory.py` | Analizador compartido de addons: inventario y diagnósticos de packs (solo lectura) |
+| `addon_inventory_cli.py` | CLI del inventario de addons (salida legible o `--json`, códigos de salida documentados) |
+| `gui_backend/services/ai_assistant.py` | Servicio de traducción a comandos Bedrock vía LM Studio local con resolución de contexto y saneamiento anti-inyección |
+| `gui_backend/routers/ai.py` | Endpoints `/api/ai/propose` y `/api/ai/status` protegidos en loopback |
+| `gui_frontend/` | Frontend React (código fuente + `dist/` compilado con pestaña de Asistente IA, listo para usar) |
 | `web/` | GUI clásica de respaldo (sin React) |
 | `configurar_firewall.bat` | Abre los puertos del firewall (como administrador) |
 | `configurar_antivirus.bat` | Añade exclusiones de Windows Defender para los backups |
 | `tools/setup_defender_exclusions.ps1` | Script PowerShell de exclusiones (pide administrador la primera vez) |
 | `requirements-dev.txt` | Dependencias de desarrollo/tests (pytest, hypothesis, httpx, pytest-cov) |
+| `suite_minecraft.py`, `desktop_window.py`, `runtime_paths.py` | Entrada de escritorio, ventana Qt y separación de recursos/datos en fuente o portable |
+| `crear_portable.ps1`, `requirements-build.txt`, `packaging/` | Construcción local del portable; herramientas de desarrollo, no binarios BDS |
 | `server.properties.example` | Plantilla de configuración (copiar a `server.properties`) |
 
 ### Arranque inicial lento y Windows Defender
@@ -92,10 +110,23 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 - **El puerto 8000 está ocupado**: la GUI salta sola al siguiente libre y abre el navegador ahí; para fijarlo, ejecutá `set GUI_PORT=8001` antes de arrancar.
 - **La GUI no muestra jugadores**: las detecciones leen el log de BDS en inglés (`Player connected: ...`). No cambies el idioma del servidor; si Mojang cambia el formato, se pierden jugadores pero los backups en caliente siguen funcionando.
 - **No aparece un backup para restaurar**: los marcados `_CORRUPTO`, `_EXCEDIDO` o `_CRASH` se ocultan a propósito (misma lista en la GUI y en la CLI).
+- **La GUI responde `403 Acceso denegado: host no permitido`**: accediste por un nombre de host que la GUI no reconoce (protección anti DNS-rebinding). Usá `127.0.0.1`/`localhost`, o definí `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
 - **¿Dónde quedan los backups?**: fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`. Se conservan 15 recientes + 1 por día durante 7 días (los marcados, 7 días como evidencia).
 - **`Debes apagar el servidor antes de reestablecer un backup`**: la restauración exige BDS apagado; usá la GUI o `python restore_backup.py`.
+- **`level-name invalido` / `Ruta de mundo insegura`**: `level-name` debe ser un nombre de carpeta dentro de `worlds/` (por ejemplo, `Mi Mundo`), sin rutas, `..`, nombres de dispositivo ni alias de Windows. Los backups y restores rechazan mundos o carpetas `worlds/` redirigidos por enlaces/junctions.
+- **Descarga BDS rechazada por host o redirección**: solo se aceptan ZIPs por HTTPS desde `www.minecraft.net` o `minecraft.net`, también en cada redirección. Si Mojang cambia de dominio, será necesario actualizar la suite.
 - **Linux**: no soportado (el BDS de Mojang existe para Linux, pero esta suite solo se prueba en Windows).
 - **No corras los e2e sobre una instalación real**: `pytest -m e2e` toca `server.properties` y crea/borra `worlds/TestWorld`.
+
+### Backups y restauración (guía rápida)
+
+- **Dónde quedan**: fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`. Se conservan 15 recientes + 1 por día durante 7 días; los marcados (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`), 7 días como evidencia y nunca se ofrecen para restaurar.
+- **Forzar un backup ahora**: botón "Backup" de la GUI o `backup` en la consola del wrapper.
+- **Restaurar (GUI)**: pestaña Backups → elegir el punto → [Restaurar]. Exige el servidor apagado; si algo falla a mitad del intercambio, se intenta recuperar el mundo anterior (rollback). Si Windows impide renombrar la carpeta, la recuperación por copia conserva el `.bak` para una recuperación exacta manual: no lo borres hasta revisar el mundo y los packs.
+- **Restaurar (CLI)**: `python restore_backup.py` → elegir número → escribir `SI`. Antes de tocar nada recupera restos de restauraciones interrumpidas.
+- **Verificar integridad**: `python tools\verify_backups.py` comprueba CRC y que cada ZIP tenga `level.dat` (sin él no es restaurable) y marca los malos automáticamente. Recomendado correrlo de vez en cuando; es lento con backups grandes porque los lee enteros.
+- **Ante un apagón a mitad de restauración**: en el próximo arranque (GUI o wrapper) los restos se limpian solos; si ves carpetas `.bak_huerfano_*`, son resguardos conservados a propósito (no se borran solos: revísalos y bórralos cuando confirmes que no los necesitás).
+- **Ante una actualización BDS interrumpida**: la GUI intenta recuperar los binarios al arrancar. Si sigue habiendo errores, conserva las carpetas `bds_update_prev_*`: contienen el manifiesto y los originales pendientes de recuperar.
 
 ### Para usarlo
 
@@ -103,7 +134,9 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 2. Clonás el repo o descargás el zip.
 3. Copiás `server.properties.example` → `server.properties`.
 4. Tirás el `bedrock_server.exe` original (y sus DLLs) adentro (no se incluye por licencia de Mojang; también podés bajarlo con la opción "Actualización BDS" del menú de la GUI).
-5. **Con GUI**: doble clic en `iniciar_gui.bat`. **Sin GUI**: doble clic en `iniciar_servidor.bat`. Cualquiera de los dos crea `.venv` e instala las dependencias solo la primera vez.
+5. **Con GUI**: doble clic en `iniciar_gui.bat`. **Sin GUI**: doble clic en `iniciar_servidor.bat`. Cualquiera de los dos crea `.venv` e instala las dependencias solo la primera vez (y las actualiza si `requirements.txt` cambia).
+
+En una instalación nueva la GUI muestra un **asistente de 3 pasos** (descarga de BDS, creación del mundo y configuración inicial) en vez del dashboard; cuando termina, aparece el panel normal.
 
 ### Tests
 
@@ -111,11 +144,16 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 pip install -r requirements-dev.txt   # o .venv\Scripts\python -m pip install -r requirements-dev.txt
 python -m ruff check .                  # lint estatico (F/E9)
 python -m pytest tests -m "not e2e" -q   # excluye e2e (requieren BDS vivo y tocan mundo real)
-# alternativa corta (tambien excluye e2e por defecto si falta bedrock_server.exe):
-python -m pytest tests/ -q
+
+cd gui_frontend
+npm ci && npm run lint && npm test && npm run build   # frontend: lint (oxlint), tests (vitest) y rebuild del dist/
 ```
 
-Incluyen tests property-based (Hypothesis) para el parseo del `save query`, la comparación de versiones, el guard anti zip-slip y el control de acceso local, más suites de inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback) y de la máquina de estados del disparo manual de backup en caliente. Desde la revisión de 2026-08-02 incluyen además regresiones de los fixes (reintento inmediato tras snapshot incompleto, validación de snapshot por `level.dat`, retención con reloj inyectable, filtro de backups corruptos en la GUI, guard TOCTOU del restore) y propiedades adicionales: prefijos de log apilados, idempotencia/normalización de rutas y consenso anti-drift del guard zip-slip entre sus copias. Desde 2026-08-16 suman suites de programación de backups + watchdog, gestión de jugadores, historial SQLite, rollback de BDS y canal de eventos NDJSON. Desde 2026-08-24 se añaden hardening de seguridad (Origin puerto-estricto, null-byte zip-slip, IPv6 Host), PBT de schedule/seguridad, simulación del watchdog con wrapper falso sin binario (crash → re-arranque real → backoff), caché TTL de métricas de disco, la migración del antiguo script manual `tests/test_wrapper_logic.py` a tests pytest reales (sus regresiones del parser no podían fallar bajo pytest) y un fixture autouse que aísla el canal NDJSON en tmp para no escribir nunca en el `data/wrapper_events/` real de la instalación, más un lector del canal tolerante a corrupción a nivel bytes (UTF-8 truncado por escritura interrumpida) con PBT de basura binaria, una suite del router WebSocket sin e2e ni httpx (ejercita la coroutine real con un WebSocket falso: handshake S3, canal ping/command/set_lang y registro de sockets limpio incluso si el cliente muere durante el init), la corrección del oráculo PBT de `console_lang` (un `set_lang` inválido es un no-op documentado, no una vuelta al inglés) y hermeticidad de los tests de arranque frente a un BDS externo real en la máquina, robustez del broadcast WebSocket del backend (`ServerManager._schedule_broadcast` es best-effort: un loop cerrado en la ventana de apagado ya no convierte cada `add_log`/`update_status` en un RuntimeError con corrutina huérfana; el lifespan resetea `manager.loop` al salir) con su suite de regresión, y cobertura de los gates del modo LAN opt-in (`GUI_ALLOW_LAN`: IPs privadas RFC1918 solo con la variable activa, loopback siempre, públicas nunca y anti-CSRF por puerto intacto) y del entrypoint LAN (`_resolver_host_gui` para GUI_HOST/GUI_ALLOW_LAN con fuente única `security._allow_lan`, `_resolver_puerto` acotado a 65535 e IPv6 en `_puerto_libre`) y una barrera de higiene i18n de consola (barrido AST sobre todos los sitios `L()`: el fallback inglés — idioma por defecto — sin residuos de español) (726 tests verdes, 0 skipped; los 2 e2e aparte requieren `bedrock_server.exe`).
+La suite Python cubre property-based tests (Hypothesis) del `save query`, versiones, guard anti zip-slip y control de acceso local; inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback, disco lleno); programación + watchdog, jugadores, historial SQLite, rollback de BDS, inventario de addons, canal NDJSON, guards HTTP/WebSocket y runtime/cierre del portable. Usá siempre el filtro `not e2e` si hay una instalación BDS en la carpeta. El detalle histórico vive en `docs/INFORME_*`; las instrucciones locales `AGENTS.md` no se distribuyen en el repo público.
+
+El QA opcional de navegador se ejecuta con `python gui_frontend/tests/appearance-browser-check.py` y requiere Playwright Python y Chrome. Sirve el `dist/` real con API/WS simulados: comprueba fondos, temas, teclado, navegación y reconexión, sin ejecutar BDS. La guía del frontend está en [gui_frontend/README.md](gui_frontend/README.md).
+
+Validación local del 2026-10-15: **1038 pruebas Python aprobadas, 2 e2e excluidas y 88 pruebas frontend aprobadas**, además de lint, build y QA visual con API simulada. Alcance y sincronización: [informe de actualización](docs/INFORME_ACTUALIZACION_2026-10-15.md).
 
 ### Licencia y aviso legal
 
@@ -142,12 +180,16 @@ It uses the native Minecraft commands (`save hold`, `save query`, `save resume`)
 iniciar_gui.bat     ← double-click on Windows (creates an isolated .venv virtual environment and installs dependencies only once)
 ```
 
-Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, start/stop/restart buttons, backups, online players (with permissions, allowlist and kick/ban), RAM/CPU/disk meters with 24-hour charts, the installed BDS version, backup scheduling and watchdog, an official Mojang updater with rollback to the previous version and a card with your IP to invite friends. Animated frontend with a WebGL fluid background.
+Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, start/stop/restart buttons, backups, online players (with permissions, allowlist and kick/ban), RAM/CPU/disk meters with 24-hour charts, the installed BDS version, backup scheduling and watchdog, an official Mojang updater with rollback to the previous version and a card with your IP to invite friends. Glass interface with a floating header and bottom navigation: Server, Players, Backups and Addons.
+
+The visible **Customize** button opens Appearance: light/dark themes, transparency, full/reduced effects and your own background (JPEG/PNG/WebP, up to 10 MB), with zoom, framing, darkening and integrated/free modes. A dismissible tip introduces it on the first dashboard visit without opening the dialog automatically. **Protected readability** adapts the material to keep text legible. Images and preferences stay in that browser, never uploaded to the server; another browser or port has its own preferences. Soft glass is used if WebGL is unavailable. Fonts and effects need no internet connection.
+
+The console uses the available height and supports **Expand/Collapse** without losing filters, command history or draft input; **Esc** restores the normal view. On desktop, resources and connectivity scroll independently. The product disclaimer and local-management notice live under **More actions → About**.
 
 - **No Node.js needed**: the frontend ships prebuilt in `gui_frontend/dist/`.
 - Requires **Python 3.10+**. The `.bat` creates a `.venv` virtual environment isolated from your machine's Python and installs `requirements.txt` there on first run (nothing goes into the global Python). If `.venv` cannot be created, it falls back to the global Python.
 - Windows only: this suite only supports Windows (Mojang's official BDS exists for Windows and Linux, but only Windows is tested/supported here).
-- The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008). LAN mode is opt-in via `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, no authentication: trusted home network only).
+- The web server listens on `127.0.0.1` only and rejects non-local connections (HTTP 403 / WebSocket 1008). LAN mode is opt-in via `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, no authentication: trusted home network only). Besides the source IP, the `Host` header is validated (anti DNS-rebinding) and the `Origin` must match the GUI's own host (anti cross-device CSRF on the LAN). If you browse by hostname (not IP), set `GUI_ALLOWED_HOSTS=your-hostname` before starting.
 
 **2. Without GUI (console only)** — the classic wrapper:
 
@@ -158,6 +200,12 @@ iniciar_servidor.bat     ← double-click and the server starts with the console
 The original mode: the wrapper reads the server console, detects players, runs automatic backups every 30 minutes by default (configurable from the GUI; plus one on start and one on stop) and keeps the last 15 backups. To force a hot backup on the spot, type `backup` in the wrapper console. If `bedrock_server.exe` is missing, the `.bat` asks and downloads it from Mojang.
 
 Both modes share the same wrapper and folder — you can start with the GUI and keep using the same backup scripts as always.
+
+### Optional portable desktop application
+
+The repository contains the sources to build `SuiteMinecraft.exe` and its helper host using 64-bit Python 3.11, Node.js and `crear_portable.ps1`. The generated folder includes Python and Qt WebEngine, so the destination machine does not need Python or Node. This is a local build, not a published binary download. It excludes BDS, worlds, packs and private data, and opening the window does not start Minecraft. The portable build hides the AI assistant; the regular web GUI retains it.
+
+Normal window closure coordinates shutdown and the final backup; a failure offers a retry instead of reporting success. Portable backups are stored in `backups/` beside the executable. Build instructions, data-preserving updates and QA limits: [packaging/README.md](packaging/README.md) (Spanish).
 
 ### What it does
 
@@ -172,6 +220,8 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 - Easy restore: from the GUI (restore/verify/delete) or with the interactive `python restore_backup.py` CLI. This installation's `.bat` shortcuts live in the local `backups/` folder and are not distributed with the repo.
 - Firewall port opener (`configurar_firewall.bat`; run it as administrator: without elevation it reports the failure instead of pretending success).
 - From the GUI: live command console, metrics, forced backup, restore/verify/delete backups and a card with your local/public IP to invite friends.
+- **AI Command Assistant with human-in-the-loop approval**: translates natural language requests (e.g. "teleport steva to juan", "make it day", "give 64 diamonds") into Bedrock commands via local LM Studio (`http://127.0.0.1:1234/v1`). The AI **only proposes** the command; execution strictly requires the operator to click [Ejecutar / Execute].
+- **Addon inventory and diagnostics (read-only)**: the GUI *Addons* tab and the CLI `python addon_inventory_cli.py` (with `--json` and documented exit codes) list the behavior and resource packs of the installation and of every world, their modules, pack and scripting dependencies, the declared minimum engine version and which worlds reference them, together with the problems their metadata proves (invalid JSON, duplicate UUIDs, missing dependencies, world references with no candidate or ambiguous…). It installs, enables or modifies nothing; details in `docs/INFORME_ADDONS.md`.
 
 ### Files
 
@@ -183,15 +233,21 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 | `server_wrapper.py` | Main script: reads the console, detects players, handles backups |
 | `backup_worker.py` | Compression worker in a separate process (subprocess, fast startup) |
 | `tools/bds_first_run.py` | Console first run: downloads BDS if missing (asks S/n) |
-| `tools/verify_backups.py` | CRC-checks every backup and marks corrupt ones as `_CORRUPTO` |
+| `tools/verify_backups.py` | CRC-checks every backup (plus the presence of `level.dat`) and marks non-restorable ones as `_CORRUPTO` |
 | `auto_backup.py` | Zips the database |
 | `restore_backup.py` | Restores a backup |
-| `gui_frontend/` | React frontend (source + prebuilt `dist/`, ready to use) |
+| `addon_inventory.py` | Shared addon analyzer: pack inventory and diagnostics (read-only) |
+| `addon_inventory_cli.py` | Addon inventory CLI (readable output or `--json`, documented exit codes) |
+| `gui_backend/services/ai_assistant.py` | Bedrock command translation service via local LM Studio with context resolution and injection sanitation |
+| `gui_backend/routers/ai.py` | Loopback-protected endpoints `/api/ai/propose` and `/api/ai/status` |
+| `gui_frontend/` | React frontend (source + prebuilt `dist/` with AI Assistant tab, ready to use) |
 | `web/` | Classic fallback GUI (no React) |
 | `configurar_firewall.bat` | Opens firewall ports (as administrator) |
 | `configurar_antivirus.bat` | Adds Windows Defender exclusions for the backups |
 | `tools/setup_defender_exclusions.ps1` | PowerShell exclusion script (asks for admin the first time) |
 | `requirements-dev.txt` | Development/test dependencies (pytest, hypothesis, httpx, pytest-cov) |
+| `suite_minecraft.py`, `desktop_window.py`, `runtime_paths.py` | Desktop entry, Qt window and source/portable resource and data paths |
+| `crear_portable.ps1`, `requirements-build.txt`, `packaging/` | Local portable build tooling; no Mojang binaries |
 | `server.properties.example` | Config template (copy to `server.properties`) |
 
 ### Slow initial startup and Windows Defender
@@ -214,10 +270,23 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 - **Port 8000 is taken**: the GUI automatically jumps to the next free port and opens the browser there; to pin it, run `set GUI_PORT=8001` before starting.
 - **The GUI shows no players**: detections read the BDS log in English (`Player connected: ...`). Do not change the server language; if Mojang changes the format, players are lost but hot backups keep working.
 - **A backup does not show up for restore**: entries marked `_CORRUPTO`, `_EXCEDIDO` or `_CRASH` are hidden on purpose (same list in the GUI and the CLI).
+- **The GUI answers `403 Acceso denegado: host no permitido`**: you browsed by a hostname the GUI does not know (anti DNS-rebinding protection). Use `127.0.0.1`/`localhost`, or set `GUI_ALLOWED_HOSTS=your-hostname` before starting.
 - **Where are the backups?**: outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`. The last 15 plus 1 daily for 7 days are kept (marked ones, 7 days as evidence).
 - **`Debes apagar el servidor antes de reestablecer un backup`**: restore requires BDS to be stopped; use the GUI or `python restore_backup.py`.
+- **`Invalid level-name` / `Unsafe world path`**: `level-name` must be a folder name inside `worlds/` (for example, `My World`), without paths, `..`, device names or Windows aliases. Backups and restores reject worlds or `worlds/` folders redirected by links/junctions.
+- **BDS download rejected due to a host or redirect**: ZIPs are accepted only over HTTPS from `www.minecraft.net` or `minecraft.net`, including every redirect. If Mojang changes domains, the suite will need an update.
 - **Linux**: not supported (Mojang's BDS exists for Linux, but this suite is only tested on Windows).
 - **Do not run the e2e on a real installation**: `pytest -m e2e` touches `server.properties` and creates/deletes `worlds/TestWorld`.
+
+### Backups and restore (quick guide)
+
+- **Where they live**: outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`. The last 15 plus 1 daily for 7 days are kept; marked ones (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`) stay 7 days as evidence and are never offered for restore.
+- **Force a backup now**: the GUI "Backup" button or `backup` in the wrapper console.
+- **Restore (GUI)**: Backups tab → pick the point → [Restore]. Requires the server to be off; if the swap fails midway, recovery of the previous world is attempted (rollback). If Windows prevents renaming the folder, recovery by copy keeps the `.bak` for exact manual recovery: keep it until you have checked the world and packs.
+- **Restore (CLI)**: `python restore_backup.py` → pick a number → type `SI`. Before touching anything it recovers leftovers from interrupted restores.
+- **Verify integrity**: `python tools\verify_backups.py` checks the CRC and that every ZIP contains `level.dat` (without it a backup is not restorable) and quarantines the bad ones. Worth running once in a while; it is slow with large backups because it reads them fully.
+- **After a blackout mid-restore**: leftovers are cleaned up on the next start (GUI or wrapper); if you see `.bak_huerfano_*` folders they are preserved safety copies on purpose (never auto-deleted: review them and remove them once you are sure).
+- **After an interrupted BDS update**: the GUI attempts to recover the binaries on startup. If errors remain, keep the `bds_update_prev_*` folders: they contain the manifest and originals still awaiting recovery.
 
 ### How to use
 
@@ -225,7 +294,9 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 2. Clone the repo or download the zip.
 3. Copy `server.properties.example` → `server.properties`.
 4. Drop your original `bedrock_server.exe` and DLLs inside (not included due to Mojang's license; you can also fetch it with the "BDS Update" option in the GUI menu).
-5. **With GUI**: double-click `iniciar_gui.bat`. **Without GUI**: double-click `iniciar_servidor.bat`. Either one creates the `.venv` and installs dependencies only on the first run.
+5. **With GUI**: double-click `iniciar_gui.bat`. **Without GUI**: double-click `iniciar_servidor.bat`. Either one creates the `.venv` and installs dependencies only on the first run (and refreshes them when `requirements.txt` changes).
+
+On a fresh install the GUI shows a **3-step setup wizard** (BDS download, world creation and initial configuration) instead of the dashboard; the normal panel appears once it finishes.
 
 ### Tests
 
@@ -233,11 +304,16 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 pip install -r requirements-dev.txt   # or .venv\Scripts\python -m pip install -r requirements-dev.txt
 python -m ruff check .                  # static lint (F/E9)
 python -m pytest tests -m "not e2e" -q   # excludes e2e (need live BDS, touches real world)
-# short alternative (also skips e2e when bedrock_server.exe missing):
-python -m pytest tests/ -q
+
+cd gui_frontend
+npm ci && npm run lint && npm test && npm run build   # frontend: lint (oxlint), tests (vitest), dist rebuild
 ```
 
-Includes property-based tests (Hypothesis) for `save query` parsing, version comparison, the zip-slip guard and the local access control, plus backup fault-injection suites (cancellation, double backup, incomplete snapshot, corrupt ZIP, rollback) and the hot-backup manual trigger state machine. Since the 2026-08-02 review it also includes fix regressions (immediate retry after an incomplete snapshot, snapshot validation by `level.dat`, clock-injectable retention, corrupt-backup filtering in the GUI, restore TOCTOU guard) and extra properties: stacked log prefixes, path idempotence/normalization and anti-drift consensus of the zip-slip guard across its copies. Since 2026-08-16 it adds suites for backup scheduling + watchdog, player management, SQLite history, BDS rollback and the wrapper NDJSON event channel. Since 2026-08-24 it adds security hardening (strict-port Origin, null-byte zip-slip, IPv6 Host), schedule/security PBTs, watchdog simulation with a fake wrapper process (no binary needed: crash → real relaunch → backoff), TTL-cached disk metrics, the migration of the old manual-style `tests/test_wrapper_logic.py` to real pytest tests (its parser regressions could never fail under pytest) and an autouse fixture that isolates the NDJSON event channel into tmp so the suite never writes to the installation's real `data/wrapper_events/`, plus a channel reader tolerant to byte-level corruption (truncated UTF-8 from an interrupted write) with binary-garbage PBT, a WebSocket router suite without e2e or httpx (exercises the real coroutine with a fake WebSocket: S3 handshake, ping/command/set_lang channel, and a clean socket registry even if the client dies during init), the fix of the `console_lang` PBT oracle (an invalid `set_lang` is a documented no-op, not a fallback to English) and hermetic start-path tests against a real external BDS running on the machine, backend WebSocket broadcast robustness (`ServerManager._schedule_broadcast` is best-effort: a closed loop during the shutdown window no longer turns every `add_log`/`update_status` into a RuntimeError with an orphaned coroutine; the lifespan resets `manager.loop` on exit) with its regression suite, and coverage of the opt-in LAN mode gates (`GUI_ALLOW_LAN`: RFC1918 private IPs only when the variable is set, loopback always, public never, port-based anti-CSRF intact) and of the LAN entrypoint (`_resolver_host_gui` for GUI_HOST/GUI_ALLOW_LAN with single source `security._allow_lan`, `_resolver_puerto` bounded at 65535, IPv6 support in `_puerto_libre`) and a console i18n hygiene barrier (AST sweep over every `L()` call site: the English fallback — the default language — carries no Spanish residue) (704 green tests, 0 skipped; the 2 separate e2e require `bedrock_server.exe`).
+The Python suite covers Hypothesis properties (`save query`, versions, zip-slip and local access), backup fault injection, scheduling/watchdog, players, SQLite history, BDS rollback, addons, NDJSON, HTTP/WebSocket guards and portable runtime/shutdown. Always use `not e2e` when the directory contains a BDS installation. Historical reports live in `docs/INFORME_*`; local `AGENTS.md` instructions are not distributed in the public repository.
+
+Optional browser QA runs with `python gui_frontend/tests/appearance-browser-check.py` and requires Playwright Python and Chrome. It serves the real `dist/` with mocked API/WS to check backgrounds, themes, keyboard navigation and reconnection without running BDS. See [gui_frontend/README.md](gui_frontend/README.md) (Spanish).
+
+Local validation on 2026-10-15: **1038 Python tests passed, 2 e2e deselected and 88 frontend tests passed**, plus lint, build and browser QA with mocked API. Scope and synchronization: [update report](docs/INFORME_ACTUALIZACION_2026-10-15.md) (Spanish).
 
 ### License and disclaimer
 
@@ -248,4 +324,4 @@ Distributed under the MIT License. See `LICENSE` for details.
 
 ### Random technical notes
 
-I had some serious headaches with the ZIP compression getting stuck, so the worker now runs in a separate process via `subprocess` (fast startup, no `multiprocessing.spawn` bootstrap pipe, which hung for 50-120 s while the server was running) with a safety timeout: if compression takes more than 2 minutes, the wrapper kills the process so the server doesn't stay frozen. Cooperative cancellation uses a marker file (a subprocess child can't share in-memory events). If the `save query` arrives incomplete, the wrapper retries the hot cycle with exponential backoff (5-60 s, at most 10 consecutive attempts, then it waits for the normal 30-minute interval); the 60 s watchdog bounds the case where the server stops responding. Hopefully I covered all the concurrency edge cases. Let me know if you find any bugs.
+I had some serious headaches with the ZIP compression getting stuck, so the worker now runs in a separate process via `subprocess` (fast startup, no `multiprocessing.spawn` bootstrap pipe, which hung for 50-120 s while the server was running) with a safety timeout that scales with the world size (a fixed 2-minute cap killed the worker on every cycle for large worlds; the base 120 s/240 s values still apply as a floor), so the server doesn't stay frozen. Cooperative cancellation uses a marker file (a subprocess child can't share in-memory events) and the packer writes in chunks so a cancel on a huge file takes effect immediately. If the `save query` arrives incomplete, the wrapper retries the hot cycle with exponential backoff (5-60 s, at most 10 consecutive attempts, then it waits for the normal 30-minute interval); the 60 s watchdog bounds the case where the server stops responding. Hopefully I covered all the concurrency edge cases. Let me know if you find any bugs.

@@ -4,28 +4,19 @@ echo  Configurando Firewall para Minecraft Bedrock
 echo ============================================
 echo.
 
-rem Idempotente: si la regla ya existe no se duplica (reiniciar dos veces no
-rem acumula reglas repetidas en el firewall de Windows).
-netsh advfirewall firewall show rule name="Minecraft Bedrock Server UDP" >nul 2>&1
-if errorlevel 1 (
-    netsh advfirewall firewall add rule name="Minecraft Bedrock Server UDP" dir=in action=allow protocol=UDP localport=19132,19133
-    if errorlevel 1 goto :fw_error
-) else (
-    echo [INFO] La regla UDP ya existe.
-)
-
-netsh advfirewall firewall show rule name="Minecraft Bedrock Server TCP" >nul 2>&1
-if errorlevel 1 (
-    netsh advfirewall firewall add rule name="Minecraft Bedrock Server TCP" dir=in action=allow protocol=TCP localport=19132,19133
-    if errorlevel 1 goto :fw_error
-) else (
-    echo [INFO] La regla TCP ya existe.
-)
+rem BDS solo usa UDP 19132/19133 (no hace falta TCP). Se borra la regla
+rem homonima (y la TCP obsoleta de versiones anteriores) y se recrea: una
+rem regla vieja con otros puertos nunca se ajustaba con "show rule".
+rem profile=private: sin abrir el puerto en redes Publicas/Dominio.
+netsh advfirewall firewall delete rule name="Minecraft Bedrock Server UDP" >nul 2>&1
+netsh advfirewall firewall delete rule name="Minecraft Bedrock Server TCP" >nul 2>&1
+netsh advfirewall firewall add rule name="Minecraft Bedrock Server UDP" dir=in action=allow protocol=UDP localport=19132,19133 profile=private
+if errorlevel 1 goto :fw_error
 
 echo.
 echo ============================================
 echo  Firewall configurado correctamente!
-echo  Puertos 19132 y 19133 abiertos (UDP/TCP)
+echo  Puertos 19132 y 19133 abiertos (UDP, solo red privada)
 echo ============================================
 echo.
 pause

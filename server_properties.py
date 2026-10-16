@@ -6,6 +6,51 @@ BDS escribe `clave=valor`, pero un archivo editado a mano puede traer
 en silencio (p. ej. `backup-inicio = false` seguia haciendo el backup inicial).
 """
 
+import os
+
+from console_lang import L
+import zip_safety
+
+
+def _is_world_name(name):
+    return (
+        isinstance(name, str) and bool(name) and name != "."
+        and "/" not in name and "\\" not in name
+        and not any(c in name for c in '<>"|?*')
+        and not any(ord(c) < 32 for c in name)
+        and zip_safety._is_safe_zip_entry(name)
+    )
+
+
+def validate_world_dir(base_dir, world_dir):
+    """Exige un hijo directo de worlds/, sin redireccion por enlaces/junctions."""
+    root = os.path.abspath(os.path.join(base_dir, "worlds"))
+    target = os.path.abspath(world_dir)
+    name = os.path.basename(target)
+    expected_root = os.path.join(os.path.realpath(base_dir), "worlds")
+    if (
+        not _is_world_name(name)
+        or os.path.normcase(os.path.dirname(target)) != os.path.normcase(root)
+        or os.path.normcase(os.path.realpath(root)) != os.path.normcase(expected_root)
+        or os.path.normcase(os.path.realpath(target)) != os.path.normcase(os.path.join(expected_root, name))
+    ):
+        raise ValueError(L(
+            "Ruta de mundo insegura: debe ser una carpeta directa dentro de worlds/, sin enlaces ni junctions.",
+            "Unsafe world path: it must be a direct folder inside worlds/, without links or junctions.",
+        ))
+    return target
+
+
+def resolve_world_dir(base_dir):
+    """Resuelve level-name con validacion comun a backup y restauracion GUI/CLI."""
+    name = read_value(os.path.join(base_dir, "server.properties"), "level-name") or "Bedrock level"
+    if not _is_world_name(name):
+        raise ValueError(L(
+            "level-name invalido: usa un nombre de carpeta, sin rutas ni alias de Windows.",
+            "Invalid level-name: use a folder name, without paths or Windows aliases.",
+        ))
+    return validate_world_dir(base_dir, os.path.join(base_dir, "worlds", name))
+
 
 def read_value(path, key, default=None):
     """Valor de `key` en un .properties, tolerante a espacios y comentarios.

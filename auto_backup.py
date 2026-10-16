@@ -12,6 +12,8 @@ from console_lang import L
 from zip_safety import CORRUPT_MARKERS
 import zip_safety as _zip_safety
 import restore_core
+import server_properties
+import runtime_paths
 
 # Alias historico para compatibilidad (tests y consumidores siguen
 # importando CORRUPT_MARKERS desde aqui; la lista canonica vive en
@@ -26,7 +28,7 @@ _PACK_ZIP_PREFIX = _zip_safety.PACK_ZIP_PREFIX
 _backup_lock = multiprocessing.Lock()
 
 # Configuracion (resuelta dinamicamente)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = runtime_paths.installation_dir()
 
 # H3: nombre de la instalacion (carpeta del servidor). Cada servidor escribe
 # sus backups en su propia subcarpeta de Backups_Minecraft; sin esto todos
@@ -45,11 +47,8 @@ def get_world_name(base_dir=None):
 
 
 def _resolve_backup_dir(base_dir):
-    """Backups por instalacion: Backups_Minecraft\\auto_backups\\<servidor> (H3)."""
-    return os.path.abspath(os.path.join(
-        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
-        os.path.basename(os.path.normpath(base_dir)),
-    ))
+    """Ruta historica en fuente; backups/ junto al .exe en el portable."""
+    return runtime_paths.backup_dir(base_dir)
 
 
 WORLD_NAME = get_world_name()
@@ -83,7 +82,7 @@ def get_world_dir(base_dir=None):
         current_global = globals()["WORLD_DIR"]
         if current_global != _IMPORT_TIME_WORLD_DIR:
             return current_global  # monkeypatch de tests: respetar
-    return os.path.join(bdir, "worlds", get_world_name(bdir))
+    return server_properties.resolve_world_dir(bdir)
 
 
 def get_world_parent_dir(base_dir=None):
@@ -108,7 +107,7 @@ DAYS_TO_KEEP_DAILY = 7
 # siempre: fuga de disco indefinida).
 CORRUPT_BACKUP_RETENTION_DAYS = 7
 
-# Limite de seguridad: tamaño maximo total del backup comprimido (10 GB default)
+# Limite de seguridad: tamaño maximo total del backup SIN comprimir (10 GB default)
 MAX_BACKUP_BYTES = 10 * 1024**3  # 10,737,418,240 bytes
 
 # Tamano de chunk para la copia en streaming de archivos de snapshot:
@@ -151,6 +150,35 @@ def _cancelled(cancel_event):
     return cancel_event is not None and cancel_event.is_set()
 
 
+def estimate_backup_total_bytes():
+    """Estima los bytes SIN comprimir del proximo backup (mundo + packs).
+
+    Sirve para escalar los timeouts de backup segun el tamano del mundo
+    (H1-2026-09-25): un timeout fijo de 120/240s mataba el worker y perdia el
+    backup de cierre en mundos de varios GB. Best-effort: ante cualquier error
+    devuelve 0 y el timeout efectivo queda en el minimo historico.
+    """
+    total = 0
+    try:
+        world_dir = get_world_dir()
+        scan_dirs = [world_dir] + [
+            os.path.join(BASE_DIR, pack_dir)
+            for pack_dir in SERVER_PACK_DIRS
+            if os.path.isdir(os.path.join(BASE_DIR, pack_dir))
+        ]
+        for scan_dir in scan_dirs:
+            for root, dirs, files in os.walk(scan_dir):
+                _poda_reparse_points(root, dirs)
+                for fname in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, fname))
+                    except OSError:
+                        continue
+    except Exception:
+        return 0
+    return total
+
+
 def _es_punto_reparse(path):
     """True si path es un symlink o una junction de Windows (reparse point).
 
@@ -170,7 +198,10 @@ def _es_punto_reparse(path):
             st = os.lstat(path)
             return bool(getattr(st, "st_file_attributes", 0) & _stat.FILE_ATTRIBUTE_REPARSE_POINT)
     except (OSError, AttributeError):
-        return False
+        # Fail-closed: ante error (permisos, ruta borrada a mitad del walk)
+        # se asume reparse y se poda. Lo contrario metia contenido externo
+        # al ZIP ante cualquier fallo transitorio de lstat.
+        return True
     return False
 
 
@@ -229,6 +260,27 @@ def _resolve_snapshot_path(rel_path):
 # (centralizadas para anti-drift; re-exportadas arriba).
 
 
+def _write_file_chunked(zipf, full_path, arcname, cancel_event, cancel_msg=None):
+    """Escribe un archivo en el ZIP por chunks chequeando la cancelacion.
+
+    zipf.write() comprime el archivo entero de una sola vez: con archivos
+    grandes (db/*.ldb de GBs) la cancelacion cooperativa tardaba todo lo que
+    durara la compresion de ese archivo (H8-2026-09-25). Por chunks el aborto
+    es casi inmediato. Preserva la fecha original del archivo.
+    """
+    msg = cancel_msg or L("Backup cancelado durante compresion.", "Backup cancelled during compression.")
+    zinfo = zipfile.ZipInfo.from_file(full_path, arcname)
+    zinfo.compress_type = zipfile.ZIP_DEFLATED
+    with open(full_path, "rb") as src, zipf.open(zinfo, "w") as out:
+        while True:
+            if _cancelled(cancel_event):
+                raise RuntimeError(msg)
+            chunk = src.read(_CHUNK)
+            if not chunk:
+                break
+            out.write(chunk)
+
+
 def _write_server_packs(zipf, total_bytes, cancel_event):
     """Agrega los packs de nivel servidor (mods/addons) al ZIP en curso.
 
@@ -249,7 +301,10 @@ def _write_server_packs(zipf, total_bytes, cancel_event):
                 if _es_punto_reparse(full_f):
                     continue
                 arc = prefix + os.path.relpath(full_f, src_dir).replace(os.sep, "/")
-                zipf.write(full_f, arc)
+                _write_file_chunked(
+                    zipf, full_f, arc, cancel_event,
+                    L("Backup cancelado durante compresion de packs.", "Backup cancelled during pack compression."),
+                )
                 total_bytes += os.path.getsize(full_f)
                 _enforce_backup_size_limit(total_bytes)
     return total_bytes
@@ -480,14 +535,14 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                                     if _es_punto_reparse(full_f):
                                         continue
                                     arc = os.path.relpath(full_f, world_dir).replace("\\", "/")
-                                    zipf.write(full_f, arc)
+                                    _write_file_chunked(zipf, full_f, arc, cancel_event)
                                     total_bytes += os.path.getsize(full_f)
                                     _enforce_backup_size_limit(total_bytes)
                         else:
                             if _es_punto_reparse(static_path):
                                 continue
                             arc = os.path.relpath(static_path, world_dir).replace("\\", "/")
-                            zipf.write(static_path, arc)
+                            _write_file_chunked(zipf, static_path, arc, cancel_event)
                             total_bytes += os.path.getsize(static_path)
                             _enforce_backup_size_limit(total_bytes)
 
@@ -508,7 +563,10 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                         if _es_punto_reparse(full_path):
                             continue
                         arcname = os.path.relpath(full_path, world_dir).replace("\\", "/")
-                        zipf.write(full_path, arcname)
+                        _write_file_chunked(
+                            zipf, full_path, arcname, cancel_event,
+                            L("Backup cancelado durante compresion tradicional.", "Backup cancelled during traditional compression."),
+                        )
                         total_bytes += os.path.getsize(full_path)
                         _enforce_backup_size_limit(total_bytes)
 
@@ -526,14 +584,28 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 "El ZIP de backup quedo vacio; no se publica.",
                 "The backup ZIP came out empty; not publishing it.",
             ))
-        if use_snapshot and "level.dat" not in _zip_names:
+        # level.dat se exige SIEMPRE (tambien en modo tradicional): un ZIP sin
+        # mundo no es restaurable (restore_core lo rechaza), asi que publicarlo
+        # como backup valido solo daba falsa confianza (H7-2026-09-25).
+        if "level.dat" not in _zip_names:
             raise RuntimeError(L(
-                "El ZIP de backup en caliente no contiene level.dat; no se publica.",
-                "The hot backup ZIP does not contain level.dat; not publishing it.",
+                "El ZIP de backup no contiene level.dat; no se publica.",
+                "The backup ZIP does not contain level.dat; not publishing it.",
             ))
 
         if _cancelled(cancel_event):
             raise RuntimeError(L("Backup cancelado antes de publicar ZIP.", "Backup cancelled before publishing ZIP."))
+
+        # Persistir el ZIP en disco antes del rename: sin fsync, un corte de
+        # luz justo despues de os.replace podia publicar un .zip con datos aun
+        # no volcados por el cacheador de NTFS (H4-2026-09-25). Best-effort:
+        # si el flush falla se publica igual (comportamiento previo).
+        try:
+            with open(tmp_filepath, "r+b") as _zf_sync:
+                _zf_sync.flush()
+                os.fsync(_zf_sync.fileno())
+        except OSError:
+            pass
 
         os.replace(tmp_filepath, zip_filepath)
         # H1: el ZIP ya esta publicado: success se marca ANTES de cualquier
@@ -680,8 +752,17 @@ def restore_backup(filename):
     valida el ZIP, extrae a staging, exige level.dat y hace el intercambio con
     rollback por cuarentena. Devuelve la ruta del backup restaurado.
     """
-    if os.path.basename(filename) != filename:
+    if not _zip_safety.is_safe_backup_name(filename):
         raise ValueError(L("Nombre de backup invalido", "Invalid backup name"))
+    # Recuperar residuos de restauraciones interrumpidas ANTES de crear
+    # residuos nuevos: un .bak_* de un intento previo debe volver a su sitio
+    # (o aislarse) primero (H6-2026-09-25). Best-effort: un fallo aqui no
+    # debe vetar el restore (el pipeline tiene sus propios guards).
+    try:
+        recover_interrupted_restores()
+    except Exception as e_rec:
+        print(L(f"[WARN] No se pudo recuperar restauraciones interrumpidas: {e_rec}",
+                f"[WARN] Could not recover interrupted restores: {e_rec}"))
     active_backup_dir = get_backup_dir()
     active_world_dir = get_world_dir()
     zip_path = os.path.join(active_backup_dir, filename)
@@ -692,13 +773,25 @@ def restore_backup(filename):
 
 
 
+# Formato EXACTO de los residuos que genera restore_core (nonce =
+# os.urandom(4).hex(), 8 hex): solo <base>.restore_staging_<8hex> y
+# <base>.bak_<8hex> son debris de una restauracion interrumpida. Antes la
+# deteccion era por subcadena y un mundo legitimo cuyo nombre contenia
+# ".restore_staging_" o ".bak_" era borrado/renombrado al arrancar
+# (H2-2026-09-25).
+_RE_STAGING_DEBRIS = re.compile(r"^(.+)\.restore_staging_[0-9a-f]{8}$")
+_RE_BAK_DEBRIS = re.compile(r"^(.+)\.bak_([0-9a-f]{8})$")
+
+
 def recover_interrupted_restores(base_dir=None):
     """Detecta y resuelve restauraciones interrumpidas por cortes de energía o caídas del proceso.
 
-    - Elimina cualquier carpeta o archivo temporal de staging (.restore_staging_*).
-    - Para cada .bak_* encontrado:
-      - Si el destino original NO existe: revierte renombrando el .bak_* al destino original.
-      - Si el destino original SÍ existe: renombra .bak_* a .bak_huerfano_<timestamp>_<nonce> para evitar pérdida de datos sin bloquear.
+    - Elimina cualquier carpeta o archivo temporal de staging (.restore_staging_<nonce>).
+    - Para cada .bak_<nonce> encontrado:
+      - Si el destino original NO existe: revierte renombrando el .bak_<nonce> al destino original.
+      - Si el destino original SÍ existe: renombra .bak_<nonce> a .bak_huerfano_<timestamp>_<nonce> para evitar pérdida de datos sin bloquear.
+    - Los nombres que NO siguen ese formato exacto (p. ej. un mundo llamado
+      "MiMundo.restore_staging_viejo") se dejan intactos.
     """
     base = base_dir or BASE_DIR
     actions = []
@@ -720,7 +813,7 @@ def recover_interrupted_restores(base_dir=None):
             full_path = os.path.join(parent, name)
 
             # 1. Limpieza de residuos de staging
-            if ".restore_staging_" in name:
+            if _RE_STAGING_DEBRIS.match(name):
                 try:
                     if os.path.isdir(full_path):
                         shutil.rmtree(full_path, ignore_errors=True)
@@ -733,8 +826,9 @@ def recover_interrupted_restores(base_dir=None):
                 continue
 
             # 2. Manejo de resguardos .bak_*
-            if ".bak_" in name and not name.startswith(".bak_huerfano_") and ".bak_huerfano_" not in name:
-                orig_name = name.split(".bak_")[0]
+            m_bak = _RE_BAK_DEBRIS.match(name)
+            if m_bak and not name.startswith(".bak_huerfano_") and ".bak_huerfano_" not in name:
+                orig_name = m_bak.group(1)
                 orig_path = os.path.join(parent, orig_name)
 
                 if not os.path.exists(orig_path):

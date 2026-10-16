@@ -24,7 +24,7 @@ class _Resp:
 def _preparar(tmp_path, monkeypatch, resp):
     monkeypatch.setattr(bu.config, "BASE_DIR", str(tmp_path))
     monkeypatch.setattr(bu, "_fetch_latest_bedrock_download",
-                        lambda: ("https://x/bedrock-server-1.2.3.4.zip", "1.2.3.4"))
+                        lambda: ("https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.2.3.4.zip", "1.2.3.4"))
     monkeypatch.setattr(bu.requests, "get", lambda *a, **k: resp)
     logs = []
     return logs
@@ -148,7 +148,7 @@ def test_download_ignora_entrada_insegura_y_aplica(tmp_path, monkeypatch):
     monkeypatch.setattr(bu.config, "BASE_DIR", str(tmp_path))
     monkeypatch.setattr(bu, "PREVIOUS_VERSION_DIR", str(tmp_path / "bds_previous"))
     monkeypatch.setattr(bu, "_fetch_latest_bedrock_download",
-                        lambda: ("https://x/bedrock-server-1.2.3.4.zip", "1.2.3.4"))
+                        lambda: ("https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.2.3.4.zip", "1.2.3.4"))
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -168,8 +168,10 @@ def test_download_ignora_entrada_insegura_y_aplica(tmp_path, monkeypatch):
 
     ok, version = bu._download_and_install_bds(log_fn=_log(logs))
 
-    assert ok is True and version == "1.2.3.4"
-    assert (tmp_path / "bedrock_server.exe").read_bytes() == b"exe-binario"
+    # Fail-closed: un zip parcialmente malicioso no se aplica a medias,
+    # se aborta antes de tocar la instalacion (ni exe ni version).
+    assert ok is False and version is None
+    assert not (tmp_path / "bedrock_server.exe").exists()
     assert any("insegura" in m.lower() or "unsafe" in m.lower() for m in logs), logs
 
 

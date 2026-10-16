@@ -1,23 +1,16 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { motion, useInView } from 'framer-motion';
 import './AnimatedList.css';
 
-const AnimatedItem = ({ children, delay = 0, index, onMouseEnter, onClick }) => {
-  const ref = useRef(null);
-  const inView = useInView(ref, { amount: 0.5, triggerOnce: false });
+const AnimatedItem = ({ children, delay: _delay, index, onMouseEnter, onClick }) => {
   return (
-    <motion.div
-      ref={ref}
+    <div
       data-index={index}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
-      initial={{ scale: 0.7, opacity: 0 }}
-      animate={inView ? { scale: 1, opacity: 1 } : { scale: 0.7, opacity: 0 }}
-      transition={{ duration: 0.2, delay }}
       style={{ marginBottom: '0.6rem', cursor: 'pointer' }}
     >
       {children}
-    </motion.div>
+    </div>
   );
 };
 

@@ -52,12 +52,44 @@ def _exceeds_expansion_limit(infos, max_bytes=MAX_RESTORE_UNCOMPRESSED_BYTES):
     return False
 
 
+def is_safe_backup_name(filename) -> bool:
+    """True si `filename` es un nombre de backup valido para operar sobre el.
+
+    Basename puro terminado en .zip, sin caracteres de control, sin '..' ni
+    punto/espacio final (alias de normalizacion NTFS). Hardening 2026-09-25:
+    basename+isfile ya impedia escapar de BACKUP_DIR, pero nombres alias
+    ('foo.zip.', '..') llegaban al filesystem.
+    """
+    if not isinstance(filename, str) or not filename:
+        return False
+    if any(ord(c) < 0x20 for c in filename):
+        return False
+    if os.path.basename(filename) != filename or filename != filename.rstrip(" ."):
+        return False
+    if filename in (".", ".."):
+        return False
+    return filename.lower().endswith(".zip")
+
+
+# Nombres de dispositivo de Windows: extraerlos escribe hacia el device
+# (NUL, CON, COM1...) con perdida silenciosa de datos. Se rechazan en
+# cualquier segmento, con o sin extension ('db/NUL', 'aux.txt').
+_WIN_DEVICE_NAMES = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + ["COM%d" % i for i in range(1, 10)]
+    + ["LPT%d" % i for i in range(1, 10)]
+)
+
+
 def _is_safe_zip_entry(filename: str) -> bool:
     """True si la entrada del zip es segura para extraer (anti zip-slip).
 
-    Rechaza rutas absolutas, cualquier segmento '..' (traversal), prefijos
-    de unidad/ADS tipo 'C:' y nombres con bytes nulos (\\x00) que podrian
-    confundir APIs de extraccion o truncar paths en C.
+    Rechaza rutas absolutas, cualquier segmento '..' (traversal), ':'
+    en cualquier segmento (unidades 'C:' y ADS de NTFS como
+    'db/foo.ldb:stream'), nombres con bytes nulos (\\x00), nombres de
+    dispositivo de Windows (NUL, CON, COM1...) y segmentos con punto o
+    espacio final (alias de normalizacion NTFS). La cadena vacia se
+    acepta por compatibilidad historica (join degenerado sin escape).
     """
     if not isinstance(filename, str):
         return False
@@ -69,8 +101,15 @@ def _is_safe_zip_entry(filename: str) -> bool:
     segs = norm.split("/")
     if any(s == ".." for s in segs):
         return False
-    if segs and ":" in segs[0]:
-        return False
+    for s in segs:
+        if not s:
+            continue  # segmento vacio: join degenerado, sin escape (compat "")
+        if ":" in s:
+            return False
+        if s != s.rstrip(" ."):
+            return False
+        if s.split(".")[0].upper() in _WIN_DEVICE_NAMES:
+            return False
     return True
 
 
@@ -109,7 +148,7 @@ def _extract_pack_entry(zipf, entry, base_dir, rel_path):
     base_dir.
     """
     segs = rel_path.split("/")
-    if any(s == ".." for s in segs) or os.path.isabs(rel_path) or ":" in segs[0]:
+    if not rel_path or not _is_safe_zip_entry(rel_path):
         raise ValueError(L(f"Entrada de pack insegura: {entry.filename}", f"Unsafe pack entry: {entry.filename}"))
     dest = os.path.join(base_dir, *segs)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -125,7 +164,8 @@ def _quarantine_and_restore(active_path, bak_path, is_dir=True):
     2. Si active_path no existe, hace os.rename(bak_path, active_path).
     3. Si active_path no pudo ser renombrado ni eliminado (p. ej. archivos bloqueados
        por Windows Defender o procesos en segundo plano), copia recursivamente
-       el contenido de bak_path sobre active_path y limpia bak_path.
+       el contenido de bak_path sobre active_path y CONSERVA bak_path: la
+       copia sobre una carpeta existente puede dejar archivos adicionales.
     """
     if not os.path.exists(bak_path):
         return
@@ -144,13 +184,17 @@ def _quarantine_and_restore(active_path, bak_path, is_dir=True):
             except Exception as e_rb:
                 print(L(f"[CRITICO] No se pudo restaurar el resguardo {bak_path} -> {active_path}: {e_rb}",
                         f"[CRITICAL] Could not restore backup {bak_path} -> {active_path}: {e_rb}"))
-            try:
-                if is_dir:
-                    shutil.rmtree(failed_path, ignore_errors=True)
-                else:
-                    os.remove(failed_path)
-            except Exception:
-                pass
+            # Solo borrar failed_path si el resguardo volvio a su sitio:
+            # contiene el mundo activo original y borrarlo en fallo es
+            # perdida de datos.
+            if restored:
+                try:
+                    if is_dir:
+                        shutil.rmtree(failed_path, ignore_errors=True)
+                    else:
+                        os.remove(failed_path)
+                except Exception:
+                    pass
 
     if not restored and not os.path.exists(active_path):
         try:
@@ -162,6 +206,7 @@ def _quarantine_and_restore(active_path, bak_path, is_dir=True):
 
     if not restored and is_dir and os.path.isdir(bak_path):
         try:
+            copy_errors = 0
             for root, dirs, files in os.walk(bak_path):
                 rel = os.path.relpath(root, bak_path)
                 target_dir = os.path.join(active_path, rel)
@@ -172,9 +217,17 @@ def _quarantine_and_restore(active_path, bak_path, is_dir=True):
                     try:
                         shutil.copy2(src_f, dst_f)
                     except Exception:
-                        pass
-            shutil.rmtree(bak_path, ignore_errors=True)
-            restored = True
+                        copy_errors += 1
+            # Una copia sin errores no prueba equivalencia del arbol: quedan
+            # archivos del intento fallido que no existian en el resguardo.
+            # Conservar SIEMPRE el .bak en este fallback permite recuperacion
+            # exacta manual cuando Windows libere la carpeta.
+            if copy_errors == 0:
+                print(L(f"[AVISO] Recuperacion por copia; se conserva {bak_path} para verificar y recuperar el arbol completo.",
+                        f"[ADVISORY] Recovery by copy; keeping {bak_path} to verify and recover the complete tree."))
+            else:
+                print(L(f"[CRITICO] Recuperacion fallback parcial: {copy_errors} archivos fallaron, se conserva {bak_path}",
+                        f"[CRITICAL] Partial fallback recovery: {copy_errors} files failed, keeping {bak_path}"))
         except Exception as e_fallback:
             print(L(f"[CRITICO] Fallo en recuperacion fallback de resguardo: {e_fallback}",
                     f"[CRITICAL] Fallback backup recovery failed: {e_fallback}"))

@@ -4,9 +4,10 @@ import json
 import os
 import re
 import time
+import runtime_paths
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = runtime_paths.installation_dir()
 SCHEDULE_CONFIG_PATH = os.path.join(BASE_DIR, "data", "schedule_config.json")
 SCHEDULE_STATE_PATH = os.path.join(BASE_DIR, "data", "schedule_state_wrapper.json")
 
@@ -131,11 +132,18 @@ def _save_last_daily_backup_date(date_str):
     try:
         os.makedirs(os.path.dirname(SCHEDULE_STATE_PATH), exist_ok=True)
         tmp_path = SCHEDULE_STATE_PATH + ".tmp_" + os.urandom(4).hex()
-        with open(tmp_path, "w", encoding="utf-8", newline="") as f:
-            json.dump({"last_daily_backup_date": date_str}, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, SCHEDULE_STATE_PATH)
+        try:
+            with open(tmp_path, "w", encoding="utf-8", newline="") as f:
+                json.dump({"last_daily_backup_date": date_str}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, SCHEDULE_STATE_PATH)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
     except OSError:
         pass
 

@@ -152,6 +152,8 @@ def test_install_bds_despacha_y_reusa_pipeline(monkeypatch, tmp_path):
         return True, "1.0.0.0"
 
     monkeypatch.setattr(bds_update, "_download_and_install_bds", fake_install)
+    from gui_backend.services import external_probe
+    monkeypatch.setattr(external_probe, "detect_external_bds", lambda: (False, None))
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
             r = c.post("/api/setup/install_bds")
@@ -195,7 +197,7 @@ def test_download_and_install_bds_exito(monkeypatch, tmp_path):
             for i in range(0, len(payload), chunk_size):
                 yield payload[i : i + chunk_size]
 
-    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.26.33.2"))
+    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.26.33.2.zip", "1.26.33.2"))
     monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
 
     gui.manager.installed_version = None
@@ -223,7 +225,7 @@ def test_download_and_install_bds_sin_red_no_toca_instalacion(monkeypatch, tmp_p
 def test_download_and_install_bds_excede_limite_aborta(monkeypatch, tmp_path):
     """Cuerpo mas grande que el tope de 400 MB: aborta sin escribir zip final."""
     base = _fake_install(monkeypatch, tmp_path)
-    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.0.0.0"))
+    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.0.0.0.zip", "1.0.0.0"))
 
     class HugeResp:
         headers = {}
@@ -254,7 +256,7 @@ def test_download_emite_progreso_en_tiempo_real(monkeypatch, tmp_path):
             for i in range(0, len(payload), chunk_size):
                 yield payload[i : i + chunk_size]
 
-    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://fake/bds.zip", "1.0.0.0"))
+    monkeypatch.setattr(bds_update, "_fetch_latest_bedrock_download", lambda: ("https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.0.0.0.zip", "1.0.0.0"))
     monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: FakeResp())
 
     log_start = len(gui.manager.log_history)

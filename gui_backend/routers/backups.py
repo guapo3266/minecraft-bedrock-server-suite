@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 import auto_backup
 from console_lang import L
 from gui_backend.security import _ensure_local, _check_origin
+from zip_safety import is_safe_backup_name
 from gui_backend.services import backups as backups_service
 from gui_backend.state import manager
 
@@ -39,7 +40,7 @@ async def restore_backup(request: Request):
         raise HTTPException(status_code=400, detail="Cuerpo JSON invalido")
     filename = (body or {}).get("filename", "")
 
-    if not filename or os.path.basename(filename) != filename:
+    if not is_safe_backup_name(filename):
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
 
     if manager.is_running:
@@ -80,7 +81,7 @@ async def download_backup(filename: str, request: Request):
     sec_fetch_site = request.headers.get("sec-fetch-site", "").lower()
     if sec_fetch_site == "cross-site":
         raise HTTPException(status_code=403, detail="Descarga cross-site rechazada")
-    if not filename or os.path.basename(filename) != filename:
+    if not is_safe_backup_name(filename):
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
     full = os.path.join(auto_backup.BACKUP_DIR, filename)
     if not os.path.isfile(full):
@@ -97,7 +98,7 @@ async def delete_backup(filename: str, request: Request):
     """
     _ensure_local(request.client.host if request.client else "")
     _check_origin(request)
-    if not filename or os.path.basename(filename) != filename:
+    if not is_safe_backup_name(filename):
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
     if manager.backup_in_progress:
         raise HTTPException(
@@ -124,7 +125,7 @@ async def verify_backup(filename: str, request: Request):
     """
     _ensure_local(request.client.host if request.client else "")
     _check_origin(request)
-    if not filename or os.path.basename(filename) != filename:
+    if not is_safe_backup_name(filename):
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
     full = os.path.join(auto_backup.BACKUP_DIR, filename)
     if not os.path.isfile(full):

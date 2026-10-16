@@ -6,10 +6,11 @@ Los routers/servicios nunca lanzan procesos directamente.
 
 import json
 import os
+import re
 import subprocess
-import sys
 import threading
 import time
+import runtime_paths
 
 from console_lang import L
 # D5: patrones de deteccion del log de BDS centralizados en server_wrapper
@@ -17,6 +18,13 @@ from server_wrapper import _RE_PLAYER_CONNECT, _RE_PLAYER_DISCONNECT, _RE_VERSIO
 
 from gui_backend import config
 from gui_backend.state import manager
+
+# Marcador de parada (fallback compilado, ES/EN) ANCLADO al inicio de la linea
+# sin prefijo de log, con "[Wrapper]" opcional: el wrapper imprime
+# "[Wrapper] BDS detenido. Iniciando limpieza final de cierre...". Antes era
+# substring libre y un gamertag 'BDS stopped' en una linea 'Player connected:
+# ...' (no-chat) seteaba server_stopped_event espuriamente (2026-09-25).
+_RE_STOP_MARKER = re.compile(r"^(?:\[Wrapper\]\s*)?BDS (?:stopped|detenido)\b")
 
 
 def _spawn_wrapper_process():
@@ -39,7 +47,7 @@ def _spawn_wrapper_process():
     )
     env["WRAPPER_EVENTS_FILE"] = events_file
     process = subprocess.Popen(
-        [sys.executable, "-u", os.path.join(config.BASE_DIR, "server_wrapper.py")],
+        runtime_paths.process_command("wrapper", config.BASE_DIR),
         cwd=config.BASE_DIR,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -49,6 +57,7 @@ def _spawn_wrapper_process():
         encoding="utf-8",
         errors="replace",
         env=env,
+        **runtime_paths.subprocess_options(),
     )
     # Limpia el estado de salida anterior antes de liberar op_lock. Si no,
     # update_bds puede ver un proceso nuevo pero un evento todavía marcado
@@ -93,20 +102,26 @@ def run_wrapper_thread(process=None):
     (flujo legacy), el hilo lo crea el mismo.
     """
 
-    # Cada arranque debe volver a descubrir la versión del proceso actual.
-    manager.installed_version = None
-    manager.events_alive = False  # lo activa el lector con wrapper_started
+    # Los writes de apertura de sesion van bajo manager.lock (mismo dominio
+    # que el cierre en el finally de abajo): fuera del lock, un start que
+    # ganara la carrera contra el cierre del hilo anterior podia ver su
+    # estado pisado (2026-09-25).
+    with manager.lock:
+        # Cada arranque debe volver a descubrir la versión del proceso actual.
+        manager.installed_version = None
+        manager.events_alive = False  # lo activa el lector con wrapper_started
+        manager.wrapper_exit_event.clear()
+        manager.server_stopped_event.clear()
+        manager.is_running = True
+        manager.start_time = time.time()
     manager.add_log(L("[GUI Backend] Iniciando wrapper de Minecraft Bedrock...", "[GUI Backend] Starting Minecraft Bedrock wrapper..."), "system")
-    manager.wrapper_exit_event.clear()
-    manager.server_stopped_event.clear()
-    manager.is_running = True
-    manager.start_time = time.time()
     manager.update_status()
 
     try:
         if process is None:
             process = _spawn_wrapper_process()
-        manager.wrapper_process = process
+        with manager.lock:
+            manager.wrapper_process = process
         events_file = manager.events_file
         if events_file:
             threading.Thread(target=_tail_events, args=(events_file,), daemon=True, name="wrapper-events").start()
@@ -141,10 +156,12 @@ def run_wrapper_thread(process=None):
             # (Marcador bilingue: la consola adapta el texto al idioma GUI.)
             # H-01: mismo gate anti-spoofing que el resto de marcadores — se
             # evalua solo en la linea sin prefijo y nunca en lineas de chat
-            # (<Jugador>): un jugador escribiendo "BDS stopped" en el chat
-            # seteaba el evento espuriamente y un stop_and_wait/restore
-            # posterior creia el mundo quieto con BDS vivo.
-            if not is_chat and ("BDS stopped" in clean_str or "BDS detenido" in clean_str):
+            # (<Jugador>), y el marcador va ANCLADO al inicio de la linea
+            # (2026-09-25): con substring libre, un gamertag 'BDS stopped' en
+            # una linea 'Player connected: ...' (no-chat) seteaba el evento
+            # espuriamente y un stop_and_wait/restore posterior creia el mundo
+            # quieto con BDS vivo.
+            if not is_chat and _RE_STOP_MARKER.match(clean_str):
                 manager.server_stopped_event.set()
 
             # Determinar tipo de log para coloreado en la GUI

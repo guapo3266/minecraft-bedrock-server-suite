@@ -40,6 +40,21 @@ def test_verify_all_marca_corruptos_y_salta_ya_marcados(tmp_path):
     assert marcado.exists(), "un backup ya marcado no debe re-procesarse"
 
 
+def test_verify_all_marca_zip_sin_level_dat(tmp_path):
+    """H3-2026-09-25: un ZIP sin level.dat pasa el CRC pero no es restaurable
+    (restore_core lo rechaza): debe marcarse como no apto, no dar [OK]."""
+    mod = _load_tool()
+    sin_mundo = tmp_path / "auto_backup_solo_packs.zip"
+    with zipfile.ZipFile(sin_mundo, "w") as zf:
+        zf.writestr("server_resource_packs/Pack/manifest.json", b"{}")
+
+    ok, corruptos = mod.verify_all(str(tmp_path))
+
+    assert (ok, corruptos) == (0, 1)
+    assert not sin_mundo.exists()
+    assert (tmp_path / "auto_backup_solo_packs_CORRUPTO.zip").exists()
+
+
 def test_verify_all_detecta_crc_roto(tmp_path):
     mod = _load_tool()
     path = tmp_path / "auto_backup_crc.zip"

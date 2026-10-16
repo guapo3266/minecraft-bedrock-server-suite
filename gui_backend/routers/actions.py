@@ -54,7 +54,20 @@ async def handle_action(action_name: str, request: Request):
         return {"status": "stopping"}
 
     elif action == "restart":
-        threading.Thread(target=lifecycle_service.restart_wrapper, daemon=True).start()
+        # Guard de reentrada (2026-09-25): antes cada clic apilaba un hilo de
+        # restart_wrapper nuevo (hasta 525s de esperas por hilo). Un solo
+        # restart en vuelo; los demas clics responden busy.
+        if manager.update_in_progress or manager.restart_in_progress:
+            return {"status": "busy", "message": L("Operación en curso", "Operation in progress")}
+        manager.restart_in_progress = True
+
+        def do_restart():
+            try:
+                lifecycle_service.restart_wrapper()
+            finally:
+                manager.restart_in_progress = False
+
+        threading.Thread(target=do_restart, daemon=True).start()
         return {"status": "restarting"}
 
     elif action == "backup":

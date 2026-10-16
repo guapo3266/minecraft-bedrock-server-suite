@@ -4,6 +4,9 @@ title Minecraft Bedrock Wrapper - ReactBits Dashboard
 color 0A
 :: Trabajar SIEMPRE sobre la carpeta de este .bat (rutas relativas a el)
 cd /d "%~dp0"
+:: Modelo de LM Studio para el asistente IA (ai_assistant.py: LMSTUDIO_MODEL).
+:: Si ya viene definido en el entorno, se respeta el valor existente.
+if not defined LMSTUDIO_MODEL set "LMSTUDIO_MODEL=qwen3-minecraft-v3"
 cls
 echo ================================================================
 echo   MINECRAFT BEDROCK WRAPPER - REACTBITS REACT DASHBOARD
@@ -63,10 +66,33 @@ if exist "%VENV_PY%" (
 
 :: Dependencias: siempre via "python -m pip" (un "pip" desnudo apuntaria
 :: al Python global aunque RUN_PY sea el del venv).
+:: Refresh condicional: la huella (SHA256) de requirements.txt se guarda en
+:: .venv\requirements.sha al instalar; si difiere, requirements.txt ha cambiado
+:: y un .venv viejo se actualiza (antes solo se comprobaban los imports y el
+:: venv nunca se refrescaba). Sin --upgrade: se respetan los topes de version.
+del "%~dp0.venv\requirements.sha.tmp" >nul 2>&1
+set "REQ_SHA_FILE=%~dp0.venv\requirements.sha"
+set "REQ_SHA_TMP=%~dp0.venv\requirements.sha.tmp"
+set "REQ_CAMBIO="
+if exist "%VENV_PY%" "%RUN_PY%" -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "%~dp0requirements.txt" > "%REQ_SHA_TMP%" 2>nul
+if exist "%REQ_SHA_TMP%" (
+    if exist "%REQ_SHA_FILE%" (
+        fc /b "%REQ_SHA_FILE%" "%REQ_SHA_TMP%" >nul 2>&1
+        if errorlevel 1 set "REQ_CAMBIO=1"
+    ) else (
+        set "REQ_CAMBIO=1"
+    )
+)
 "%RUN_PY%" -c "import fastapi, uvicorn, websockets, psutil, requests" >nul 2>&1
-if errorlevel 1 (
+if errorlevel 1 set "REQ_CAMBIO=1"
+if defined REQ_CAMBIO (
     echo [1/3] Instalando dependencias de Python en el entorno...
     "%RUN_PY%" -m pip install -r requirements.txt
+    if errorlevel 1 (
+        echo [AVISO] pip no pudo instalar del todo las dependencias; se comprobara el resultado.
+    ) else (
+        copy /y "%REQ_SHA_TMP%" "%REQ_SHA_FILE%" >nul 2>&1
+    )
     "%RUN_PY%" -c "import fastapi, uvicorn, websockets, psutil, requests" >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Las dependencias no se pudieron instalar.
@@ -78,6 +104,7 @@ if errorlevel 1 (
 ) else (
     echo [1/3] Dependencias de Python listas.
 )
+del "%REQ_SHA_TMP%" >nul 2>&1
 
 call :bootstrap_unlock
 

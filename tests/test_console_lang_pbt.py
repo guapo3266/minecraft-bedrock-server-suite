@@ -202,24 +202,32 @@ def _find_L_calls(path):
 
 
 L_PY_FILES = [
+    "suite_minecraft.py",
+    "desktop_window.py",
+    "gui_backend/services/desktop_lifecycle.py",
     "server_wrapper.py",
     "wrapper_backup.py",
     "server_gui_server.py",
     "auto_backup.py",
     "backup_worker.py",
     "restore_core.py",
+    "server_properties.py",
     "zip_safety.py",
+    "addon_inventory_cli.py",
     "gui_backend/supervisor.py",
     "gui_backend/services/bds_update.py",
     "gui_backend/services/lifecycle.py",
     "gui_backend/services/watchdog.py",
     "gui_backend/routers/actions.py",
+    "gui_backend/routers/addons.py",
     "gui_backend/routers/backups.py",
     "gui_backend/routers/schedule.py",
     "gui_backend/routers/setup.py",
     "gui_backend/routers/system.py",
     "gui_backend/routers/websocket.py",
     "tools/bds_first_run.py",
+    "tools/enable_beta_apis_v2.py",
+    "tools/update_items_v2.py",
     "tools/verify_backups.py",
 ]
 

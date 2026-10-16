@@ -21,6 +21,7 @@ import os
 
 import auto_backup
 import windows_process_guard as wpg
+import runtime_paths
 
 from console_lang import L
 
@@ -504,12 +505,18 @@ def execute_final_backup(trigger="cierre"):
     dominio de lock que el backup de cierre normal evita que el de emergencia
     se ejecute sin coordinar con el ipc lock jerarquico.
     """
+    result = None
+    error = None
     try:
         result = auto_backup.create_backup(trigger, file_snapshot=None, wait_lock_timeout_sec=wstate.FINAL_BACKUP_LOCK_WAIT_SEC, external_lock=wstate.backup_ipc_lock)
         if not result:
+            error = L("El backup final no produjo un ZIP válido.", "The final backup did not produce a valid ZIP.")
             print(L("[Wrapper] El backup final no produjo un ZIP válido o abortó por timeout.", "[Wrapper] The final backup did not produce a valid ZIP or was aborted by timeout."))
     except Exception as e:
+        error = str(e)
         print(L(f"[Wrapper] Falló el backup final: {e}", f"[Wrapper] Final backup failed: {e}"))
+    finally:
+        _emit_event("final_backup_finished", success=bool(result), zip=str(result) if result else None, error=error)
 
 def should_run_initial_backup():
     """Lee backup-inicio de server.properties (default: True).
@@ -599,7 +606,7 @@ if __name__ == "__main__":
             errors="replace",
             bufsize=1,
             cwd=wstate.BASE_DIR,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | runtime_paths.subprocess_options().get("creationflags", 0),
         )
         if sys.platform == "win32":
             bds_job = wpg.create_job_object_for_process(wstate.server_process.pid)
@@ -752,13 +759,18 @@ if __name__ == "__main__":
                 final_thread = threading.Thread(target=execute_final_backup, daemon=True)
 
             final_thread.start()
+            # Timeout proporcional al tamano del mundo (H1-2026-09-25): con el
+            # fijo de FINAL_BACKUP_TIMEOUT_SEC, un mundo grande perdia su
+            # backup de cierre (el hilo daemon moria con el proceso al salir).
+            estimado = auto_backup.estimate_backup_total_bytes()
+            final_timeout = wstate.scaled_backup_timeout_sec(estimado, wstate.FINAL_BACKUP_TIMEOUT_SEC)
             try:
-                final_thread.join(timeout=wstate.FINAL_BACKUP_TIMEOUT_SEC)
+                final_thread.join(timeout=final_timeout)
             except KeyboardInterrupt:
                 print(L("[Wrapper] Interrupción por teclado durante backup final.", "[Wrapper] Keyboard interrupt during final backup."))
 
             if final_thread.is_alive():
-                print(L(f"[Wrapper] [WARN] Backup de cierre excedio los {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Finalizando proceso.", f"[Wrapper] [WARN] Shutdown backup exceeded {wstate.FINAL_BACKUP_TIMEOUT_SEC}s. Terminating."))
+                print(L(f"[Wrapper] [WARN] Backup de cierre excedio los {final_timeout}s y quedo incompleto (se descarta; el .tmp se limpia solo). Finalizando proceso.", f"[Wrapper] [WARN] Shutdown backup exceeded {final_timeout}s and is incomplete (discarded; the .tmp is cleaned up automatically). Terminating."))
 
             print(L("[Wrapper] Servidor finalizado limpiamente. Adiós.", "[Wrapper] Server finished cleanly. Goodbye."))
         except BaseException as e:

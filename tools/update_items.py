@@ -39,8 +39,6 @@ def modify_item(data):
     components.pop("minecraft:use_animation", None)
     components.pop("minecraft:use_modifiers", None)
 
-update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_activator.json"), modify_item)
-update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_controller.json"), modify_item)
 
 # 2. Modify BP Manifest
 def modify_bp_manifest(data):
@@ -52,7 +50,6 @@ def modify_bp_manifest(data):
         if dep.get("uuid") == "9f075d4a-bc12-4c2c-8d14-6fa6b12a2b74":
             dep["version"] = [1, 0, 5]
 
-update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/manifest.json"), modify_bp_manifest)
 
 # 3. Modify RP Manifest
 def modify_rp_manifest(data):
@@ -61,7 +58,6 @@ def modify_rp_manifest(data):
         if module["type"] == "resources":
             module["version"] = [1, 0, 5]
 
-update_json_file(os.path.join(BASE_DIR, "resource_packs/guardian_robot_RP/manifest.json"), modify_rp_manifest)
 
 # 4. Modify World JSONs
 def modify_world_bp(data):
@@ -69,11 +65,26 @@ def modify_world_bp(data):
         if pack["pack_id"] == "8f075d4a-bc12-4c2c-8d14-6fa6b12a2b72":
             pack["version"] = [1, 0, 5]
 
-update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_behavior_packs.json"), modify_world_bp)
 
 def modify_world_rp(data):
     for pack in data:
         if pack["pack_id"] == "9f075d4a-bc12-4c2c-8d14-6fa6b12a2b74":
             pack["version"] = [1, 0, 5]
 
-update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_resource_packs.json"), modify_world_rp)
+
+def main():
+    """Aplica las modificaciones (solo al ejecutar como script).
+
+    Antes este modulo escribia 6 ficheros de produccion al importarlo;
+    ahora importar es inocuo y el trabajo vive aqui.
+    """
+    update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_activator.json"), modify_item)
+    update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_controller.json"), modify_item)
+    update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/manifest.json"), modify_bp_manifest)
+    update_json_file(os.path.join(BASE_DIR, "resource_packs/guardian_robot_RP/manifest.json"), modify_rp_manifest)
+    update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_behavior_packs.json"), modify_world_bp)
+    update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_resource_packs.json"), modify_world_rp)
+
+
+if __name__ == "__main__":
+    main()

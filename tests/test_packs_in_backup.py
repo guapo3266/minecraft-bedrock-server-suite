@@ -19,11 +19,11 @@ import restore_core
 def _setup_env():
     tmp = tempfile.mkdtemp(prefix="packs_")
     fake_bkp = os.path.join(tmp, "backups")
-    fake_world = os.path.join(tmp, "worlds", "Bedrock level")
     fake_base = os.path.join(tmp, "base")
+    fake_world = os.path.join(fake_base, "worlds", "Bedrock level")
     os.makedirs(fake_bkp)
-    os.makedirs(fake_world)
     os.makedirs(fake_base)
+    os.makedirs(fake_world)
     old = (auto_backup.BACKUP_DIR, auto_backup.WORLD_DIR, auto_backup.BASE_DIR)
     auto_backup.BACKUP_DIR = fake_bkp
     auto_backup.WORLD_DIR = fake_world

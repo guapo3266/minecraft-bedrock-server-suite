@@ -2,13 +2,17 @@
 
 import json
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from console_lang import L, set_lang as _set_lang
-from gui_backend.security import _get_request_port, _is_allowed_client_host, _is_allowed_origin
+from gui_backend.security import _get_request_port, _host_header_hostname, _is_allowed_client_host, _is_allowed_origin
 from gui_backend.state import manager, build_public_status
 
 router = APIRouter()
+
+# Mismo tope que POST /api/command (routers/system.py): el pipe + log +
+# SQLite no deben recibir lineas de MBs desde un frame WS.
+MAX_WS_COMMAND_CHARS = 2000
 
 
 @router.websocket("/ws")
@@ -20,10 +24,12 @@ async def websocket_endpoint(websocket: WebSocket):
     # S3: rechazar handshakes de navegador con Origin externo o puerto incorrecto
     # (anti-CSRF). Puerto esperado por la MISMA fuente unica que los endpoints
     # HTTP (anti-drift: soporta Host IPv6 "[::1]:8000", Host malformado y cae
-    # al puerto por defecto del esquema ws/wss).
+    # al puerto por defecto del esquema ws/wss). expected_host cierra el CSRF
+    # entre dispositivos de la LAN (2026-09-25).
     if not _is_allowed_origin(
         websocket.headers.get("origin"),
         expected_port=_get_request_port(websocket),
+        expected_host=_host_header_hostname(websocket),
     ):
         await websocket.close(code=1008)
         return
@@ -57,6 +63,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 if msg.get("type") == "command":
                     cmd = msg.get("command", "").strip()
                     if not cmd:
+                        continue
+                    if len(cmd) > MAX_WS_COMMAND_CHARS:
+                        manager.add_log(L(
+                            f"[GUI Backend] Comando WS rechazado: excede {MAX_WS_COMMAND_CHARS} caracteres",
+                            f"[GUI Backend] WS command rejected: exceeds {MAX_WS_COMMAND_CHARS} chars",
+                        ), "error")
                         continue
                     wrapper_alive = bool(
                         manager.wrapper_process
@@ -93,7 +105,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     # flag quedaba True con el servidor vivo e inhibia al
                     # watchdog ante un crash real.
                     # Se compara por LINEA: "list\nstop" tambien apaga.
-                    if "stop" in {l.strip().lower() for l in cmd.splitlines()}:
+                    # Particion solo por \r\n (igual que el wrapper):
+                    # splitlines() tambien parte por \v \f \u2028... y un
+                    # "x\x0bstop" marcaba stop_requested con el wrapper vivo.
+                    if "stop" in {l.strip().lower() for l in cmd.replace("\r", "\n").split("\n")}:
                         manager.stop_requested = True
                     manager.add_log(f"> {cmd}", "command")
                 elif msg.get("type") == "ping":
@@ -103,6 +118,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     _set_lang(msg.get("lang"))
             except Exception:
                 pass
+    except WebSocketDisconnect:
+        # Cerrar el panel o apagar uvicorn (1012) termina la sesion normalmente.
+        pass
     finally:
         # Cualquier salida (disconnect u otro error de transporte) debe sacar
         # el socket del registro; si no, broadcast reintenta contra un socket

@@ -43,9 +43,17 @@ hostile_name = st.lists(
     min_size=1, max_size=6,
 ).map(lambda segs: "/".join(segs))
 
-# Nombre normal sin traversal
+# Nombre normal sin traversal ni caracteres peligrosos (':', dispositivos
+# Windows, punto/espacio final): lo aceptado por el guard debe ser siempre True.
+_REF_DEVICES = {"CON", "PRN", "AUX", "NUL"} | {"COM%d" % i for i in range(1, 10)} | {"LPT%d" % i for i in range(1, 10)}
 safe_name = st.lists(zip_segment, min_size=1, max_size=6).filter(
-    lambda segs: all(s not in ("", ".", "..") and ":" not in s for s in segs)
+    lambda segs: all(
+        s not in ("", ".", "..")
+        and ":" not in s
+        and s == s.rstrip(" .")
+        and s.split(".")[0].upper() not in _REF_DEVICES
+        for s in segs
+    )
 ).map(lambda segs: "/".join(segs))
 
 # Referencia independiente para el orden de versiones: tuplas numéricas con
@@ -115,14 +123,24 @@ def test_version_append_segment_monotonic(v, k):
 # ─────────────────────────────────────────────────────────────
 
 def ref_safe(name):
-    """Referencia independiente (regex): rechaza traversal '..', absolutas y 'C:'."""
+    """Referencia independiente (regex): rechaza traversal '..', absolutas,
+    ':' en cualquier segmento (unidades y ADS de NTFS), nombres de dispositivo
+    de Windows y punto/espacio final (alias NTFS)."""
     norm = name.replace("\\", "/")
     if norm.startswith("/") or os.path.isabs(norm):
         return False
     if re.search(r"(^|/)\.\.(/|$)", norm):
         return False
-    if re.match(r"^[^/]*:", norm):
-        return False
+    devices = {"CON", "PRN", "AUX", "NUL"} | {"COM%d" % i for i in range(1, 10)} | {"LPT%d" % i for i in range(1, 10)}
+    for seg in norm.split("/"):
+        if not seg:
+            continue
+        if ":" in seg:
+            return False
+        if seg != seg.rstrip(" ."):
+            return False
+        if seg.split(".")[0].upper() in devices:
+            return False
     return True
 
 

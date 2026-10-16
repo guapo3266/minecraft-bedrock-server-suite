@@ -3,7 +3,7 @@
 
 Cuando Windows no deja renombrar la ruta activa (archivos bloqueados por
 antivirus/procesos), el modulo debe copiar RECURSIVAMENTE el resguardo sobre la
-ruta activa y limpiar el .bak. Sin cobertura hasta 2026-09-10.
+ruta activa y conservar el .bak para recuperacion exacta manual.
 """
 import os
 
@@ -28,7 +28,7 @@ def test_fallback_copia_recursiva_cuando_rename_falla(tmp_path, monkeypatch):
 
     assert (active / "level.dat").read_bytes() == b"NUEVO"
     assert (active / "sub" / "x.bin").read_bytes() == b"NUEVO-X"
-    assert not bak.exists()
+    assert (bak / "level.dat").read_bytes() == b"NUEVO"
 
 
 def test_camino_feliz_rename_deja_el_bak_y_sin_residuos(tmp_path):

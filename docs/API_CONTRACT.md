@@ -1,8 +1,8 @@
 # Contrato API HTTP / WebSocket — GUI Bedrock Wrapper
 
-Línea base capturada antes del refactor (`server_gui_server.py`, commit `af71b99`).
-Durante el refactor **no pueden cambiar** rutas, códigos HTTP, textos de respuesta ni el protocolo WS.
-Este documento es la referencia para detectar regresiones de comportamiento.
+Línea base del refactor: `server_gui_server.py`, commit `af71b99`, ampliada con
+los contratos implementados hasta 2026-10-15. Es la referencia para detectar
+regresiones: los refactors no cambian rutas, códigos, respuestas ni protocolo WS.
 
 ## Modelo de seguridad (todos los endpoints)
 
@@ -10,19 +10,24 @@ Este documento es la referencia para detectar regresiones de comportamiento.
 |---|---|---|
 | `_ensure_local` (IP loopback: `127.0.0.1`, `::1`) | Todos los endpoints REST y el WS | REST: `403 {"detail": "Acceso denegado: solo conexiones locales"}`; WS: `close(1008)` |
 | `_check_origin` (header `Origin` local con el MISMO puerto del request, o ausente; anti-CSRF) | Solo endpoints de escritura y el WS | `403 {"detail": "Acceso denegado: origen no permitido"}`; WS: `close(1008)` |
+| `_ensure_valid_host_header` | Middleware de `/api/*` y guard WS | Rechaza Host no permitido (protección contra DNS rebinding) |
 
 **Guarda temprana (middleware, 2026-09-10):** `create_app()` instala un middleware HTTP que aplica ambos guards a **todo** `/api/*` ANTES del routing y de la validación del body. Sin él, un cliente externo podía recibir un `422` de pydantic (p. ej. `POST /api/command` sin body) y enumerar rutas/esquema sin pasar por los guards internos. Los endpoints conservan sus propios chequeos (defensa en profundidad) y el WS valida en el handshake (no pasa por middleware HTTP). Cobertura anti-drift: `tests/test_router_guards.py` (inventario OpenAPI + `403` en todos los POST/GET de API con cliente externo u Origin externo).
 
-Endpoint solo con `_ensure_local` (lectura): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/connectivity`, `GET /`, `GET /favicon.svg`.
-Endpoint con `_ensure_local` + `_check_origin` (escritura): `POST /api/command`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
+Lectura con `_ensure_local` (además del middleware de `/api/*`): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/connectivity`, `GET /api/addons`, `GET /api/ai/status`, `GET /`, `GET /favicon.svg`.
+Endpoints con `_ensure_local` + `_check_origin`: `POST /api/command`, `POST /api/ai/propose`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
 
 **Modo LAN opt-in (`GUI_ALLOW_LAN=1`, ver `server_gui_server.py`)**: ambos guards se relajan
 de forma controlada — S1 acepta también IPs privadas RFC1918/ULA (`_is_allowed_client_host`
 con `_is_private_ip`; una IP pública sigue en 403) y S3 acepta Origins cuyo host es privado
-con el MISMO puerto del request (el anti-CSRF por puerto se mantiene; orígenes externos,
+con el MISMO host y puerto del request (orígenes de otro dispositivo de la LAN,
 `"null"` y hosts públicos siguen rechazados). Sin la variable de entorno, el comportamiento
 histórico es exactamente el descrito arriba (solo loopback). Cobertura:
 `tests/test_security_hardening.py` (sección LAN).
+
+El Host debe ser loopback/localhost, una IP privada con LAN habilitada o un
+nombre permitido explícitamente en `GUI_ALLOWED_HOSTS`. Habilitar LAN no elimina
+la coincidencia de Origin con el host del propio request.
 
 ## Estado público (payload `status` — compartido por `/api/status`, WS `init` y WS `status`)
 
@@ -100,6 +105,50 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 - `known` sale del registro propio (`data/known_players.json`, alimentado por los eventos de conexión) cruzado con `permissions.json` (por xuid) y `allowlist.json` (por nombre o xuid); archivos ausentes/corruptos se leen como vacíos.
 - Solo lectura: las mutaciones de permisos/allowlist se hacen con comandos de consola de BDS (`op`/`deop`, `allowlist add/remove`, `kick`) vía `POST /api/command`.
 
+### `GET /api/addons?world=<nombre>&kind=behavior|resource` (2026-10-06)
+- Solo `_ensure_local` (lectura). El análisis corre en el threadpool (`run_in_threadpool`): recorre el árbol de la instalación y no debe congelar WebSocket ni métricas.
+- 400 `"kind debe ser 'behavior' o 'resource'"` — `kind` con otro valor.
+- 400 `"Mundo desconocido: <nombre>"` — `world` que no está en `worlds/`.
+- 200: payload del analizador compartido `addon_inventory.analyze_addons` (el MISMO que imprime `python addon_inventory_cli.py --json`; determinista, sin fechas):
+  ```json
+  {
+    "schema_version": 1, "base_dir": "<ruta>", "complete": true,
+    "partial_reasons": [], "active_world": "<level-name>|null",
+    "supported": {"manifest_format_versions": [2], "locations": [...], "excluded_locations": [...]},
+    "scopes": [{"id": "compartido:behavior", "origin": "compartido", "kind": "behavior",
+                "root": "behavior_packs", "exists": true}],
+    "packs": [{"id": "<ruta>", "kind": "behavior", "origin": "compartido|sistema|mundo",
+               "world": null, "scope": "compartido:behavior", "status": "ok|invalid|unreadable|unsupported",
+               "name": "...", "description": "...", "format_version": 2,
+               "header_uuid": "...", "version": [1,0,0], "min_engine_version": [1,20,0],
+               "modules": [{"index": 0, "type": "data", "uuid": "...", "version": [1,0,0]}],
+               "pack_dependencies": [{"index": 0, "uuid": "...", "version": [1,0,0]}],
+               "script_dependencies": [{"index": 0, "module_name": "@minecraft/server",
+                                        "version": "1.0.0-beta", "beta": true, "internal": false}],
+               "dependency_resolution": [{"uuid": "...", "version": [1,0,0],
+                  "status": "resolved|missing|ambiguous|version_mismatch|other_kind|unchecked|context_dependent",
+                  "candidates": [...], "world_resolutions": [{"world": "<mundo>|null",
+                      "status": "resolved|missing|ambiguous|version_mismatch|other_kind|unchecked", "candidates": [...]}]}],
+               "referenced_by_worlds": ["<mundo>"], "scripting_compatibility": "no_determinada",
+               "diagnostic_codes": ["..."]}],
+    "worlds": [{"name": "<mundo>", "active": true, "has_level_dat": true,
+                "ref_files": [{"kind": "behavior", "file": "...", "status": "ok|missing|invalid|unreadable|unsupported|reparse"}],
+                "references": [{"kind": "behavior", "file": "...", "index": 0, "pack_id": "...",
+                                "version": [1,0,0], "status": "resolved|unresolved|ambiguous|version_unavailable|kind_mismatch|version_missing|invalid",
+                                "resolved_pack": "<id>|null", "candidates": [...]}]}],
+    "not_analyzed": [{"path": "...", "reason_code": "...", "detail": null}],
+    "diagnostics": [{"code": "WORLD_REF_UNRESOLVED", "severity": "error|aviso|info",
+                     "source": "F1..F5|BDS-howto|N#", "determined": true,
+                     "source_file": "...", "scope": "...", "pack": "...", "world": "...",
+                     "field": "...", "ref": {...}, "message_es": "...", "message_en": "..."}],
+    "summary": {"packs_total": 0, "referencias_total": 0, "errores": 0, "avisos": 0,
+                "informativos": 0, "complete": true}
+  }
+  ```
+- Con `world`/`kind` el payload añade `"filter": {"world": ..., "kind": ...}`, `summary_installation` (resumen completo) y acota `packs`, `worlds` y `diagnostics` a la vista. `kind` filtra también `worlds[].references`, `ref_files` y `pack_dirs`: un error de referencias de comportamiento no aparece al seleccionar recursos. `summary` cuenta esa vista; `complete` y `partial_reasons` siguen describiendo la instalación completa.
+- `world_resolutions` es una ampliación del payload v1: conserva por separado los mundos que referencian un pack, directamente o como dependencia transitiva. Los packs locales se evalúan en su mundo; los compartidos/de sistema sin consumidores conocidos se evalúan solo contra las raíces compartidas/de sistema (`world: null`). Se muestran candidatos estáticos, sin afirmar que BDS los cargue. Si los estados difieren entre mundos, el estado agregado es `context_dependent`. Con `world`, se selecciona el resultado de ese mundo; si únicamente se evaluaron otros mundos, se devuelve `unchecked` con candidatos vacíos. Los diagnósticos de dependencias llevan su `world` y se excluyen de las vistas de otros mundos.
+- Solo lectura: no modifica mundos, packs, manifiestos ni configuración (verificado por tests que fotografían el árbol antes/después). Códigos de diagnóstico, gravedad y fuentes: `docs/INFORME_ADDONS.md`.
+
 ### `GET /api/history/metrics?hours=24`
 - `hours` ∈ {1, 6, 24}; otro valor → 400.
 - 200: `{"points": [{"ts", "ram_mb", "ram_pct", "cpu_pct", "disk_used_pct", "sys_used_pct", "running"}]}` (muestreo cada 30 s, downsample a ≤300 puntos).
@@ -114,6 +163,7 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 
 ### `POST /api/setup/install_bds`
 - 409 `"El servidor esta en ejecucion; detenlo antes de instalar"` — con servidor corriendo.
+- 409 `"Hay una instancia externa del servidor en ejecución; instalación cancelada"` — sonda externa bajo `op_lock`, antes del despacho.
 - 200 `{"status": "busy", "message": "Operación en curso (actualización/restauración/backup)"}` — `op_lock` ocupado.
 - 200 `{"status": "install_dispatched"}` — hilo lanzado (logs `[Setup]`).
 
@@ -153,6 +203,7 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 - 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`) / `"Hay una instancia externa del servidor en ejecución; restauración cancelada"` (sonda externa bajo `op_lock`).
 - 404: `FileNotFoundError` (texto del error).
 - 500: error genérico (extracción/swap). Un ZIP sin `level.dat` en el staging — vacío o solo-packs — se rechaza con `RuntimeError` SIN tocar el mundo (ronda 2026-09-11).
+- 500: `level-name` inválido o destino fuera de `worlds/`/redirigido por enlaces; se rechaza antes de abrir el ZIP. Si falla el rollback por rename y se recurre a copiar, el `.bak` se conserva para recuperación exacta manual.
 - 200: `{"status": "ok", "backup": "<filename>"}` + log.
 
 ### `GET /api/backups/{filename}/download`
@@ -169,6 +220,23 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
 - 400 `"Nombre de backup invalido"`; 404 `"Backup no encontrado"`; 500 error genérico.
 - 200 `{"status": "ok", "filename": "<filename>"}` — CRC correcto.
 - 200 `{"status": "corrupt", "filename": "<filename>", "entry": "<str>"}` — `testzip` o `BadZipFile` (no es error HTTP).
+
+### `GET /api/ai/status`
+
+- Consulta LM Studio local y devuelve `{"status":"ok","online":<bool>,"model":<str|null>}`.
+- La consulta corre en el threadpool. No arranca modelos ni ejecuta comandos BDS.
+
+### `POST /api/ai/propose`
+
+- Body: `{"prompt":"<instrucción>"}`. Body inválido: 422 tras superar los guards.
+- Éxito HTTP 200: `{"status":"ok","proposed_command":"...","explanation":"...","function":"...","args":{...},"warning":null}`; `warning` puede ser texto.
+- Prompt vacío, fallo de LM Studio, respuesta truncada o llamada no interpretable:
+  HTTP 200 con `{"status":"error","message":"..."}`. No equivale a una ejecución.
+- Usa una copia de los jugadores online y sanea argumentos antes de construir
+  la propuesta. La GUI requiere pulsar Ejecutar, que usa `POST /api/command`.
+  El servicio IA no escribe a stdin ni toma esa aprobación por el usuario.
+- El build portable oculta este asistente en el frontend; eso no convierte las
+  rutas del backend en una interfaz de ejecución autónoma.
 
 ## WebSocket `/ws`
 

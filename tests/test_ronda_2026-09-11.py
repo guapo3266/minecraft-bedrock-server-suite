@@ -36,7 +36,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ═══════════════════════════════════════════════════════════════════════
 def _fake_env(monkeypatch, tmp_path):
     """Mundo y backups falsos (mismo patron que el resto de la suite)."""
-    fake_world = os.path.join(str(tmp_path), "world")
+    fake_world = os.path.join(str(tmp_path), "worlds", "Mundo")
     fake_bkp = os.path.join(str(tmp_path), "backups")
     os.makedirs(fake_world)
     os.makedirs(fake_bkp)
@@ -542,7 +542,7 @@ def test_descarga_bds_http_404_aborta(monkeypatch):
 
     monkeypatch.setattr(
         bds_update, "_fetch_latest_bedrock_download",
-        lambda: ("http://example/bedrock.zip", "1.0.0"),
+        lambda: ("https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.0.0.0.zip", "1.0.0.0"),
     )
     monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: _Resp404())
     logs = []

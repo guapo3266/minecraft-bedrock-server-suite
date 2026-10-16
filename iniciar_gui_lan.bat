@@ -20,6 +20,8 @@ if errorlevel 1 (
 
 :: Activar modo LAN: la GUI escuchara en 0.0.0.0 y permitira IPs privadas
 set GUI_ALLOW_LAN=1
+:: Modelo de LM Studio para el asistente IA (ai_assistant.py: LMSTUDIO_MODEL).
+if not defined LMSTUDIO_MODEL set "LMSTUDIO_MODEL=qwen3-minecraft-v3"
 :: Opcional: fija puerto (si lo cambias, abre ese puerto en el firewall)
 if "%GUI_PORT%"=="" set GUI_PORT=8000
 
@@ -46,18 +48,16 @@ if defined LAN_IP (
 )
 echo.
 echo [LAN] Intentando abrir puerto %GUI_PORT% en Firewall de Windows...
-netsh advfirewall firewall show rule name="Minecraft GUI LAN" >nul 2>&1
-if errorlevel 1 (
-    rem profile=private: la GUI LAN no tiene autenticacion; la regla no debe
-    rem abrir el puerto en redes Publicas/Dominio, solo en la red de confianza.
-    netsh advfirewall firewall add rule name="Minecraft GUI LAN" dir=in action=allow protocol=TCP localport=%GUI_PORT% profile=private >nul 2>&1
-    if not errorlevel 1 (
-        echo [LAN] Regla de firewall creada: permite TCP %GUI_PORT% (solo red privada)
-    ) else (
-        echo [AVISO] No se pudo crear regla de firewall (ejecuta como Administrador si falla el acceso desde el movil).
-    )
+rem Se borra la regla homonima y se recrea con el puerto ACTUAL: si GUI_PORT
+rem cambia despues de crearla, la regla vieja dejaria el puerto nuevo cerrado.
+rem profile=private: la GUI LAN no tiene autenticacion; la regla no debe
+rem abrir el puerto en redes Publicas/Dominio, solo en la red de confianza.
+netsh advfirewall firewall delete rule name="Minecraft GUI LAN" >nul 2>&1
+netsh advfirewall firewall add rule name="Minecraft GUI LAN" dir=in action=allow protocol=TCP localport=%GUI_PORT% profile=private >nul 2>&1
+if not errorlevel 1 (
+    echo [LAN] Regla de firewall lista: permite TCP %GUI_PORT% (solo red privada)
 ) else (
-    echo [LAN] Regla de firewall ya existe.
+    echo [AVISO] No se pudo crear regla de firewall (ejecuta como Administrador si falla el acceso desde el movil).
 )
 echo.
 
@@ -92,10 +92,32 @@ if exist "%VENV_PY%" (
     echo [AVISO] No se pudo crear .venv: se usara el Python global.
 )
 
+:: Refresh condicional: la huella (SHA256) de requirements.txt se guarda en
+:: .venv\requirements.sha al instalar; si difiere, requirements.txt ha cambiado
+:: y un .venv viejo se actualiza. Sin --upgrade: se respetan los topes.
+del "%~dp0.venv\requirements.sha.tmp" >nul 2>&1
+set "REQ_SHA_FILE=%~dp0.venv\requirements.sha"
+set "REQ_SHA_TMP=%~dp0.venv\requirements.sha.tmp"
+set "REQ_CAMBIO="
+if exist "%VENV_PY%" "%RUN_PY%" -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "%~dp0requirements.txt" > "%REQ_SHA_TMP%" 2>nul
+if exist "%REQ_SHA_TMP%" (
+    if exist "%REQ_SHA_FILE%" (
+        fc /b "%REQ_SHA_FILE%" "%REQ_SHA_TMP%" >nul 2>&1
+        if errorlevel 1 set "REQ_CAMBIO=1"
+    ) else (
+        set "REQ_CAMBIO=1"
+    )
+)
 "%RUN_PY%" -c "import fastapi, uvicorn, websockets, psutil, requests" >nul 2>&1
-if errorlevel 1 (
+if errorlevel 1 set "REQ_CAMBIO=1"
+if defined REQ_CAMBIO (
     echo [1/3] Instalando dependencias...
     "%RUN_PY%" -m pip install -r requirements.txt
+    if errorlevel 1 (
+        echo [AVISO] pip no pudo instalar del todo las dependencias; se comprobara el resultado.
+    ) else (
+        copy /y "%REQ_SHA_TMP%" "%REQ_SHA_FILE%" >nul 2>&1
+    )
     "%RUN_PY%" -c "import fastapi, uvicorn, websockets, psutil, requests" >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Dependencias no se pudieron instalar.
@@ -106,6 +128,7 @@ if errorlevel 1 (
 ) else (
     echo [1/3] Dependencias listas.
 )
+del "%REQ_SHA_TMP%" >nul 2>&1
 
 call :bootstrap_unlock
 

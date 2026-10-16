@@ -1129,9 +1129,14 @@ def test_restore_rollback_quarantines_and_recovers_bak_when_active_world_has_loc
         with open(locked_file_path, "rb") as _holder:
             zip_safety._quarantine_and_restore(active_world, bak_world, is_dir=True)
 
-    # active_world debe haber sido recuperado desde bak_world
+    # En Windows los handles abiertos fuerzan el fallback por copia:
+    # se recupera level.dat y se conserva el resguardo completo.
     assert os.path.exists(active_world)
-    assert not os.path.exists(bak_world)
+    if os.name == "nt":
+        assert Path(os.path.join(bak_world, "level.dat")).read_bytes() == b"ORIGINAL_LEVEL_DAT"
+    else:
+        # En otros sistemas el rename puede completar la recuperacion exacta.
+        assert not os.path.exists(bak_world)
     with open(os.path.join(active_world, "level.dat"), "rb") as f:
         assert f.read() == b"ORIGINAL_LEVEL_DAT"
 

@@ -337,7 +337,7 @@ def test_check_update_expone_previous(env, monkeypatch):
 
     monkeypatch.setattr(bds_update.requests, "get", lambda *a, **k: _Resp(
         {"result": {"links": [{"downloadType": "serverBedrockWindows",
-                               "downloadUrl": "https://x/bedrock-server-1.26.40.8.zip"}]}}
+                               "downloadUrl": "https://www.minecraft.net/bedrockdedicatedserver/bin-win/bedrock-server-1.26.40.8.zip"}]}}
     ))
     gui.manager.installed_version = "1.26.33.2"
 

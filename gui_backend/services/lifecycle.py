@@ -139,7 +139,7 @@ def restart_wrapper():
         manager.add_log(L(f"[GUI Backend] No se pudo re-iniciar el wrapper ({status}): {detalle}", f"[GUI Backend] Could not restart the wrapper ({status}): {detalle}"), "error")
 
 
-def stop_and_wait(tag="[Actualizador BDS]"):
+def stop_and_wait(tag="[Actualizador BDS]", on_progress=None, wrapper_timeout=None):
     """Detiene el wrapper (si corre) y espera las dos fases G8.
 
     Marca stop_requested (stop deliberado: el watchdog no re-lanza). Devuelve
@@ -163,6 +163,8 @@ def stop_and_wait(tag="[Actualizador BDS]"):
     # debe inhibir al watchdog mientras el servidor sigue vivo.
     manager.stop_requested = True
     manager.add_log(L(f"{tag} Deteniendo servidor de Minecraft...", f"{tag} Stopping Minecraft server..."), "system")
+    if on_progress:
+        on_progress("stopping")
     # G8: dos fases — BDS muerto primero, despues el wrapper completo
     # (backup final de cierre incluido) antes de tocar binarios o mundos.
     if not manager.server_stopped_event.wait(timeout=config.SERVER_STOP_TIMEOUT_SEC):
@@ -174,11 +176,14 @@ def stop_and_wait(tag="[Actualizador BDS]"):
             "error",
         )
         return False
-    if not manager.wrapper_exit_event.wait(timeout=config.WRAPPER_EXIT_TIMEOUT_SEC):
+    if on_progress:
+        on_progress("backup")
+    wait_timeout = config.WRAPPER_EXIT_TIMEOUT_SEC if wrapper_timeout is None else wrapper_timeout
+    if not manager.wrapper_exit_event.wait(timeout=wait_timeout):
         manager.add_log(
-            L(f"{tag} El wrapper no termino en {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
+            L(f"{tag} El wrapper no termino en {wait_timeout}s "
               "(incluye el backup final de cierre). Operación cancelada.",
-              f"{tag} The wrapper did not finish within {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
+              f"{tag} The wrapper did not finish within {wait_timeout}s "
               "(includes the final shutdown backup). Operation cancelled."),
             "error",
         )

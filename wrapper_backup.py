@@ -3,8 +3,8 @@
 import multiprocessing
 import os
 import subprocess
-import sys
 import time
+import runtime_paths
 
 import auto_backup
 import wrapper_events
@@ -200,14 +200,13 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
         )
 
         import json as _json
-        _base = os.path.dirname(os.path.abspath(__file__))
+        _base = wstate.BASE_DIR
         _stamp = int(time.time() * 1000)
         _nonce = os.urandom(4).hex()
         _tmpdir = os.environ.get("TEMP", ".")
         _snap_path = os.path.join(_tmpdir, "bw_snap_%d_%s.json" % (_stamp, _nonce))
         _marker = os.path.join(_tmpdir, "bw_cancel_%d_%s.mark" % (_stamp, _nonce))
         _result = os.path.join(_tmpdir, "bw_result_%d_%s.json" % (_stamp, _nonce))
-        _worker = os.path.join(_base, "backup_worker.py")
 
         try:
             with open(_snap_path, "w", encoding="utf-8") as _f:
@@ -215,9 +214,10 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             if cancel_event is not None and hasattr(cancel_event, "path"):
                 _marker = cancel_event.path
             comp_proc = _WorkerProcess(subprocess.Popen(
-                [sys.executable, "-u", _worker, _snap_path, _marker, _result],
+                runtime_paths.process_command("backup-worker", _base, _snap_path, _marker, _result),
                 cwd=_base,
                 stdin=subprocess.DEVNULL,
+                **runtime_paths.subprocess_options(),
             ))
         except Exception as e:
             print(L(f"[Worker] [WARN] No se pudo lanzar el worker: {e}", f"[Worker] [WARN] Could not launch the worker: {e}"))
@@ -242,11 +242,24 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
         with wstate.state_lock:
             wstate.active_compress_process = comp_proc
 
-        comp_proc.join(timeout=wstate.WORKER_COMPRESSION_TIMEOUT_SEC)
+        # Timeout proporcional al tamano del snapshot (H1-2026-09-25): con
+        # mundos grandes el fijo de WORKER_COMPRESSION_TIMEOUT_SEC mataba al
+        # worker en cada ciclo y el backup caliente nunca completaba.
+        total_snap_bytes = 0
+        for _item in (file_snapshot or []):
+            try:
+                _b = _item[1]
+            except (TypeError, IndexError):
+                continue
+            if isinstance(_b, int) and _b > 0:
+                total_snap_bytes += _b
+        comp_timeout = wstate.scaled_backup_timeout_sec(total_snap_bytes, wstate.WORKER_COMPRESSION_TIMEOUT_SEC)
+
+        comp_proc.join(timeout=comp_timeout)
 
         # --- CASO A: Compresion excedio el tiempo maximo ---
         if comp_proc.is_alive():
-            print(L(f"[Worker] [WARN] Timeout de compresion ({wstate.WORKER_COMPRESSION_TIMEOUT_SEC}s).", f"[Worker] [WARN] Compression timeout ({wstate.WORKER_COMPRESSION_TIMEOUT_SEC}s)."))
+            print(L(f"[Worker] [WARN] Timeout de compresion ({comp_timeout}s).", f"[Worker] [WARN] Compression timeout ({comp_timeout}s)."))
             print(L("[Worker]          Terminando proceso de compresion...", "[Worker]          Terminating compression process..."))
 
             _force_kill_compress_process(comp_proc)

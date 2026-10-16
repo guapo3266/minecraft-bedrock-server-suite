@@ -1,7 +1,22 @@
 import json
 import os
+import shutil
+import sys
+from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
+
+try:
+    from console_lang import L
+except ImportError:  # script copiado fuera del arbol del suite: mismo criterio que console_lang.L
+    def L(es, en):
+        return es if os.environ.get("WRAPPER_LANG") == "es" else en
+
+try:
+    import server_properties
+except ImportError:  # script copiado fuera del arbol del suite: level-name por defecto
+    server_properties = None
 
 
 def write_text_atomic(path, text):
@@ -224,19 +239,52 @@ system.runInterval(() => {
 }, 20);
 """
 
-write_text_atomic(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/scripts/main.js"), main_js_content)
-print("Updated main.js")
-
 # 2. Update item JSONs to declare the custom components
+def _respaldo(path):
+    """Respaldo previo (copy2) del archivo que se va a reescribir.
+
+    Si falla se aborta sin tocar el original (mismo criterio que
+    enable_beta_apis_v2). El sufijo no es .bak_: el recuperador de
+    restauraciones interrumpidas renombra *.bak_* de worlds/ como huerfano.
+    """
+    respaldo = path + ".respaldo_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    shutil.copy2(path, respaldo)
+    return respaldo
+
+
 def update_json_file(file_path, modify_func):
+    """Valida, respalda y reescribe un JSON con modify_func (escritura atomica).
+
+    Devuelve False si no se pudo actualizar (explicado por consola, sin
+    traceback); un archivo que no existe solo avisa y no cuenta como fallo.
+    """
     if not os.path.exists(file_path):
-        print(f"File not found: {file_path}")
-        return
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    modify_func(data)
+        print(L(f"[AVISO] No se encontró el archivo: {file_path}",
+                f"[WARNING] File not found: {file_path}"))
+        return True
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(L(f"[ERROR] JSON ilegible en {file_path}: {e}",
+                f"[ERROR] Unreadable JSON in {file_path}: {e}"))
+        return False
+    try:
+        modify_func(data)
+    except (KeyError, TypeError) as e:
+        print(L(f"[ERROR] Estructura inesperada en {file_path} (falta {e!r}); queda sin modificar.",
+                f"[ERROR] Unexpected structure in {file_path} (missing {e!r}); left unchanged."))
+        return False
+    try:
+        respaldo = _respaldo(file_path)
+    except OSError as e:
+        print(L(f"[ERROR] No se pudo crear el respaldo de {file_path} ({e}); queda sin modificar.",
+                f"[ERROR] Could not back up {file_path} ({e}); left unchanged."))
+        return False
     write_text_atomic(file_path, json.dumps(data, indent=2, ensure_ascii=False))
-    print(f"Updated {file_path}")
+    print(L(f"Actualizado {file_path} (respaldo: {os.path.basename(respaldo)})",
+            f"Updated {file_path} (backup: {os.path.basename(respaldo)})"))
+    return True
 
 def modify_activator(data):
     components = data["minecraft:item"]["components"]
@@ -245,9 +293,6 @@ def modify_activator(data):
 def modify_controller(data):
     components = data["minecraft:item"]["components"]
     components["minecraft:custom_components"] = ["custom:guardian_controller_behavior"]
-
-update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_activator.json"), modify_activator)
-update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_controller.json"), modify_controller)
 
 # 3. Modify BP Manifest
 def modify_bp_manifest(data):
@@ -259,8 +304,6 @@ def modify_bp_manifest(data):
         if dep.get("uuid") == "9f075d4a-bc12-4c2c-8d14-6fa6b12a2b74":
             dep["version"] = [1, 0, 6]
 
-update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/manifest.json"), modify_bp_manifest)
-
 # 4. Modify RP Manifest
 def modify_rp_manifest(data):
     data["header"]["version"] = [1, 0, 6]
@@ -268,19 +311,54 @@ def modify_rp_manifest(data):
         if module["type"] == "resources":
             module["version"] = [1, 0, 6]
 
-update_json_file(os.path.join(BASE_DIR, "resource_packs/guardian_robot_RP/manifest.json"), modify_rp_manifest)
-
 # 5. Modify World JSONs
 def modify_world_bp(data):
     for pack in data:
         if pack["pack_id"] == "8f075d4a-bc12-4c2c-8d14-6fa6b12a2b72":
             pack["version"] = [1, 0, 6]
 
-update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_behavior_packs.json"), modify_world_bp)
-
 def modify_world_rp(data):
     for pack in data:
         if pack["pack_id"] == "9f075d4a-bc12-4c2c-8d14-6fa6b12a2b74":
             pack["version"] = [1, 0, 6]
 
-update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_resource_packs.json"), modify_world_rp)
+
+def _ruta_mundo():
+    """Carpeta del mundo segun level-name de server.properties (default de BDS)."""
+    nombre = "Bedrock level"
+    if server_properties is not None:
+        nombre = server_properties.read_value(
+            os.path.join(BASE_DIR, "server.properties"), "level-name", nombre) or nombre
+    return os.path.join(BASE_DIR, "worlds", nombre)
+
+
+def main():
+    """Aplica las modificaciones (solo al ejecutar como script).
+
+    Antes este modulo escribia packs/mundo al importarlo; ahora importar
+    es inocuo y el trabajo vive aqui. Devuelve 0 si todo se aplico.
+    """
+    write_text_atomic(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/scripts/main.js"), main_js_content)
+    print(L("Actualizado main.js", "Updated main.js"))
+    mundo = _ruta_mundo()
+    trabajos = [
+        (os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_activator.json"), modify_activator),
+        (os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_controller.json"), modify_controller),
+        (os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/manifest.json"), modify_bp_manifest),
+        (os.path.join(BASE_DIR, "resource_packs/guardian_robot_RP/manifest.json"), modify_rp_manifest),
+    ]
+    if os.path.isdir(mundo):
+        trabajos.append((os.path.join(mundo, "world_behavior_packs.json"), modify_world_bp))
+        trabajos.append((os.path.join(mundo, "world_resource_packs.json"), modify_world_rp))
+    else:
+        print(L(f"[AVISO] El mundo {mundo} no existe (level-name de server.properties); no se tocaron sus packs.",
+                f"[WARNING] World {mundo} does not exist (level-name from server.properties); its packs were not touched."))
+    fallos = 0
+    for ruta, modificador in trabajos:
+        if not update_json_file(ruta, modificador):
+            fallos += 1
+    return 1 if fallos else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
