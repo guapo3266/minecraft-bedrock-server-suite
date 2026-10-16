@@ -24,20 +24,27 @@ Se usan versiones estables `MAYOR.MENOR.PARCHE`:
 - MAYOR: cambios que rompan un contrato público o requieran migración, por ejemplo `3.0.0`.
 
 El número se cambia al preparar una entrega, no por cada commit. La primera
-versión común es 2.0.0 y conserva el número previamente declarado por el backend.
+versión común fue 2.0.0 y conservó el número previamente declarado por el backend.
 La entrega 2.1.0 añade el ZIP con Python incluido y el actualizador de la suite.
 Ver [descarga, seguridad y recuperación](ACTUALIZACIONES_SUITE.md).
+
+La [Release pública v2.1.0](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.0)
+se publicó el 16 de octubre de 2026. Su etiqueta pública identifica `0632a58`;
+la etiqueta local de TESTTEST identifica `41cc161`. No moverlas para incluir
+commits posteriores de documentación o CI. Estos commits pueden conservar la
+versión 2.1.0 mientras no se prepare otro paquete; la siguiente corrección
+distribuible partiría de 2.1.1.
 
 ## Preparar una entrega local
 
 En la raíz de **cada** repositorio, con el mismo número elegido:
 
 ```powershell
-python tools/set_version.py 2.0.1
+python tools/set_version.py 2.1.1
 ```
 
 Mover los cambios de `[Sin publicar]` a una sección como
-`## [2.0.1] - AAAA-MM-DD` en `CHANGELOG.md`, con la fecha real de preparación.
+`## [2.1.1] - AAAA-MM-DD` en `CHANGELOG.md`, con la fecha real de preparación.
 Documentar solo los cambios incluidos en ese árbol. Comprobar los manifiestos:
 
 ```powershell
@@ -55,15 +62,21 @@ commit aprobado de cada repositorio, con el árbol limpio:
 ```powershell
 git diff --check
 git status --short
-git commit -m "chore: preparar versión 2.0.1"
-git tag -a v2.0.1 -m "Versión 2.0.1 de Minecraft Bedrock Server Suite"
+git commit -m "chore: preparar versión 2.1.1"
+git tag -a v2.1.1 -m "Versión 2.1.1 de Minecraft Bedrock Server Suite"
 ```
 
 Seleccionar explícitamente los archivos que se incluirán antes del commit.
 No mover una etiqueta existente para reutilizar un número: una corrección de
-una entrega ya identificada recibe una nueva versión.
+una entrega ya identificada que vaya a distribuirse recibe una nueva versión.
 
 Commit, etiqueta, push y despliegue son operaciones separadas. La herramienta
 no hace commits, no crea etiquetas, no publica ni sincroniza instalaciones.
 Para una futura instalación, distribuir también `suite_version.py` y
 `version.json` junto al código y el `dist/` reconstruido.
+
+Los workflows de tests y Release son **solo manuales**. Ni push ni PR los
+ejecutan; no reactivar esos disparadores al sincronizar repositorios. La
+publicación del código, la Release con sus assets y el despliegue en una
+instalación son tres operaciones independientes. Una Release pública no
+autoriza a sincronizar ni actualizar el servidor real.

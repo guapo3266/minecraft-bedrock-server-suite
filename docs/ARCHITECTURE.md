@@ -18,6 +18,9 @@ restore_core.py                  # Pipeline unico de restore: validacion, stagin
                                  #   (fuente unica GUI auto_backup / CLI restore_backup)
 zip_safety.py                    # Fuente unica anti-drift: _is_safe_zip_entry, _pack_dest,
                                  #   _extract_pack_entry, _quarantine_and_restore y CORRUPT_MARKERS
+suite_version.py + version.json  # Versión común de backend/API y GUI, independiente de BDS
+suite_release.py                # Allowlist, manifiesto/hash, staging y diario con rollback
+suite_updater.py                # Auxiliar con Python independiente: swap, health y recuperación
 server_properties.py             # Lectura tolerante de server.properties (clave = valor,
                                  #   comentarios #/;) + resolver/guard del mundo en worlds/
 addon_inventory.py               # Analizador compartido de addons (SIN FastAPI): inventario
@@ -42,6 +45,7 @@ gui_backend/
     properties.py               # PROPS_FIELDS, leer/validar/escribir props
     backups.py                  # listado, guard de restore, verify
     bds_update.py               # Mojang, staging, rollback, recuperación
+    suite_update.py             # Releases GitHub, descarga verificada, cierre y relevo al auxiliar
     setup.py                    # detección de instalación (wizard)
     lifecycle.py                # start_wrapper/restart_wrapper/cold_backup
                                 #   (única fuente de esas secuencias: la usan
@@ -64,6 +68,7 @@ gui_backend/
     properties.py               # /api/server_properties
     setup.py                    # /api/setup_status, install_bds, complete
     actions.py                  # /api/action/{name}, /api/check_update
+    suite_update.py             # /api/suite_update, /progress y /health
     backups.py                  # /api/backups*, /api/restore (+ download/delete/verify, listado filtra _CORRUPTO/_EXCEDIDO/_CRASH)
     schedule.py                 # /api/schedule (GET/POST)
     players.py                  # /api/players (GET, solo lectura)
@@ -94,6 +99,35 @@ del directorio de trabajo. El backend lanza `server_wrapper.py` y el wrapper
 lanza `backup_worker.py` con el mismo intérprete Python y los canales de
 entrada/salida correspondientes. Los backups se guardan por instalación en
 `../../Backups_Minecraft/auto_backups/<carpeta>`.
+
+## Versión y actualización de la suite
+
+`version.json` es la fuente común. Python expone `suite_version.VERSION` en
+OpenAPI y el estado HTTP/WS; React incorpora ese JSON al build y a Acerca de.
+El número de BDS permanece en `installed_version`.
+
+`gui_backend.services.suite_update` consulta Releases estables y verifica el
+SHA-256 de GitHub, las rutas y el manifiesto antes de detener el servidor.
+Serializa la operación con `manager.op_lock` y un mutex por instalación.
+El evento NDJSON `final_backup_finished` debe acreditar el backup de cierre;
+un evento de backup ordinario o una línea de consola no lo sustituye.
+Mientras `suite_update_in_progress` esté activo, el middleware rechaza otros
+POST y el WS bloquea comandos.
+
+El servicio prepara una copia independiente de Python en el área de
+recuperación y pide el cierre coordinado al `uvicorn.Server` del entrypoint.
+El auxiliar `suite_updater.py` espera la salida de la GUI y rechaza procesos
+residuales. `suite_release.py` reemplaza solo archivos del programa que cambian,
+con diario persistido y resguardos verificados; las rutas de datos/configuración
+quedan fuera de su lista positiva. Si falla la copia o el arranque, recupera
+el código anterior y conserva la evidencia.
+
+La GUI nueva mantiene el guard de operación durante el relevo. El auxiliar
+verifica versión, token, API, HTML y hashes de assets antes de confirmar el
+diario y liberar ese guard. Después reinicia Minecraft si estaba encendido;
+un fallo de ese reinicio se comunica por separado. Los lanzadores ejecutan
+`Recuperar_suite.bat` cuando existe un diario pendiente. Ver protocolo, límites
+y QA en [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 
 ## Wrapper de consola
 

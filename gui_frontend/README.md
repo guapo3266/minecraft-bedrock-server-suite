@@ -42,6 +42,13 @@ los componentes adaptados y sus licencias está en los archivos `NOTICE.md`.
   obsoletos sin alterar el estado del servidor ni enviar acciones.
 - `src/hooks/useActionMenu.js`: foco y cierre compartidos por los menús de
   cabecera, comandos rápidos y backups, incluidas opciones deshabilitadas.
+- `AboutModal.jsx`: muestra la versión común de `../version.json`, incorporada
+  al build; no confundirla con la versión de Minecraft en el dashboard.
+- `src/hooks/useSuiteUpdate.js`/`SuiteUpdateModal.jsx`: consulta al abrir,
+  comprobación manual, confirmación de instalación y progreso/reconexión tras
+  cerrar la GUI. `sessionStorage` (`bedrock-suite-updating`) conserva el flujo
+  durante el relevo. `src/suiteUpdateLogic.js` define fases activas y terminales;
+  los resultados de rollback o fallo de reinicio siguen visibles.
 - `GlassStage.jsx`: canvas decorativo, cabecera/dock vacíos para el motor local;
   **no captura el DOM de consola, formularios ni IA**. WebGL se importa bajo
   demanda y cae a CSS ante fallos. Pausa en segundo plano.
@@ -74,8 +81,14 @@ seguido de conectividad. En móvil se apilan después de la consola.
 
 **Configuración** abre directamente `server.properties`; **Personalizar** abre
 Apariencia y reemplaza el antiguo acceso de sol/luna. El tema se elige dentro
-del diálogo. **Más acciones** agrupa Programación, Actualización BDS y **Acerca de**,
-donde están Administración local y el aviso de independencia de Mojang/Microsoft.
+del diálogo. **Más acciones** agrupa Programación, Actualización BDS,
+**Actualizar la suite** y **Acerca de**, donde están la versión del producto,
+Administración local y el aviso de independencia de Mojang/Microsoft.
+El menú indica si hay una nueva versión; comprobar no instala nada. La
+confirmación explica la conservación de datos y, si Minecraft está encendido,
+su cierre, backup final y reinicio. Mientras se actualiza, los controles y los
+guards HTTP/WS bloquean operaciones incompatibles. Detalles de recuperación:
+[`ACTUALIZACIONES_SUITE.md`](../docs/ACTUALIZACIONES_SUITE.md).
 Este menú y los
 de comandos rápidos/backups permiten flechas y Home/End; Escape restaura el foco
 al botón correcto y Tab/Shift+Tab salen hacia sus controles vecinos. Abrir o

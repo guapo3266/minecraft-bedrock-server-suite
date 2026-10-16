@@ -21,8 +21,11 @@ Para preparar la siguiente entrega: [guía de versionado](docs/VERSIONADO.md).
 
 ### Dos formas de usarlo
 
+[Descargar ZIP para Windows](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/latest/download/BedrockSuite-Windows-x64.zip) · [Checksum SHA-256](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/latest/download/BedrockSuite-Windows-x64.zip.sha256) · [Última Release](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/latest).
+
 **ZIP para Windows x64:** la entrega `BedrockSuite-Windows-x64.zip` incluye
-Python y dependencias. Extráela completa y abre `iniciar_gui.bat`; no requiere
+Python y dependencias. Extráela completa en una ruta corta, como
+`C:\BedrockSuite`, y abre `iniciar_gui.bat`; no requiere
 Python, Git ni Node instalados. Las Releases se publican por separado de los
 commits. En la GUI, **Más acciones → Actualizar la suite** comprueba versiones
 y pide confirmación antes de instalar. Conserva mundos y configuración, espera
@@ -33,7 +36,7 @@ En carpetas con Git permite comprobar y descargar, pero no reemplazar el código
 **1. Con GUI (dashboard web)** — la forma recomendada:
 
 ```
-iniciar_gui.bat     ← doble clic en Windows (crea un entorno virtual .venv aislado e instala dependencias solo la primera vez)
+iniciar_gui.bat     ← doble clic: usa el Python del ZIP o prepara .venv si se ejecuta desde fuentes
 ```
 
 Te abre `http://127.0.0.1:8000` en el navegador con un panel completo: consola en vivo, botones de iniciar/detener/reiniciar, backups, jugadores online (con permisos, allowlist y kick/ban), medidores de RAM/CPU/disco con gráficas de las últimas 24 horas, la versión instalada de BDS, programación de backups y watchdog, actualizador oficial de Mojang con vuelta atrás a la versión anterior y una tarjeta con tu IP para invitar amigos. Interfaz de vidrio con cabecera flotante y navegación inferior: Servidor, Jugadores, Backups y Addons.
@@ -77,11 +80,14 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 
 | Archivo | Qué hace |
 |---|---|
-| `iniciar_gui.bat` | Arranca la GUI (crea el `.venv` e instala dependencias de Python si faltan) |
-| `iniciar_servidor.bat` | Arranca el servidor con el wrapper clásico (sin GUI; también asegura el `.venv` y las dependencias) |
+| `iniciar_gui.bat` | Arranca la GUI con el Python incluido; desde fuentes prepara `.venv` si hace falta |
+| `iniciar_servidor.bat` | Arranca el wrapper sin GUI con Python incluido o el entorno de fuentes |
 | `server_gui_server.py` | Backend de la GUI: FastAPI + WebSockets, sirve el frontend |
 | `server_wrapper.py` | Script principal: lee la consola, detecta jugadores, maneja los backups |
 | `backup_worker.py` | Worker de compresión en proceso separado (subprocess, arranque rápido) |
+| `version.json` / `suite_version.py` | Versión común de backend, API e interfaz; independiente de BDS |
+| `suite_release.py` / `suite_updater.py` | Instalación selectiva del programa, comprobación de arranque y rollback |
+| `Recuperar_suite.bat` | Recupera una actualización interrumpida con el runtime auxiliar |
 | `tools/bds_first_run.py` | Primer arranque por consola: descarga BDS si falta (pregunta S/n) |
 | `tools/verify_backups.py` | Verifica los backups (CRC + presencia de `level.dat`) y marca los no restaurables con `_CORRUPTO` |
 | `auto_backup.py` | Comprime la base de datos a ZIP |
@@ -189,8 +195,11 @@ Maintenance instructions: [versioning guide](docs/VERSIONADO.md) (Spanish).
 
 ### Two ways to use it
 
+[Download Windows ZIP](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/latest/download/BedrockSuite-Windows-x64.zip) · [SHA-256 checksum](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/latest/download/BedrockSuite-Windows-x64.zip.sha256) · [Latest release](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/latest).
+
 **Windows x64 ZIP:** `BedrockSuite-Windows-x64.zip` includes Python and its
-dependencies. Extract it fully and open `iniciar_gui.bat`; no Python, Git or Node
+dependencies. Extract it fully to a short path, such as `C:\BedrockSuite`, and
+open `iniciar_gui.bat`; no Python, Git or Node
 installation is needed. Releases are published separately from commits.
 **More actions → Update the suite** checks stable releases and requires confirmation
 before installation. It preserves worlds and configuration, waits for the final
@@ -201,7 +210,7 @@ Git checkouts allow checks and downloads, but no automatic file replacement.
 **1. With GUI (web dashboard)** — the recommended way:
 
 ```
-iniciar_gui.bat     ← double-click on Windows (creates an isolated .venv virtual environment and installs dependencies only once)
+iniciar_gui.bat     ← double-click: uses bundled Python, or prepares .venv when running from source
 ```
 
 Opens `http://127.0.0.1:8000` in your browser with a full panel: live console, start/stop/restart buttons, backups, online players (with permissions, allowlist and kick/ban), RAM/CPU/disk meters with 24-hour charts, the installed BDS version, backup scheduling and watchdog, an official Mojang updater with rollback to the previous version and a card with your IP to invite friends. Glass interface with a floating header and bottom navigation: Server, Players, Backups and Addons.
@@ -245,7 +254,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 
 | File | What it does |
 |---|---|
-| `iniciar_gui.bat` | Starts the GUI (creates the `.venv` and installs Python deps if missing) |
+| `iniciar_gui.bat` | Starts the GUI with bundled Python, or prepares `.venv` for a source installation |
 | `iniciar_servidor.bat` | Starts the server with the classic wrapper (no GUI; also ensures the `.venv` and dependencies) |
 | `server_gui_server.py` | GUI backend: FastAPI + WebSockets, serves the frontend |
 | `server_wrapper.py` | Main script: reads the console, detects players, handles backups |

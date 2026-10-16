@@ -7,9 +7,21 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 
 ## [Sin publicar]
 
-Los próximos cambios se documentarán aquí antes de preparar otra versión.
+### Documentación y mantenimiento
+
+- Enlaces de descarga del ZIP/checksum y registro de la publicación de 2.1.0,
+  instrucciones de validación, recuperación y arquitectura del actualizador.
+- Workflows de tests y Release solo manuales; push de ramas/tags y PR no
+  inician jobs. Estas instrucciones se conservan al sincronizar repositorios.
+
+Estos cambios posteriores a la Release no modifican el ZIP ni la etiqueta
+2.1.0 ya publicados.
 
 ## [2.1.0] - 2026-10-15
+
+Preparada el 15 de octubre y [publicada el 16 de octubre de 2026](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.0)
+con ZIP Windows x64 y checksum. Procedencia, hash y alcance de la validación
+en [ACTUALIZACIONES_SUITE.md](docs/ACTUALIZACIONES_SUITE.md).
 
 ### Añadido
 
@@ -31,7 +43,8 @@ Los próximos cambios se documentarán aquí antes de preparar otra versión.
 
 - Compatible con instalaciones nuevas y con instalaciones previas de scripts.
   En checkouts Git se permite comprobar y descargar; no reemplazar el código.
-- Preparación y pruebas locales. Publicación y despliegue requieren pedido expreso.
+- La Release pública no implica un despliegue en el servidor real; sincronizar
+  o actualizar esa instalación requiere un pedido propio.
 
 ## [2.0.0] - 2026-10-15
 
@@ -60,7 +73,7 @@ del producto y no se presentan como incorporaciones de este cambio.
   la aprobación del operador para ejecutar una propuesta.
 - Interfaz ES/EN con apariencia personalizable y consola expandible.
 
-### Estado de publicación
+### Estado al preparar 2.0.0
 
-Preparada e identificada localmente. Esta versión no implica un push a GitHub
-ni una sincronización con el servidor de producción.
+Se preparó e identificó localmente antes de publicar 2.1.0. Esa preparación no
+incluyó sincronizar el servidor de producción.

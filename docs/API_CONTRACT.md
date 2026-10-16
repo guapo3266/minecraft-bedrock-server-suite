@@ -294,7 +294,7 @@ Cliente → servidor:
 - Guarda temprana: el middleware de `create_app()` aplica S1+S3 a `/api/*` antes de pydantic; los endpoints re-chequean (defensa en profundidad).
 - `manager.lock`: mutaciones/lecturas de `players_online` y `log_history`.
 - `manager.stdin_lock`: TODAS las escrituras a `wrapper_process.stdin` (API command, WS command, stop/restart/backup/update) — 6 sitios.
-- `manager.op_lock`: exclusión mutua de start/restore/update/backup frío/install.
+- `manager.op_lock`: exclusión mutua de start/restore/update BDS/update suite/backup frío/install.
 - Stop deliberado: `stop_requested` solo se marca DESPUÉS de entregar el `stop` por stdin (router stop, `POST /api/command`, comando WS, `restart_wrapper`, `stop_and_wait`); si el write falla, la operación se cancela sin inhibir al watchdog.
 - Eventos G8: `server_stopped_event` (BDS muerto) ≠ `wrapper_exit_event` (wrapper terminado, backup final incluido).
 - `SERVER_STOP_TIMEOUT_SEC=75`, `WRAPPER_EXIT_TIMEOUT_SEC=450`.
@@ -302,8 +302,19 @@ Cliente → servidor:
 
 ## Arranque (no modificar)
 
-- `iniciar_gui.bat` → `.venv\Scripts\python.exe server_gui_server.py` (el `.bat` asegura `.venv` + `requirements.txt`; fallback a `python` del PATH).
+- Si existe un diario de actualización, `iniciar_gui.bat` ejecuta primero
+  `Recuperar_suite.bat` con el Python auxiliar; un error impide abrir otra GUI.
+- El ZIP usa `runtime\python.exe -B server_gui_server.py`. Una instalación de
+  scripts sin ese runtime conserva el bootstrap de `.venv` + `requirements.txt`
+  y el fallback a `python` del PATH.
 - Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
-- `uvicorn.run("server_gui_server:app", host="127.0.0.1", ...)`.
+- El entrypoint ejecuta `uvicorn.Server(uvicorn.Config(app, ...))` y registra
+  `suite_update.configure_runtime` con el puerto real y un callback de
+  `server.should_exit`; el auxiliar puede solicitar un cierre coordinado.
+- `GUI_OPEN_BROWSER=0` evita abrir otra pestaña al relanzar tras una actualización.
 - Estáticos: `/assets` desde `gui_frontend/dist/assets` (si existe) y `/static` desde `web/`.
-- `lifespan`: `manager.loop`, `recover_interrupted_updates()`, `recover_interrupted_restores()`, bucle de métricas (2s, incluye la sonda de instancia externa), `watchdog.start()` (hilo daemon opt-in; los tests lo neutralizan en `tests/conftest.py`) y `history.start()` (SQLite + precarga de logs).
+- `lifespan`: `manager.loop`, `suite_update.enter_handoff_guard()`,
+  `recover_interrupted_updates()`, `recover_interrupted_restores()`, bucle de
+  métricas (2s, incluye la sonda de instancia externa), `watchdog.start()`
+  (hilo daemon opt-in; los tests lo neutralizan en `tests/conftest.py`) e
+  `history.start()` (SQLite + precarga de logs).
