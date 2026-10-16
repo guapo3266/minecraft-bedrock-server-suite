@@ -59,3 +59,17 @@ Resultados de esta revisión:
   fondos, wizard, i18n, IA con aprobación humana, efectos reducidos y fallback
   sin WebGL aprobados. Sin errores JavaScript. API y WebSocket simulados:
   no acredita operaciones reales de Minecraft.
+
+
+## Sincronización de la reversión
+
+Se alinearon el asistente inicial y el cierre WebSocket con la reversión
+validada en TESTTEST. Se conservaron las adaptaciones propias de rutas,
+subprocesos Python, documentación y pruebas de este repositorio. Los assets
+obsoletos se resguardaron fuera del árbol y `dist/` se reconstruyó aquí; sus
+12 archivos coinciden por SHA-256 con el build validado de TESTTEST.
+
+Nueva validación sobre este árbol: **1014 pruebas Python aprobadas, 2 omitidas
+por requerir archivos de una instalación real y 2 e2e excluidas**. Ruff, lint,
+**88 pruebas del frontend** y build aprobados. La sincronización es local,
+sin push, release ni publicación de binarios.

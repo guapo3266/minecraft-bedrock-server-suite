@@ -26,7 +26,6 @@ import json
 import os
 
 import pytest
-from fastapi import WebSocketDisconnect
 
 from gui_backend.routers.websocket import websocket_endpoint
 from gui_backend.state import manager
@@ -311,17 +310,3 @@ def test_ws_mensaje_set_lang_invalido_no_cambia_idioma():
     ws = _WsFalso(entrantes=[json.dumps({"type": "set_lang", "lang": ""})])
     _correr_hasta_desconexion(ws)
     assert os.environ.get("WRAPPER_LANG") == previo
-
-
-@pytest.mark.parametrize("code", [1000, 1012])
-@pytest.mark.parametrize("fase", ["send_json", "receive_text"])
-def test_ws_desconexion_normal_no_propaga_y_limpia_registro(code, fase):
-    ws = _WsFalso()
-
-    async def desconectar(*args):
-        raise WebSocketDisconnect(code=code)
-
-    setattr(ws, fase, desconectar)
-    asyncio.run(websocket_endpoint(ws))
-    assert ws.accepted
-    assert ws not in manager.active_websockets

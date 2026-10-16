@@ -2,7 +2,7 @@
 
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket
 
 from console_lang import L, set_lang as _set_lang
 from gui_backend.security import _get_request_port, _host_header_hostname, _is_allowed_client_host, _is_allowed_origin
@@ -118,9 +118,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     _set_lang(msg.get("lang"))
             except Exception:
                 pass
-    except WebSocketDisconnect:
-        # Cerrar el panel o apagar uvicorn (1012) termina la sesion normalmente.
-        pass
     finally:
         # Cualquier salida (disconnect u otro error de transporte) debe sacar
         # el socket del registro; si no, broadcast reintenta contra un socket

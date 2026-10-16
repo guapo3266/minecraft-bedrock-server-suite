@@ -72,7 +72,7 @@ gui_backend/
     websocket.py                # /ws (Origin puerto-estricto, stdin_lock 6/6)
 ```
 
-## Frontend y aplicación de escritorio
+## Frontend
 
 La GUI React/Vite se distribuye compilada en `gui_frontend/dist/`; Node solo
 interviene en desarrollo/build. `App.jsx` conserva una sesión WS y mantiene

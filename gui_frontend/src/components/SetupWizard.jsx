@@ -209,7 +209,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
         setInstallResult({ ok: true, message: t('setupInstallOk') });
       } else {
         // sigue en curso: se mantiene el aviso "en progreso"
-        setInstallResult({ ok: false, message: t(installing ? 'setupInstallSlow' : 'setupBdsNotFoundManual') });
+        setInstallResult({ ok: false, message: t('setupInstallSlow') });
       }
     } catch (e) {
       setInstallResult({ ok: false, message: t('setupNetError') + ` (${String(e)})` });
@@ -361,9 +361,6 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
                   <Download className="h-4 w-4" />
                   {installing ? t('setupInstalling') : installed ? t('setupBdsPresent') : t('setupInstall')}
                 </button>
-
-                {!installed && !installing && <button type="button" onClick={handleCheckInstallStatus}
-                  className="button secondary w-full">{t('setupCheckManual')}</button>}
 
                 {installResult && (
                   <div aria-live="polite" className={`rounded-lg border px-3 py-2 text-xs font-semibold ${installResult.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/40 bg-rose-500/10 text-rose-300'}`}>

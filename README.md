@@ -145,7 +145,7 @@ La suite Python cubre property-based tests (Hypothesis) del `save query`, versio
 
 El QA opcional de navegador se ejecuta con `python gui_frontend/tests/appearance-browser-check.py` y requiere Playwright Python y Chrome. Sirve el `dist/` real con API/WS simulados: comprueba fondos, temas, teclado, navegación y reconexión, sin ejecutar BDS. La guía del frontend está en [gui_frontend/README.md](gui_frontend/README.md).
 
-Validación local del 2026-10-15: **1018 pruebas Python aprobadas, 2 omitidas por requerir una instalación real, 2 e2e excluidas y 88 pruebas frontend aprobadas**, además de lint, build y QA visual con API simulada. Alcance y sincronización: [informe de actualización](docs/INFORME_ACTUALIZACION_2026-10-15.md).
+Validación local del 2026-10-15: **1014 pruebas Python aprobadas, 2 omitidas por requerir una instalación real, 2 e2e excluidas y 88 pruebas frontend aprobadas**, además de lint, build y QA visual con API simulada. Alcance y sincronización: [informe de actualización](docs/INFORME_ACTUALIZACION_2026-10-15.md).
 
 ### Licencia y aviso legal
 
@@ -297,7 +297,7 @@ The Python suite covers Hypothesis properties (`save query`, versions, zip-slip 
 
 Optional browser QA runs with `python gui_frontend/tests/appearance-browser-check.py` and requires Playwright Python and Chrome. It serves the real `dist/` with mocked API/WS to check backgrounds, themes, keyboard navigation and reconnection without running BDS. See [gui_frontend/README.md](gui_frontend/README.md) (Spanish).
 
-Local validation on 2026-10-15: **1018 Python tests passed, 2 skipped because they require a real installation, 2 e2e deselected and 88 frontend tests passed**, plus lint, build and browser QA with mocked API. Scope and synchronization: [update report](docs/INFORME_ACTUALIZACION_2026-10-15.md) (Spanish).
+Local validation on 2026-10-15: **1014 Python tests passed, 2 skipped because they require a real installation, 2 e2e deselected and 88 frontend tests passed**, plus lint, build and browser QA with mocked API. Scope and synchronization: [update report](docs/INFORME_ACTUALIZACION_2026-10-15.md) (Spanish).
 
 ### License and disclaimer
 
