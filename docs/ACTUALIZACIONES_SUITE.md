@@ -83,8 +83,10 @@ ese ZIP queda marcado y el actualizador lo rechaza. `release_python.json` fija
 CPython y su hash oficial; `requirements-release.txt` fija las dependencias.
 Se conservan sus licencias y se excluyen recursos `.agents` de desarrollo.
 
-El workflow **Release Windows** valida y construye el ZIP. Su ejecución manual
-solo crea un artifact. Publicar un tag `vX.Y.Z` coincidente con `version.json`
-dispara la Release con ZIP y checksum. Un push solo a main no crea Releases.
-No mover tags existentes. Push, publicación y despliegue son operaciones separadas
-que requieren el pedido del usuario.
+Los workflows **tests** y **Release Windows** se ejecutan solo manualmente desde
+Actions. Los pushes de ramas/tags y las PR no los activan. **Release Windows**
+valida y construye el ZIP: ejecutarlo sobre una rama crea un artifact; sobre un
+tag `vX.Y.Z` coincidente con `version.json` también publica la Release con ZIP y
+checksum. El ZIP ya validado puede publicarse directamente mediante la API de
+GitHub. No mover tags existentes. Push, publicación y despliegue son operaciones
+separadas que requieren el pedido del usuario.
