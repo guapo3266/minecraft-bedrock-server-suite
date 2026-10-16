@@ -11,6 +11,10 @@ Incluye CPython, dependencias y GUI compilada: no requiere Python, Git ni Node
 instalados. El wizard descarga BDS desde Mojang. El ZIP no incluye BDS, mundos,
 packs ni configuraciones personales. Admite instalaciones previas con scripts.
 
+Se recomienda una ruta corta, por ejemplo `C:\BedrockSuite`. Si Windows rechaza
+las rutas largas del staging o del auxiliar, la preparación se cancela antes de
+reemplazar el programa; extraer la instalación en una ruta corta permite repetirla.
+
 ## Qué puede reemplazar
 
 Descarga el ZIP completo, pero solo reemplaza archivos del programa cuyo hash

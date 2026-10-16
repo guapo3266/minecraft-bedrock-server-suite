@@ -49,9 +49,10 @@ def build(output, allow_dirty=False):
                         "--only-binary=:all:", "--python-version", ".".join(pin["version"].split(".")[:2]),
                         "--platform", "win_amd64", "--implementation", "cp", "--abi", "cp" + minor,
                         "--target", str(runtime / "Lib/site-packages"), "-r", str(ROOT / "requirements-release.txt")], check=True)
-        # Algunos wheels incluyen instrucciones de agentes para desarrollo;
+        # Algunos wheels incluyen tests, cachés e instrucciones de desarrollo;
         # no forman parte del runtime ni se distribuyen con nuestra aplicación.
-        for extra in list(runtime.rglob(".agents")):
+        extras = [p for p in runtime.rglob("*") if p.name in {".agents", "tests", "__pycache__"}]
+        for extra in sorted(extras, key=lambda p: len(p.parts), reverse=True):
             if extra.is_dir():
                 assert extra.absolute().is_relative_to(package.absolute())
                 shutil.rmtree(extra)
@@ -90,6 +91,7 @@ def build(output, allow_dirty=False):
             "Minecraft Bedrock Server Suite\n\nExtrae el ZIP completo y abre iniciar_gui.bat.\n"
             "Incluye Python y dependencias: no requiere Python, Git ni Node instalados.\n"
             "Minecraft/BDS se descarga desde Mojang mediante el asistente inicial.\n"
+            "Se recomienda una ruta corta, por ejemplo C:\\BedrockSuite, para evitar límites de Windows.\n"
             "Para actualizar, usa Actualizar la suite en la GUI. Los mundos y configuraciones se conservan.\n"
             "Si una actualización se interrumpe, vuelve a abrir iniciar_gui.bat o Recuperar_suite.bat.\n",
             encoding="utf-8")
