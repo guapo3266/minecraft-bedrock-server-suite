@@ -31,7 +31,10 @@ _ruido = st.text(
     ),
     st.text(max_size=20),
 )
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
+# deadline=None: cada ejemplo escribe a disco; la primera E/S en frio
+# (Defender/NTFS) superaba los 200 ms por defecto (FlakyFailure).
+@settings(max_examples=200, deadline=None,
+          suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 def test_read_value_encuentra_el_valor_con_ruido(tmp_path, lineas, valor, espacios):
     """`clave = valor` (con cualquier espacio alrededor) se encuentra aunque
     haya ruido alrededor; la clave no puede contener '=' ni saltos."""

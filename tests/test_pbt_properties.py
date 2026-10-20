@@ -182,7 +182,9 @@ def valid_world_relative_path(draw):
 
 
 @given(valid_world_relative_path())
-@settings(max_examples=100)
+# deadline=None: cada ejemplo crea un TemporaryDirectory; la primera E/S en
+# frio (Defender/NTFS) superaba los 200 ms por defecto (FlakyFailure).
+@settings(max_examples=100, deadline=None)
 @example("db/000030.ldb")
 @example("level.dat")
 @example("db/MANIFEST-000001")
