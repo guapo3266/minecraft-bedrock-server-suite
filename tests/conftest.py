@@ -77,6 +77,24 @@ def _watchdog_de_fondo_desactivado():
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _espera_del_wrapper_no_depende_del_mundo_real():
+    """La espera de fase 2 de la GUI escala con el tamano del mundo.
+
+    `lifecycle.wrapper_exit_timeout_sec` suma al piso de config lo que el mundo
+    anade al cierre del wrapper. Los tests de restart/stop_and_wait fijan el
+    piso en fracciones de segundo; si midieran el `worlds/` REAL de la
+    instalacion (puede pesar GB), la espera efectiva seria de minutos y la suite
+    dependeria de la maquina. Aqui el tamano es 0; los tests de la escala
+    parchean `lifecycle._estimate_world_bytes` con su propio valor.
+    """
+    from gui_backend.services import lifecycle
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(lifecycle, "_estimate_world_bytes", lambda: 0)
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _host_header_de_tests_permitido():
     """El TestClient de Starlette manda `Host: testserver`; el guard anti
     DNS-rebinding (S1b, 2026-09-25) rechaza hostnames que no son loopback/

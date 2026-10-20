@@ -190,7 +190,9 @@ vía `manager.add_log`.
 - Eventos G8: `server_stopped_event` (BDS muerto) ≠ `wrapper_exit_event`
   (wrapper terminado, backup final incluido). restart/update esperan en DOS
   fases con `config.SERVER_STOP_TIMEOUT_SEC` (75s) y
-  `config.WRAPPER_EXIT_TIMEOUT_SEC` (450s).
+  `config.WRAPPER_EXIT_TIMEOUT_SEC` (450s, piso: la espera efectiva suma lo que
+  el tamaño del mundo añade al join del worker y al backup final del wrapper,
+  `lifecycle.wrapper_exit_timeout_sec()`).
 - El registro WebSocket (`active_websockets`) y `broadcast()` viven en
   `state.py`; el router WS solo añade/descarta conexiones. El `finally` del
   router cubre TODA la sesión registrada, incluido el envío del `init`: un

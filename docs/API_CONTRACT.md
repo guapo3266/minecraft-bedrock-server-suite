@@ -282,7 +282,7 @@ Cliente → servidor:
 - `manager.op_lock`: exclusión mutua de start/restore/update BDS/update suite/backup frío/install.
 - Stop deliberado: `stop_requested` solo se marca DESPUÉS de entregar el `stop` por stdin (router stop, `POST /api/command`, comando WS, `restart_wrapper`, `stop_and_wait`); si el write falla, la operación se cancela sin inhibir al watchdog.
 - Eventos G8: `server_stopped_event` (BDS muerto) ≠ `wrapper_exit_event` (wrapper terminado, backup final incluido).
-- `SERVER_STOP_TIMEOUT_SEC=75`, `WRAPPER_EXIT_TIMEOUT_SEC=450`.
+- `SERVER_STOP_TIMEOUT_SEC=75`, `WRAPPER_EXIT_TIMEOUT_SEC=450` (piso de la fase 2; la espera efectiva suma `wrapper_state.shutdown_extra_sec` según el tamaño del mundo, ver `lifecycle.wrapper_exit_timeout_sec()`).
 - `manager` es un singleton global; nunca crear instancias por petición.
 
 ## Arranque (no modificar)

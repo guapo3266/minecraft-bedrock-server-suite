@@ -693,12 +693,18 @@ if __name__ == "__main__":
             with wstate.state_lock:
                 wstate.shutting_down = True
                 current_worker = wstate.backup_thread
+                worker_timeout = wstate.active_worker_timeout_sec
 
             # ── Paso 1: Esperar al worker de backup si está activo ──
             if current_worker and current_worker.is_alive():
-                print(L(f"[Wrapper] Esperando a que termine el backup en curso (Max {wstate.WORKER_JOIN_ON_SHUTDOWN_SEC}s)...", f"[Wrapper] Waiting for the running backup to finish (Max {wstate.WORKER_JOIN_ON_SHUTDOWN_SEC}s)..."))
+                # Join = timeout ESCALADO del propio worker + margen (piso 135 s):
+                # con un fijo, un snapshot grande hacia que este cierre matara al
+                # worker ANTES de que venciera su timeout (carrera de dos rutas
+                # de kill sobre el mismo proceso, ver wrapper_state).
+                worker_join_timeout = wstate.worker_join_timeout_sec(worker_timeout)
+                print(L(f"[Wrapper] Esperando a que termine el backup en curso (Max {worker_join_timeout}s)...", f"[Wrapper] Waiting for the running backup to finish (Max {worker_join_timeout}s)..."))
                 try:
-                    current_worker.join(timeout=wstate.WORKER_JOIN_ON_SHUTDOWN_SEC)
+                    current_worker.join(timeout=worker_join_timeout)
                 except KeyboardInterrupt:
                     print(L("[Wrapper] Interrupción por teclado durante join del worker.", "[Wrapper] Keyboard interrupt during worker join."))
 

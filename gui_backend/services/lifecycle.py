@@ -11,10 +11,37 @@ import threading
 import time
 
 import auto_backup
+import wrapper_state
 from console_lang import L
 
 from gui_backend import config, supervisor
 from gui_backend.state import manager
+
+
+def _estimate_world_bytes():
+    """Bytes sin comprimir del proximo backup (los que ve el wrapper al cerrar).
+
+    Costura de tests: tests/conftest.py la fija en 0 para que la suite no
+    dependa del tamano del mundo real de la instalacion.
+    """
+    return auto_backup.estimate_backup_total_bytes()
+
+
+def wrapper_exit_timeout_sec():
+    """Espera de la fase 2 (wrapper completo) para el mundo actual.
+
+    Piso configurable (`config.WRAPPER_EXIT_TIMEOUT_SEC`, holgura incluida) mas
+    lo que el tamano del mundo anade al cierre del wrapper: su join del worker
+    caliente y su backup final escalan (`wrapper_state.shutdown_extra_sec`, la
+    misma escala que usa el wrapper). Con un tope fijo la GUI abortaba una
+    actualizacion/reinicio mientras el backup final seguia legitimamente en
+    curso. Nunca lanza: un fallo al estimar deja el piso.
+    """
+    try:
+        extra = wrapper_state.shutdown_extra_sec(_estimate_world_bytes())
+    except Exception:
+        extra = 0
+    return config.WRAPPER_EXIT_TIMEOUT_SEC + extra
 
 
 def _launch_wrapper():
@@ -112,13 +139,15 @@ def restart_wrapper():
             return
         #  Fase 2: que el wrapper termine del todo (backup final de cierre
         # incluido) antes de lanzar otro: dos wrappers comprimiendo el mismo
-        # mundo pisarian sus copias.
-        if not exit_event.wait(timeout=config.WRAPPER_EXIT_TIMEOUT_SEC):
+        # mundo pisarian sus copias. El tope escala con el tamano del mundo,
+        # igual que los timeouts del wrapper (wrapper_exit_timeout_sec).
+        wrapper_exit_timeout = wrapper_exit_timeout_sec()
+        if not exit_event.wait(timeout=wrapper_exit_timeout):
             manager.add_log(
-                L(f"[GUI Backend] El wrapper no termino en {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
+                L(f"[GUI Backend] El wrapper no termino en {wrapper_exit_timeout}s "
                   "(incluye el backup final de cierre). Reinicio cancelado; "
                   "inicia el servidor manualmente.",
-                  f"[GUI Backend] The wrapper did not finish within {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
+                  f"[GUI Backend] The wrapper did not finish within {wrapper_exit_timeout}s "
                   "(includes the final shutdown backup). Restart cancelled; "
                   "start the server manually."),
                 "error",
@@ -174,11 +203,12 @@ def stop_and_wait(tag="[Actualizador BDS]"):
             "error",
         )
         return False
-    if not manager.wrapper_exit_event.wait(timeout=config.WRAPPER_EXIT_TIMEOUT_SEC):
+    wrapper_exit_timeout = wrapper_exit_timeout_sec()
+    if not manager.wrapper_exit_event.wait(timeout=wrapper_exit_timeout):
         manager.add_log(
-            L(f"{tag} El wrapper no termino en {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
+            L(f"{tag} El wrapper no termino en {wrapper_exit_timeout}s "
               "(incluye el backup final de cierre). Operación cancelada.",
-              f"{tag} The wrapper did not finish within {config.WRAPPER_EXIT_TIMEOUT_SEC}s "
+              f"{tag} The wrapper did not finish within {wrapper_exit_timeout}s "
               "(includes the final shutdown backup). Operation cancelled."),
             "error",
         )

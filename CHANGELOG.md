@@ -15,6 +15,16 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
   auditoría y la variable `LMSTUDIO_MODEL` de los lanzadores de la GUI. Los
   comandos se siguen enviando solo desde la consola (`POST /api/command`).
 
+### Corregido
+
+- Esperas de cierre incoherentes con los timeouts de backup escalados por
+  tamaño: el join de cierre del worker caliente usa ahora su propio timeout
+  escalado (+15 s, piso 135 s) y la GUI deriva la espera de fase 2 de
+  reinicio/actualización de BDS/rollback/actualizador de suite de la misma
+  escala (piso 450 s). Antes abortaban con el backup final aún en curso en
+  mundos desde ~1,75 GB (~0,63 GB con un backup caliente activo). Detalle en
+  `docs/INFORME_TIMEOUTS_CIERRE_2026-10-19.md`.
+
 ### Documentación y mantenimiento
 
 - Enlaces de descarga del ZIP/checksum y registro de la publicación de 2.1.0,

@@ -36,7 +36,43 @@ def scaled_backup_timeout_sec(total_bytes, base_sec, sec_per_gb=None):
     return min(max(base_sec, base_sec + extra), BACKUP_TIMEOUT_MAX_SEC)
 
 
-WORKER_JOIN_ON_SHUTDOWN_SEC = 135
+# Join del worker caliente al cerrar: su PROPIO timeout + margen, para que el
+# worker procese siempre su "suicidio" (CASO A de execute_backup_worker) antes
+# que la red de seguridad del cierre maestro (dos rutas matando el mismo proceso
+# a la vez era la carrera de DOCUMENTACION_ARQUITECTURA_V5 §3). 135 es el PISO
+# (120 + 15); con un snapshot grande el timeout del worker escala y el join debe
+# escalar con el (worker_join_timeout_sec), no quedarse en el fijo.
+WORKER_JOIN_MARGIN_SEC = 15
+WORKER_JOIN_ON_SHUTDOWN_SEC = WORKER_COMPRESSION_TIMEOUT_SEC + WORKER_JOIN_MARGIN_SEC
+
+
+def worker_join_timeout_sec(worker_timeout_sec=None):
+    """Tope del join de cierre para el worker activo (>= WORKER_JOIN_ON_SHUTDOWN_SEC).
+
+    `worker_timeout_sec` es el timeout con el que arranco el worker
+    (`active_worker_timeout_sec`); sin worker o con valor invalido, el piso.
+    """
+    if (not isinstance(worker_timeout_sec, (int, float))
+            or isinstance(worker_timeout_sec, bool) or worker_timeout_sec <= 0):
+        return WORKER_JOIN_ON_SHUTDOWN_SEC
+    return max(WORKER_JOIN_ON_SHUTDOWN_SEC, worker_timeout_sec + WORKER_JOIN_MARGIN_SEC)
+
+
+def shutdown_extra_sec(total_bytes):
+    """Segundos que el tamano del mundo anade, sobre los pisos, al cierre del wrapper.
+
+    Peor caso tras la muerte de BDS: join del worker caliente + backup final.
+    Fuente unica de la espera de fase 2 de la GUI
+    (gui_backend.services.lifecycle.wrapper_exit_timeout_sec): la GUI suma esto
+    a su piso WRAPPER_EXIT_TIMEOUT_SEC para no abortar mientras el wrapper sigue
+    dentro de sus propios timeouts escalados. 0 con tamano desconocido o chico.
+    """
+    join = worker_join_timeout_sec(
+        scaled_backup_timeout_sec(total_bytes, WORKER_COMPRESSION_TIMEOUT_SEC))
+    final = scaled_backup_timeout_sec(total_bytes, FINAL_BACKUP_TIMEOUT_SEC)
+    return (join - WORKER_JOIN_ON_SHUTDOWN_SEC) + (final - FINAL_BACKUP_TIMEOUT_SEC)
+
+
 # Tope del join tras matar el proceso de compresion (TerminateProcess es
 # inmediato; el tope solo evita que un wait colgado retenga state_lock).
 WORKER_KILL_JOIN_TIMEOUT_SEC = 10
@@ -60,6 +96,9 @@ last_backup_completed_time = 0
 save_hold_timestamp = 0
 backup_thread = None
 active_compress_process = None
+# Timeout efectivo (escalado) del worker caliente en curso; 0 = ninguno. Lo
+# publica execute_backup_worker bajo state_lock y el cierre lo lee para el join.
+active_worker_timeout_sec = 0
 last_save_snapshot = []
 save_query_ready_seen = False
 backup_cancel_event = None

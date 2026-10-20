@@ -199,6 +199,23 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
             files=len(file_snapshot) if file_snapshot else 0,
         )
 
+        # Timeout proporcional al tamano del snapshot (H1-2026-09-25): con
+        # mundos grandes el fijo de WORKER_COMPRESSION_TIMEOUT_SEC mataba al
+        # worker en cada ciclo y el backup caliente nunca completaba. Se calcula
+        # ANTES del Popen y se publica: el join de cierre del wrapper lo necesita
+        # para esperar mas que el propio worker (ver wstate.worker_join_timeout_sec).
+        total_snap_bytes = 0
+        for _item in (file_snapshot or []):
+            try:
+                _b = _item[1]
+            except (TypeError, IndexError):
+                continue
+            if isinstance(_b, int) and _b > 0:
+                total_snap_bytes += _b
+        comp_timeout = wstate.scaled_backup_timeout_sec(total_snap_bytes, wstate.WORKER_COMPRESSION_TIMEOUT_SEC)
+        with wstate.state_lock:
+            wstate.active_worker_timeout_sec = comp_timeout
+
         import json as _json
         _base = wstate.BASE_DIR
         _stamp = int(time.time() * 1000)
@@ -240,19 +257,6 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
 
         with wstate.state_lock:
             wstate.active_compress_process = comp_proc
-
-        # Timeout proporcional al tamano del snapshot (H1-2026-09-25): con
-        # mundos grandes el fijo de WORKER_COMPRESSION_TIMEOUT_SEC mataba al
-        # worker en cada ciclo y el backup caliente nunca completaba.
-        total_snap_bytes = 0
-        for _item in (file_snapshot or []):
-            try:
-                _b = _item[1]
-            except (TypeError, IndexError):
-                continue
-            if isinstance(_b, int) and _b > 0:
-                total_snap_bytes += _b
-        comp_timeout = wstate.scaled_backup_timeout_sec(total_snap_bytes, wstate.WORKER_COMPRESSION_TIMEOUT_SEC)
 
         comp_proc.join(timeout=comp_timeout)
 
@@ -385,6 +389,9 @@ def execute_backup_worker(file_snapshot=None, cancel_event=None):
                     os.remove(_p)
                 except Exception:
                     pass
+        # El worker ya no esta en curso: el cierre no debe esperar un timeout ajeno.
+        with wstate.state_lock:
+            wstate.active_worker_timeout_sec = 0
 
 
 def _begin_manual_hot_backup():

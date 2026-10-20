@@ -34,7 +34,7 @@ Con un mundo cuya compresión de cierre tarda >30s, el reinicio/actualización s
 | Constante | Valor | Cuándo tocarla |
 |---|---|---|
 | `SERVER_STOP_TIMEOUT_SEC` | 75 | Debe ser **mayor** que `BDS_STOP_TIMEOUT_SEC` del wrapper (60): el wrapper fuerza el kill y la GUI solo observa. Si tu mundo tarda mucho en guardar al cerrar, súbela; nunca la bajes por debajo del valor del wrapper |
-| `WRAPPER_EXIT_TIMEOUT_SEC` | 450 | Presupuesto: 75 (BDS) + 135 (join del worker caliente) + 240 (backup final) + margen. Si cambias esos topes en el wrapper, recalcula esta |
+| `WRAPPER_EXIT_TIMEOUT_SEC` | 450 | Presupuesto: 75 (BDS) + 135 (join del worker caliente) + 240 (backup final) + margen. Si cambias esos topes en el wrapper, recalcula esta. **Vigencia (2026-10-19):** hoy es solo el PISO; el join y el backup final escalan con el mundo y la GUI suma `wrapper_state.shutdown_extra_sec` (`docs/INFORME_TIMEOUTS_CIERRE_2026-10-19.md`) |
 
 La mecánica de dos eventos en sí (marcador + respaldo en `finally`) no debería tocarse: es lo que hace que el reinicio no dependa del tamaño del mundo.
 
