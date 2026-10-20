@@ -89,6 +89,40 @@ def test_backup_snapshot_incluye_packs_de_servidor():
         _teardown(tmp, old)
 
 
+def test_ida_y_vuelta_con_media_stored_y_resto_deflated():
+    """create_backup guarda PNG/OGG con ZIP_STORED y el resto con DEFLATED
+    (2026-10-19); restore_backup devuelve ambos byte a byte."""
+    tmp, fake_bkp, fake_world, fake_base, old = _setup_env()
+    try:
+        _write(os.path.join(fake_world, "level.dat"), b"WORLD-V1")
+        rp, bp = _make_packs(fake_base)
+        png = os.urandom(4096)
+        ogg = os.urandom(2048)
+        _write(os.path.join(rp, "textures", "rock.png"), png)
+        _write(os.path.join(bp, "sounds", "golpe.ogg"), ogg)
+
+        result = auto_backup.create_backup("test")
+        assert result, "backup completo fallo"
+        prefijo_rp = "server_resource_packs/Revolution Vibrant Visuals - Realistic/"
+        with zipfile.ZipFile(result) as zf:
+            assert zf.getinfo(prefijo_rp + "textures/rock.png").compress_type == zipfile.ZIP_STORED
+            assert zf.getinfo("server_behavior_packs/MiMod/sounds/golpe.ogg").compress_type == zipfile.ZIP_STORED
+            assert zf.getinfo(prefijo_rp + "manifest.json").compress_type == zipfile.ZIP_DEFLATED
+            assert zf.getinfo("level.dat").compress_type == zipfile.ZIP_DEFLATED
+
+        # la instalacion cambia despues del backup
+        _write(os.path.join(fake_world, "level.dat"), b"WORLD-V2")
+        _write(os.path.join(rp, "textures", "rock.png"), b"ROTO")
+        os.remove(os.path.join(bp, "sounds", "golpe.ogg"))
+
+        auto_backup.restore_backup(os.path.basename(result))
+        assert Path(os.path.join(fake_world, "level.dat")).read_bytes() == b"WORLD-V1"
+        assert Path(os.path.join(rp, "textures", "rock.png")).read_bytes() == png
+        assert Path(os.path.join(bp, "sounds", "golpe.ogg")).read_bytes() == ogg
+    finally:
+        _teardown(tmp, old)
+
+
 def test_restore_devuelve_packs_a_carpetas_de_servidor():
     """La restauracion reemplaza los packs del servidor con los del backup."""
     tmp, fake_bkp, fake_world, fake_base, old = _setup_env()

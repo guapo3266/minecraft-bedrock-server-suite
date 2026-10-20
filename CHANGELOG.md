@@ -27,7 +27,10 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 - Backups mucho más lentos de lo necesario con packs grandes: cada archivo se
   leía con `read(8 MiB)`, que en Windows reserva el búfer entero en cada
   llamada. Las lecturas se acotan ahora al tamaño del archivo; con ~12.000
-  archivos de packs el empaquetado baja de ~114 s a ~11 s.
+  archivos de packs el empaquetado baja de ~114 s a ~11 s. Además, PNG/OGG/MP3
+  se guardan sin recomprimir (`ZIP_STORED`) y los nombres de entrada de los
+  packs se calculan por directorio: ~16 % menos de CPU por backup, con un ZIP
+  ~1 % mayor.
 
 ### Documentación y mantenimiento
 

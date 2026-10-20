@@ -118,6 +118,17 @@ _CHUNK = 8 * 1024 * 1024
 # Piso de cada lectura de _write_file_chunked (ver _read_size): evita leer de
 # a pocos bytes un archivo que crecio despues del stat.
 _MIN_READ = 64 * 1024
+# Formatos que ya vienen comprimidos: deflate apenas los reduce (quedan al
+# 97-99 %) y gasta CPU en cada backup. Se guardan con ZIP_STORED (2026-10-19);
+# la restauracion lee igual entradas STORED y DEFLATED.
+_STORED_EXTENSIONS = frozenset({".png", ".ogg", ".mp3"})
+
+
+def _compress_type_for(path):
+    """ZIP_STORED para formatos ya comprimidos; ZIP_DEFLATED para el resto."""
+    if os.path.splitext(path)[1].lower() in _STORED_EXTENSIONS:
+        return zipfile.ZIP_STORED
+    return zipfile.ZIP_DEFLATED
 
 
 def _read_size(file_size):
@@ -286,11 +297,12 @@ def _write_file_chunked(zipf, full_path, arcname, cancel_event, cancel_msg=None)
     grandes (db/*.ldb de GBs) la cancelacion cooperativa tardaba todo lo que
     durara la compresion de ese archivo (H8-2026-09-25). Por chunks el aborto
     es casi inmediato. Preserva la fecha original del archivo. Cada lectura se
-    acota al tamano del archivo (_read_size), no al chunk maximo.
+    acota al tamano del archivo (_read_size), no al chunk maximo, y los
+    formatos ya comprimidos se guardan sin recomprimir (_compress_type_for).
     """
     msg = cancel_msg or L("Backup cancelado durante compresion.", "Backup cancelled during compression.")
     zinfo = zipfile.ZipInfo.from_file(full_path, arcname)
-    zinfo.compress_type = zipfile.ZIP_DEFLATED
+    zinfo.compress_type = _compress_type_for(full_path)
     read_size = _read_size(zinfo.file_size)
     with open(full_path, "rb") as src, zipf.open(zinfo, "w") as out:
         while True:
@@ -315,13 +327,18 @@ def _write_server_packs(zipf, total_bytes, cancel_event):
         prefix = _PACK_ZIP_PREFIX + pack_dir + "/"
         for root, dirs, files in os.walk(src_dir):
             _poda_reparse_points(root, dirs)
+            # Prefijo del directorio calculado UNA vez: un relpath por archivo
+            # costaba ~1 s con ~12.000 archivos de packs. Mismo arcname que
+            # relpath(full_f, src_dir) porque fname no contiene separadores.
+            rel_root = os.path.relpath(root, src_dir)
+            dir_prefix = prefix if rel_root == "." else prefix + rel_root.replace(os.sep, "/") + "/"
             for fname in files:
                 if _cancelled(cancel_event):
                     raise RuntimeError(L("Backup cancelado durante compresion de packs.", "Backup cancelled during pack compression."))
                 full_f = os.path.join(root, fname)
                 if _es_punto_reparse(full_f):
                     continue
-                arc = prefix + os.path.relpath(full_f, src_dir).replace(os.sep, "/")
+                arc = dir_prefix + fname
                 _write_file_chunked(
                     zipf, full_f, arc, cancel_event,
                     L("Backup cancelado durante compresion de packs.", "Backup cancelled during pack compression."),
