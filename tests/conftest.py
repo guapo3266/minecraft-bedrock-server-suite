@@ -19,11 +19,20 @@ import os
 import sys
 
 import pytest
+from hypothesis import settings
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gui_backend.services import history
 import wrapper_events
+
+# Perfil global de Hypothesis sin deadline (2026-10-19): muchas propiedades
+# tocan disco y la primera E/S en frio (antivirus/NTFS) superaba los 200 ms
+# por defecto -> DeadlineExceeded/FlakyFailure intermitentes en tests sanos
+# (test_rotate_old_survivors_bounded_by_recent_layer, test_read_value_*).
+# Los @settings de cada test siguen fijando max_examples.
+settings.register_profile("suite", deadline=None)
+settings.load_profile("suite")
 
 
 @pytest.fixture(autouse=True)

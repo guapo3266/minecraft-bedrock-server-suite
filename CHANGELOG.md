@@ -24,6 +24,10 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
   escala (piso 450 s). Antes abortaban con el backup final aún en curso en
   mundos desde ~1,75 GB (~0,63 GB con un backup caliente activo). Detalle en
   `docs/INFORME_TIMEOUTS_CIERRE_2026-10-19.md`.
+- Backups mucho más lentos de lo necesario con packs grandes: cada archivo se
+  leía con `read(8 MiB)`, que en Windows reserva el búfer entero en cada
+  llamada. Las lecturas se acotan ahora al tamaño del archivo; con ~12.000
+  archivos de packs el empaquetado baja de ~114 s a ~11 s.
 
 ### Documentación y mantenimiento
 
@@ -35,6 +39,10 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
   IA retirado (el plan conserva su registro histórico con una nota).
 - Notas de diseño del worker de backups actualizadas: IPC en JSON UTF-8 (no
   `pickle`), timeouts escalados por tamaño y parsers vigentes.
+- Suite de tests más rápida y estable: dos tests de `create_backup` ya no
+  empaquetan los packs reales de la instalación, Hypothesis usa un perfil
+  global sin deadline y el e2e del backup caliente ya no confunde el
+  `.zip.tmp` en curso con un ZIP publicado.
 
 Estos cambios posteriores a la Release no modifican el ZIP ni la etiqueta
 2.1.0 ya publicados.

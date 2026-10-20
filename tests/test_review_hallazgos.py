@@ -400,10 +400,14 @@ def test_e2e_gui_flag_backup_in_progress_nunca_true_caliente():
                     saw_in_progress = True
                 if j.get("last_backup") and j.get("last_backup") != "Ninguno":
                     last_backup_updates += 1
+                # Solo ZIPs PUBLICADOS: el .zip.tmp en curso tambien empieza
+                # por auto_backup_ y contiene "periodico"; contarlo daba el
+                # ciclo por terminado antes de tiempo (falso fallo 2026-10-19).
                 new_zips = [
                     f
                     for f in os.listdir(BACKUP_DIR_REAL)
-                    if f not in baseline and f.startswith("auto_backup_") and "periodico" in f
+                    if f not in baseline and f.startswith("auto_backup_")
+                    and "periodico" in f and f.endswith(".zip")
                 ]
                 if new_zips:
                     saw_zip = new_zips[0]

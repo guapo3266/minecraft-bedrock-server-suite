@@ -115,6 +115,23 @@ MAX_BACKUP_BYTES = 10 * 1024**3  # 10,737,418,240 bytes
 # Tamano de chunk para la copia en streaming de archivos de snapshot:
 # el pico de RAM es constante (~2x chunk), no proporcional al archivo.
 _CHUNK = 8 * 1024 * 1024
+# Piso de cada lectura de _write_file_chunked (ver _read_size): evita leer de
+# a pocos bytes un archivo que crecio despues del stat.
+_MIN_READ = 64 * 1024
+
+
+def _read_size(file_size):
+    """Tamano de cada src.read() para un archivo de `file_size` bytes.
+
+    Acotado a [_MIN_READ, _CHUNK] y, dentro de eso, al tamano del archivo
+    (+1 para que la primera lectura ya alcance EOF). En Windows read(n) reserva
+    un bufer de n bytes en CADA llamada aunque el archivo sea chico: con un fijo
+    de 8 MiB costaba ~3,5 ms por lectura y miles de archivos de packs llevaban
+    el backup a 74-185 s en lugar de ~10 s (H-2026-10-19).
+    """
+    if not isinstance(file_size, int) or file_size < 0:
+        return _MIN_READ
+    return max(_MIN_READ, min(_CHUNK, file_size + 1))
 
 
 class SnapshotDesyncError(RuntimeError):
@@ -268,16 +285,18 @@ def _write_file_chunked(zipf, full_path, arcname, cancel_event, cancel_msg=None)
     zipf.write() comprime el archivo entero de una sola vez: con archivos
     grandes (db/*.ldb de GBs) la cancelacion cooperativa tardaba todo lo que
     durara la compresion de ese archivo (H8-2026-09-25). Por chunks el aborto
-    es casi inmediato. Preserva la fecha original del archivo.
+    es casi inmediato. Preserva la fecha original del archivo. Cada lectura se
+    acota al tamano del archivo (_read_size), no al chunk maximo.
     """
     msg = cancel_msg or L("Backup cancelado durante compresion.", "Backup cancelled during compression.")
     zinfo = zipfile.ZipInfo.from_file(full_path, arcname)
     zinfo.compress_type = zipfile.ZIP_DEFLATED
+    read_size = _read_size(zinfo.file_size)
     with open(full_path, "rb") as src, zipf.open(zinfo, "w") as out:
         while True:
             if _cancelled(cancel_event):
                 raise RuntimeError(msg)
-            chunk = src.read(_CHUNK)
+            chunk = src.read(read_size)
             if not chunk:
                 break
             out.write(chunk)

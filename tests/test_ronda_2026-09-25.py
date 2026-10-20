@@ -102,6 +102,9 @@ def test_create_backup_fsync_antes_de_publicar(tmp_path, monkeypatch):
     (mundo / "level.dat").write_bytes(b"L" * 10)
     bkp = tmp_path / "backups"
     bkp.mkdir()
+    # BASE_DIR aislado: si no, _write_server_packs mete en el ZIP los packs
+    # REALES de la instalacion (miles de archivos; 100-160 s por test).
+    monkeypatch.setattr(ab, "BASE_DIR", str(tmp_path))
     monkeypatch.setattr(ab, "get_world_dir", lambda base_dir=None: str(mundo))
     monkeypatch.setattr(ab, "get_backup_dir", lambda base_dir=None: str(bkp))
 
@@ -128,6 +131,8 @@ def test_backup_traditional_sin_level_dat_no_publica(tmp_path, monkeypatch, caps
     (mundo / "db" / "CURRENT").write_bytes(b"x")
     bkp = tmp_path / "backups"
     bkp.mkdir()
+    # BASE_DIR aislado: sin esto se empaquetan los packs reales de la instalacion.
+    monkeypatch.setattr(ab, "BASE_DIR", str(tmp_path))
     monkeypatch.setattr(ab, "get_world_dir", lambda base_dir=None: str(mundo))
     monkeypatch.setattr(ab, "get_backup_dir", lambda base_dir=None: str(bkp))
 
