@@ -19,6 +19,35 @@ Se recomienda una ruta corta, por ejemplo `C:\BedrockSuite`. Si Windows rechaza
 las rutas largas del staging o del auxiliar, la preparación se cancela antes de
 reemplazar el programa; extraer la instalación en una ruta corta permite repetirla.
 
+## Entrega 2.1.1 publicada
+
+La [Release v2.1.1](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.1)
+se publicó el **20 de octubre de 2026** como estable y Latest. El ZIP incluye
+CPython **3.13.16**, ocupa **16 484 670 bytes**, tiene 756 archivos y su
+manifiesto identifica el commit público `39cd5bb177ca8c74b6a0e50458626afd02162797`
+(etiqueta `v2.1.1`; en TESTTEST apunta a `53f1a9f`). Su SHA-256 es:
+
+```text
+495aebbcb5f66943842fcc6459b32ec979a5bd19e826e51f97819d38746c5e27
+```
+
+Evidencia del 20 de octubre:
+
+- Se construyó desde un checkout limpio y pasó `tools/verify_release.py` en una
+  carpeta nueva: actualización, migración desde scripts y rollback ante un
+  fallo de arranque inyectado, con los seis testigos de datos intactos. GUI y
+  Python fueron reales; GitHub y el wrapper, simulados; no se ejecutó BDS.
+- Un intento previo con otro ZIP falló en el escenario de actualización por un
+  `PermissionError` en `os.replace` de `progress.json`; se corrigió con
+  `suite_release._replace` y el ZIP publicado se construyó después de esa
+  corrección. El auxiliar se copia de la instalación actual: la mejora rige
+  para actualizaciones que parten de 2.1.1.
+- Los assets publicados se descargaron de GitHub y sus bytes coincidieron con
+  los del ZIP probado y con el digest de la API. El actualizador, ejecutado
+  contra la API real, detectó la Release con su URL y SHA-256 y la ofreció solo
+  a instalaciones 2.1.0. No se instaló en el servidor real: esa instalación se
+  sincronizó por separado desde TESTTEST.
+
 ## Entrega 2.1.0 publicada
 
 La [Release v2.1.0](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.0)

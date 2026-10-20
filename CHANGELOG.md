@@ -7,6 +7,10 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 
 ## [2.1.1] - 2026-10-20
 
+[Publicada el 20 de octubre de 2026](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.1)
+con ZIP Windows x64 y checksum. Procedencia, hash y alcance de la validación
+en [ACTUALIZACIONES_SUITE.md](docs/ACTUALIZACIONES_SUITE.md).
+
 Corrección distribuible de 2.1.0. Se instala desde **Más acciones → Actualizar
 la suite** (siempre con confirmación) o con el ZIP de la Release. Mundos,
 propiedades, packs, backups y configuración quedan fuera del reemplazo.
