@@ -34,10 +34,10 @@ Además, si el wrapper aplicaba un `kill()` al proceso mientras éste tenía el 
 El arranque de los procesos hijos vía `multiprocessing.spawn` (el único método disponible en Windows) se colgaba de forma intermitente 50-120 s+ cuando el padre era el wrapper con BDS en marcha: el hijo quedaba bloqueado en la lectura del pipe de arranque de spawn y nunca llegaba a ejecutar la compresión. El timeout de 120 s abortaba el backup caliente sistematicamente (investigación completa en `INFORME_COLGADO_SPAWN_WORKER.md`).
 
 ### La Solución
-- **Worker por `subprocess.Popen`:** `execute_backup_worker` lanza `backup_worker.py` como subproceso con `subprocess.Popen` (arranque inmediato, sin pipe de bootstrap). El snapshot viaja en un pickle temporal y el resultado vuelve en otro.
+- **Worker por `subprocess.Popen`:** `execute_backup_worker` lanza `backup_worker.py` como subproceso con `subprocess.Popen` (arranque inmediato, sin pipe de bootstrap). El snapshot viaja en un archivo temporal JSON UTF-8 (`backup_worker.load_snapshot`) y el resultado vuelve en otro (`backup_worker.write_result`, escritura atómica). La primera versión usaba `pickle`; se descartó por el riesgo de ejecución arbitraria desde `%TEMP%` y no debe volver.
 - **Cancelación por archivo marcador:** la señal ya no es un `multiprocessing.Event` compartido (imposible entre procesos subprocess): `_FileCancelEvent` escribe/lee un archivo con la misma API (`is_set`/`set`/`clear`), de modo que los puntos de cancelacion existentes no cambiaron.
 - **El `backup_ipc_lock` se mantiene** pero solo para los backups fríos del propio wrapper (inicio/cierre, mismo proceso). El worker usa el lock interno de `auto_backup`; la exclusion entre ambos la garantizan `backup_in_progress` + el join antes del backup de cierre.
-- El timeout de 120 s y `_force_kill_compress_process` siguen funcionando sin cambios (con shims `is_alive`/`join` sobre el `Popen`).
+- `_force_kill_compress_process` sigue funcionando sin cambios, con el adaptador `_WorkerProcess` (`is_alive`/`join`) sobre el `Popen`. El timeout de 120 s es hoy el **piso** de `wrapper_state.scaled_backup_timeout_sec`, que suma 120 s por GB sin comprimir del snapshot (tope `BACKUP_TIMEOUT_MAX_SEC` = 3600 s); el backup de cierre usa el mismo cálculo con piso de 240 s.
 
 > Las secciones 1 y 2 de este documento describen el diseño original (V5) con `multiprocessing`; su lógica de timeout y des-envenenamiento del lock sigue vigente para los backups en proceso del wrapper.
 
@@ -53,6 +53,8 @@ El tiempo máximo de espera para un backup atascado era de 120s (`WORKER_COMPRES
 - Esto asegura estadísticamente (y se comprobó con fuzzer tests de 25 iteraciones) que el propio worker siempre procesará su suicidio primero (a los 120s), dejando a la rama de apagado maestro como una red de seguridad que solo actuará en situaciones de colapso extremo de hilos.
 - Se centralizó toda la lógica de aniquilación y renovación en una única función Thread-Safe: `_force_kill_compress_process(proc)`.
 
+> **Vigencia (2026-10-19):** el timeout del worker ya no es fijo en 120 s: escala con el tamaño del snapshot (ver 2.5), mientras que `WORKER_JOIN_ON_SHUTDOWN_SEC` sigue fijo en 135 s. El orden «el worker se mata primero» solo se cumple mientras el timeout escalado no supere ese margen (snapshots de hasta 128 MiB sin comprimir); con más, el cierre maestro puede actuar antes: fuerza el kill, cancela el backup y envía `save resume`.
+
 ---
 
 ## 4. Parseo Indestructible del Registro (Bug del Log Prefix)
@@ -63,6 +65,8 @@ Cuando el protocolo Bedrock nativo reporta una lista de archivos, a veces interc
 ### La Solución
 Se reemplazó la lógica frágil por una **Expresión Regular (Regex)**: `re.sub(r'^\[.*?\]\s*', '', line)`.
 Esta directriz "lava" cualquier prefijo temporal del motor de Bedrock antes de evaluar el resto de la cadena. Si el texto limpio contiene un archivo y un peso (`ruta:bytes`), se guarda; si es texto basura ("Quit correctly"), se descarta de forma segura.
+
+> **Vigencia (2026-10-19):** la implementación actual es `wrapper_console._strip_log_prefix`, que quita solo los prefijos estándar de BDS (`[AAAA-MM-DD hh:mm:ss:mmm NIVEL]` o `[NIVEL]`, con NIVEL = INFO/WARN/ERROR/DEBUG/LOG) anclados al inicio de la línea, no cualquier texto entre corchetes.
 
 ---
 
@@ -78,6 +82,8 @@ with state_lock:
     is_expecting_list = expecting_list_names
 ```
 
+> **Vigencia (2026-10-19):** el estado vive hoy en `wrapper_state.py` y se accede como `wstate.state_lock` / `wstate.expecting_list_names`.
+
 ---
 
 ## 6. Dinamismo de Rutas y Limpieza de Huérfanos
@@ -89,6 +95,8 @@ with state_lock:
 ### La Solución
 - **Dinamismo `server.properties`**: `auto_backup.py` ahora implementa un analizador que lee la configuración nativa del servidor (`level-name=...`) y resuelve las rutas dinámicamente.
 - **Barredora Segura de TMP**: `create_backup` escanea el disco y elimina archivos `.tmp` incompletos. **Nota de seguridad:** Esta limpieza ocurre estrictamente _después_ de haber adquirido el `backup_ipc_lock`, asegurando matemáticamente que el `.tmp` pertenece a un proceso muerto y no al proceso de un backup legítimo que esté corriendo simultáneamente.
+
+> **Vigencia (2026-10-19):** `auto_backup.py` ya no tiene un parser propio: `level-name` se resuelve con `server_properties.read_value`/`resolve_world_dir`, compartidos por GUI y CLI. La barredora corre dentro de `create_backup`, tras adquirir el `NamedMutex` `BDS_Backup_<hash>` y el lock de backup (`backup_ipc_lock` en los backups fríos del wrapper; el `_backup_lock` interno en el worker).
 
 ---
 

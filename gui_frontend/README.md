@@ -50,7 +50,7 @@ los componentes adaptados y sus licencias está en los archivos `NOTICE.md`.
   durante el relevo. `src/suiteUpdateLogic.js` define fases activas y terminales;
   los resultados de rollback o fallo de reinicio siguen visibles.
 - `GlassStage.jsx`: canvas decorativo, cabecera/dock vacíos para el motor local;
-  **no captura el DOM de consola, formularios ni IA**. WebGL se importa bajo
+  **no captura el DOM de consola ni de formularios**. WebGL se importa bajo
   demanda y cae a CSS ante fallos. Pausa en segundo plano.
 - `Appearance.jsx`/`GlassSelect.jsx`: diálogo y controles accesibles; el botón del
   selector mantiene el foco y soporta flechas, Home/End, Escape y búsqueda al teclear.
@@ -118,7 +118,7 @@ Requiere **Playwright Python y Google Chrome local**; son opcionales y no se
 añadieron a las dependencias de runtime ni a CI. El script sirve `dist/` con un
 HTTP temporal de loopback e intercepta API/WS en el navegador con fixtures. No
 importa el backend ni inicia el wrapper/BDS. Comprueba navegación, consola,
-confirmaciones, IA con aprobación humana, preferencias, subida/recarga/reset de
+confirmaciones, preferencias, subida/recarga/reset de
 imagen, ES/EN, móvil, teclado, wizard, reducción del SO y fallback sin WebGL.
 Comprueba además que logs y entrada de comandos estén dentro del área útil sin
 scroll de página a 1440×1000, 1280×800 y 1024×768, y la distinción encendido/apagado.

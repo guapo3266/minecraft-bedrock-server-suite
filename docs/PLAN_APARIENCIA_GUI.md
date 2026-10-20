@@ -13,6 +13,11 @@ de apariencia/renderizado del origen y su verificación de UX. Se inspeccionaron
 visualmente la cabecera, la navegación y el diálogo de apariencia del origen,
 sirviendo únicamente su frontend estático (sin conectar a un router).
 
+**Actualización 2026-10-19:** el asistente IA experimental que mencionan los
+invariantes, el drawer, la matriz de QA y las evidencias (`ai.png`) se retiró
+(ver `CHANGELOG.md`). Esas menciones quedan como registro de la ronda del
+2026-10-12 y no son requisitos vigentes; el resto del plan no cambia.
+
 ## Invariantes
 
 - No modificar backend, API, WebSocket, locks, wrapper, mundos ni archivos de

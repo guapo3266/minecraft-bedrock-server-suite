@@ -21,6 +21,10 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
   instrucciones de validación, recuperación y arquitectura del actualizador.
 - Workflows de tests y Release solo manuales; push de ramas/tags y PR no
   inician jobs. Estas instrucciones se conservan al sincronizar repositorios.
+- Guía del frontend y plan de apariencia sin referencias vigentes al asistente
+  IA retirado (el plan conserva su registro histórico con una nota).
+- Notas de diseño del worker de backups actualizadas: IPC en JSON UTF-8 (no
+  `pickle`), timeouts escalados por tamaño y parsers vigentes.
 
 Estos cambios posteriores a la Release no modifican el ZIP ni la etiqueta
 2.1.0 ya publicados.
