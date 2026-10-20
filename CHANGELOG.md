@@ -5,7 +5,11 @@ es independiente de la versión de Minecraft Bedrock Dedicated Server (BDS).
 Este historial empieza en 2.0.0; el desarrollo anterior se conserva en Git y en
 los informes de `docs/`, sin asignarle versiones retrospectivas.
 
-## [Sin publicar]
+## [2.1.1] - 2026-10-20
+
+Corrección distribuible de 2.1.0. Se instala desde **Más acciones → Actualizar
+la suite** (siempre con confirmación) o con el ZIP de la Release. Mundos,
+propiedades, packs, backups y configuración quedan fuera del reemplazo.
 
 ### Eliminado
 
@@ -46,9 +50,6 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
   empaquetan los packs reales de la instalación, Hypothesis usa un perfil
   global sin deadline y el e2e del backup caliente ya no confunde el
   `.zip.tmp` en curso con un ZIP publicado.
-
-Estos cambios posteriores a la Release no modifican el ZIP ni la etiqueta
-2.1.0 ya publicados.
 
 ## [2.1.0] - 2026-10-15
 

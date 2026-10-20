@@ -98,7 +98,11 @@ Las rutas de la instalación se calculan desde los módulos Python, sin depender
 del directorio de trabajo. El backend lanza `server_wrapper.py` y el wrapper
 lanza `backup_worker.py` con el mismo intérprete Python y los canales de
 entrada/salida correspondientes. Los backups se guardan por instalación en
-`../../Backups_Minecraft/auto_backups/<carpeta>`.
+`../../Backups_Minecraft/auto_backups/<carpeta>`. Cada ZIP lleva el mundo y
+los packs de servidor (`server_resource_packs/`, `server_behavior_packs/`).
+`auto_backup._write_file_chunked` escribe por chunks cancelables y acota cada
+lectura al tamaño del archivo (`_read_size`); PNG/OGG/MP3 se guardan con
+`ZIP_STORED` porque deflate no los reduce.
 
 ## Versión y actualización de la suite
 

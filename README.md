@@ -103,9 +103,11 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 
 ### Arranque inicial lento y Windows Defender
 
-Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arrancar por primera vez, tras clonar el repo o tras actualizar addons con miles de archivos):
+Hasta 2.1.0, los backups con miles de archivos de packs tardaban minutos por la forma en que se leía cada archivo. Desde 2.1.1 está corregido: con ~12.000 archivos de packs, el empaquetado bajó de ~114 s a ~11 s en el equipo de pruebas (i3-1315U con NVMe). Actualizá la suite antes de buscar otra causa.
 
-- **Causa**: Windows Defender con protección en la nube (MAPS) revisa la primera lectura de cada archivo recién descargado (~15 ms por archivo; con 11.000 archivos son ~3 minutos con 0% de CPU). En la segunda lectura ya son confiables y tarda 0.4 s.
+Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arrancar por primera vez, tras clonar el repo o tras actualizar addons con miles de archivos):
+
+- **Causa probable**: Windows Defender con protección en la nube (MAPS) puede revisar la primera lectura de cada archivo recién descargado (~15 ms por archivo). En la segunda lectura ya son confiables.
 - **Solución**: Doble clic en `configurar_antivirus.bat` (añade las carpetas `worlds`, `resource_packs`, `behavior_packs` y `Backups_Minecraft` a las exclusiones de Defender).
 - **O desde PowerShell** (como administrador):
   ```powershell
@@ -116,7 +118,7 @@ Si el backup inicial tarda 3+ minutos en vez de los ~6 segundos normales (al arr
 
 ### Solución de problemas
 
-- **El backup inicial tarda 3+ minutos**: aplicá las exclusiones de Windows Defender (sección anterior) o poné `backup-inicio=false` en `server.properties`.
+- **El backup inicial tarda varios minutos**: comprobá en **Más acciones → Acerca de** que la suite sea 2.1.1 o posterior; si ya lo es, aplicá las exclusiones de Windows Defender (sección anterior) o poné `backup-inicio=false` en `server.properties`.
 - **`409 Hay una instancia externa del servidor en ejecución`**: hay un wrapper o BDS de ESTA instalación corriendo por fuera de la GUI. Cerralo y reintentá; la sonda compara la ruta del ejecutable, así que un BDS de otra carpeta no bloquea.
 - **El puerto 8000 está ocupado**: la GUI salta sola al siguiente libre y abre el navegador ahí; para fijarlo, ejecutá `set GUI_PORT=8001` antes de arrancar.
 - **La GUI no muestra jugadores**: las detecciones leen el log de BDS en inglés (`Player connected: ...`). No cambies el idioma del servidor; si Mojang cambia el formato, se pierden jugadores pero los backups en caliente siguen funcionando.
@@ -271,9 +273,11 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 
 ### Slow initial startup and Windows Defender
 
-If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds (on a fresh install, after cloning the repo or after syncing thousands of addon files):
+Up to 2.1.0, backups with thousands of pack files took minutes because of the way each file was read. This is fixed in 2.1.1: with ~12,000 pack files, packaging went from ~114 s to ~11 s on the test machine (i3-1315U with NVMe). Update the suite before looking for another cause.
 
-- **Cause**: Windows Defender Cloud-delivered Protection (MAPS) scans the first read of every newly downloaded file (~15 ms per file; with 11,000 files that is ~3 minutes at 0% CPU). On the second read the files are trusted and it takes 0.4 s.
+If the initial startup backup still takes several minutes on 2.1.1 or later (on a fresh install, after cloning the repo or after syncing thousands of addon files):
+
+- **Likely cause**: Windows Defender Cloud-delivered Protection (MAPS) may scan the first read of every newly downloaded file (~15 ms per file). On the second read the files are trusted.
 - **Fix**: Double-click `configurar_antivirus.bat` (adds `worlds`, `resource_packs`, `behavior_packs`, and `Backups_Minecraft` to Defender exclusions).
 - **Or from PowerShell** (as administrator):
   ```powershell
@@ -284,7 +288,7 @@ If the initial startup backup takes 3+ minutes instead of the normal ~6 seconds 
 
 ### Troubleshooting
 
-- **The initial backup takes 3+ minutes**: apply the Windows Defender exclusions (previous section) or set `backup-inicio=false` in `server.properties`.
+- **The initial backup takes several minutes**: check in **More actions → About** that the suite is 2.1.1 or later; if it is, apply the Windows Defender exclusions (previous section) or set `backup-inicio=false` in `server.properties`.
 - **`409 Hay una instancia externa del servidor en ejecución`**: a wrapper or BDS of THIS installation is running outside the GUI. Close it and retry; the probe compares the executable path, so a BDS from another folder does not block.
 - **Port 8000 is taken**: the GUI automatically jumps to the next free port and opens the browser there; to pin it, run `set GUI_PORT=8001` before starting.
 - **The GUI shows no players**: detections read the BDS log in English (`Player connected: ...`). Do not change the server language; if Mojang changes the format, players are lost but hot backups keep working.
