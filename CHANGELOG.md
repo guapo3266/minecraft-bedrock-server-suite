@@ -35,6 +35,14 @@ propiedades, packs, backups y configuración quedan fuera del reemplazo.
   se guardan sin recomprimir (`ZIP_STORED`) y los nombres de entrada de los
   packs se calculan por directorio: ~16 % menos de CPU por backup, con un ZIP
   ~1 % mayor.
+- El actualizador de la suite podía terminar en error con «Acceso denegado»
+  si la GUI o el antivirus leían su archivo de progreso justo cuando se
+  reemplazaba. Ahora reintenta el reemplazo durante unos segundos. Como el
+  auxiliar se copia de la instalación actual, la mejora protege las
+  actualizaciones que parten de 2.1.1; la de 2.1.0 a 2.1.1 aún usa el
+  auxiliar de 2.1.0. Si ese paso mostrara «Acceso denegado», se puede
+  reintentar; si quedó interrumpido, `iniciar_gui.bat` o `Recuperar_suite.bat`
+  restauran antes la versión anterior.
 
 ### Documentación y mantenimiento
 

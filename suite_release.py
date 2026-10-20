@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import time
 import zipfile
 
 from zip_safety import _is_safe_zip_entry
@@ -16,6 +17,8 @@ REPOSITORY = "guapo3266/minecraft-bedrock-server-suite"
 ASSET_NAME = "BedrockSuite-Windows-x64.zip"
 MAX_BYTES = 1024 ** 3
 MAX_FILES = 15000
+REPLACE_ATTEMPTS = 30
+REPLACE_DELAY_SEC = 0.1
 VERSION_RE = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 ROOT_FILES = frozenset("""addon_inventory.py addon_inventory_cli.py auto_backup.py
 backup_worker.py console_lang.py restore_backup.py restore_core.py server_gui_server.py
@@ -74,6 +77,21 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def _replace(tmp, target):
+    """os.replace con reintentos breves (2026-10-20). En Windows falla con
+    acceso denegado mientras otro proceso tiene abierto el destino: la GUI
+    leyendo progress.json o el antivirus revisando el archivo. Sin reintento,
+    una lectura coincidente abortaba la actualización."""
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(REPLACE_DELAY_SEC)
+
+
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +102,7 @@ def write_json(path, value):
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(tmp, path)
+        _replace(tmp, path)
     finally:
         if tmp.exists():
             tmp.unlink()
@@ -212,7 +230,7 @@ def _atomic_copy(source, target):
             shutil.copyfileobj(src, dst, 1024 * 1024)
             dst.flush()
             os.fsync(dst.fileno())
-        os.replace(tmp, target)
+        _replace(tmp, target)
     finally:
         if tmp.exists():
             tmp.unlink()
