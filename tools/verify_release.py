@@ -128,6 +128,10 @@ def run(archive, output):
     seed = output / "base"
     with zipfile.ZipFile(archive) as original:
         version = json.loads(original.read("version.json"))["version"]
+    # El rollback simula una entrega posterior al paquete verificado; un número
+    # fijo dejaba de ser «posterior» al verificar esa misma versión.
+    major, minor, patch = (int(part) for part in version.split("."))
+    later_version = f"{major}.{minor}.{patch + 1}"
     extract_package(archive, seed, version)
     (seed / "server_wrapper.py").write_text(WRAPPER, encoding="utf-8")
     (seed / "web/qa-unchanged.js").write_bytes(b"conservar mtime")
@@ -140,7 +144,7 @@ def run(archive, output):
         target, incoming = scenario / "Instalación con espacios y á", scenario / "entrega"
         shutil.copytree(seed, target)
         shutil.copytree(seed, incoming)
-        new_version = "2.1.1" if failed else version
+        new_version = later_version if failed else version
         if failed:
             (incoming / "server_gui_server.py").write_text("raise RuntimeError('Fallo de arranque inyectado por QA')\n", encoding="utf-8")
         manifest_for(incoming, new_version)
