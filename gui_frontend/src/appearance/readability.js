@@ -22,7 +22,7 @@ export function protectionOpacity(pixel, foregrounds, dark) {
 export function createReadability(stage, backdrop, enabled, theme) {
   const root = document.documentElement, dark = theme === 'dark'
   const bodySelector = '.panel, .stat, .section-heading, .notice'
-  const floatingSelector = '.glass-menu, .dialog, .toast, .ai-panel'
+  const floatingSelector = '.glass-menu, .dialog, .toast'
   const sample = document.createElement('canvas')
   sample.width = SAMPLE.width; sample.height = SAMPLE.height
   const ctx = sample.getContext('2d', { willReadFrequently: true })

@@ -38,7 +38,7 @@ from gui_backend.services import bds_update as bds_update_service
 from gui_backend.services import watchdog as watchdog_service
 from gui_backend.services import history as history_service
 from gui_backend.services import suite_update as suite_update_service
-from gui_backend.routers import system, properties, setup, actions, backups, websocket, schedule, players, history, ai, addons, suite_update
+from gui_backend.routers import system, properties, setup, actions, backups, websocket, schedule, players, history, addons, suite_update
 
 
 async def hardware_metrics_loop():
@@ -151,7 +151,6 @@ def create_app() -> FastAPI:
     app.include_router(history.router)
     app.include_router(addons.router)
     app.include_router(websocket.router)
-    app.include_router(ai.router)
     app.include_router(suite_update.router)
 
     return app

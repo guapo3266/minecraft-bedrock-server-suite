@@ -73,7 +73,6 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 - Restauración fácil: desde la GUI (restaurar/verificar/borrar) o con la CLI interactiva `python restore_backup.py`. Los accesos directos `.bat` de esta instalación viven en la carpeta local `backups/` y no se distribuyen con el repo.
 - Script para abrir los puertos del firewall (`configurar_firewall.bat`; ejecútalo como administrador: sin permisos avisa y aborta en vez de fingir éxito).
 - Desde la GUI: consola de comandos en vivo, métricas, forzar backup, restaurar/verificar/borrar backups y una tarjeta con tu IP local/pública para invitar amigos.
-- **Asistente de comandos IA con aprobación humana**: traduce peticiones en lenguaje natural en español (ej. "teletransporta a steva a juan", "haz de día", "dame 64 diamantes") a comandos Bedrock mediante LM Studio local (`http://127.0.0.1:1234/v1`). La IA **solo propone** el comando; requiere aprobación explícita del operador con el botón [Ejecutar].
 - **Inventario y diagnóstico de addons (solo lectura)**: la pestaña *Addons* de la GUI y la CLI `python addon_inventory_cli.py` (con `--json` y códigos de salida documentados) listan los behavior packs y resource packs de la instalación y de cada mundo, sus módulos, dependencias de packs y de scripting, la versión mínima del motor y los mundos que los referencian, junto con los problemas que demuestran sus metadatos (JSON inválido, UUID duplicados, dependencias ausentes, referencias de mundo sin candidato o ambiguas…). No instala, activa ni modifica nada; detalle en `docs/INFORME_ADDONS.md`.
 
 ### Archivos
@@ -94,9 +93,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 | `restore_backup.py` | Restaura un backup |
 | `addon_inventory.py` | Analizador compartido de addons: inventario y diagnósticos de packs (solo lectura) |
 | `addon_inventory_cli.py` | CLI del inventario de addons (salida legible o `--json`, códigos de salida documentados) |
-| `gui_backend/services/ai_assistant.py` | Servicio de traducción a comandos Bedrock vía LM Studio local con resolución de contexto y saneamiento anti-inyección |
-| `gui_backend/routers/ai.py` | Endpoints `/api/ai/propose` y `/api/ai/status` protegidos en loopback |
-| `gui_frontend/` | Frontend React (código fuente + `dist/` compilado con pestaña de Asistente IA, listo para usar) |
+| `gui_frontend/` | Frontend React (código fuente + `dist/` compilado, listo para usar) |
 | `web/` | GUI clásica de respaldo (sin React) |
 | `configurar_firewall.bat` | Abre los puertos del firewall (como administrador) |
 | `configurar_antivirus.bat` | Añade exclusiones de Windows Defender para los backups |
@@ -247,7 +244,6 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 - Easy restore: from the GUI (restore/verify/delete) or with the interactive `python restore_backup.py` CLI. This installation's `.bat` shortcuts live in the local `backups/` folder and are not distributed with the repo.
 - Firewall port opener (`configurar_firewall.bat`; run it as administrator: without elevation it reports the failure instead of pretending success).
 - From the GUI: live command console, metrics, forced backup, restore/verify/delete backups and a card with your local/public IP to invite friends.
-- **AI Command Assistant with human-in-the-loop approval**: translates natural language requests (e.g. "teleport steva to juan", "make it day", "give 64 diamonds") into Bedrock commands via local LM Studio (`http://127.0.0.1:1234/v1`). The AI **only proposes** the command; execution strictly requires the operator to click [Ejecutar / Execute].
 - **Addon inventory and diagnostics (read-only)**: the GUI *Addons* tab and the CLI `python addon_inventory_cli.py` (with `--json` and documented exit codes) list the behavior and resource packs of the installation and of every world, their modules, pack and scripting dependencies, the declared minimum engine version and which worlds reference them, together with the problems their metadata proves (invalid JSON, duplicate UUIDs, missing dependencies, world references with no candidate or ambiguous…). It installs, enables or modifies nothing; details in `docs/INFORME_ADDONS.md`.
 
 ### Files
@@ -265,9 +261,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 | `restore_backup.py` | Restores a backup |
 | `addon_inventory.py` | Shared addon analyzer: pack inventory and diagnostics (read-only) |
 | `addon_inventory_cli.py` | Addon inventory CLI (readable output or `--json`, documented exit codes) |
-| `gui_backend/services/ai_assistant.py` | Bedrock command translation service via local LM Studio with context resolution and injection sanitation |
-| `gui_backend/routers/ai.py` | Loopback-protected endpoints `/api/ai/propose` and `/api/ai/status` |
-| `gui_frontend/` | React frontend (source + prebuilt `dist/` with AI Assistant tab, ready to use) |
+| `gui_frontend/` | React frontend (source + prebuilt `dist/`, ready to use) |
 | `web/` | Classic fallback GUI (no React) |
 | `configurar_firewall.bat` | Opens firewall ports (as administrator) |
 | `configurar_antivirus.bat` | Adds Windows Defender exclusions for the backups |

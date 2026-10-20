@@ -12,7 +12,6 @@ import ConnectivityCard from './components/ConnectivityCard';
 import ControlsBar from './components/ControlsBar';
 import TerminalConsole from './components/TerminalConsole';
 import SidebarTabs from './components/SidebarTabs';
-import { lazy, Suspense } from 'react';
 import UpdateModal from './components/UpdateModal';
 import PropsModal from './components/PropsModal';
 import ScheduleModal from './components/ScheduleModal';
@@ -21,8 +20,6 @@ import AboutModal from './components/AboutModal';
 import SuiteUpdateModal from './components/SuiteUpdateModal';
 import useSuiteUpdate from './hooks/useSuiteUpdate';
 import { useI18n } from './i18n.jsx';
-
-const AiDrawer = lazy(() => import('./components/AiDrawer'));
 
 export default function App() {
   const { t, lang } = useI18n();
@@ -446,7 +443,6 @@ export default function App() {
       </main>
       <Dock dockRef={dockRef} hidden={!ready} active={activeView} onChange={view => { setActiveView(view); setConsoleExpanded(false); }} players={status.player_count} backups={backups.length} />
     </div>
-    {ready && <Suspense fallback={null}><AiDrawer onSendCommand={handleSendCommand} isRunning={status.running} /></Suspense>}
     <Appearance open={appearanceOpen} onClose={() => setAppearanceOpen(false)} appearance={appearance} glassStatus={glassStatus} />
     {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     {suiteUpdate.open && <SuiteUpdateModal update={suiteUpdate} running={status.running} playerCount={status.player_count} />}

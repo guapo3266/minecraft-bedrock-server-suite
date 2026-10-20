@@ -2,7 +2,7 @@
 
 Módulo integrado en `gui_frontend/src/vendor/liquidglass.js` para las superficies
 decorativas de la suite. Se importa como ES module local, sin globals ni CDN.
-No captura contenido de consola, formularios o asistente IA.
+No captura contenido de consola ni formularios.
 
 ## Adaptación mantenida por la suite
 

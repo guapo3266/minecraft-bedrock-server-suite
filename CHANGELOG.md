@@ -7,6 +7,14 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 
 ## [Sin publicar]
 
+### Eliminado
+
+- Asistente IA experimental de la GUI (LM Studio/FunctionGemma): los endpoints
+  `POST /api/ai/propose` y `GET /api/ai/status`, el panel flotante y sus textos
+  ES/EN, el servicio de traducción a comandos Bedrock, sus utilidades de
+  auditoría y la variable `LMSTUDIO_MODEL` de los lanzadores de la GUI. Los
+  comandos se siguen enviando solo desde la consola (`POST /api/command`).
+
 ### Documentación y mantenimiento
 
 - Enlaces de descarga del ZIP/checksum y registro de la publicación de 2.1.0,

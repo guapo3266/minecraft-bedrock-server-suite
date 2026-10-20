@@ -476,33 +476,6 @@ def test_watchdog_tope_de_reintentos(monkeypatch):
     assert wd._crash_restart_cap_notified is False
 
 
-def test_ai_tool_calls_malformados_no_lanzan(monkeypatch):
-    """Una respuesta rara de LM Studio (tool_calls con null/cadenas o
-    arguments no-dict) devuelve un envelope de error, nunca una excepcion
-    que se traduzca en un 500 (2026-09-25)."""
-    from gui_backend.services import ai_assistant as ai
-
-    class _Resp:
-        status_code = 200
-        text = ""
-
-        def __init__(self, payload):
-            self._payload = payload
-
-        def json(self):
-            return self._payload
-
-    monkeypatch.setattr(ai, "check_lmstudio_health", lambda base_url: (True, "modelo-test"))
-
-    for tool_calls in ([None], ["cadena"], [{"function": "no-dict"}], [{"function": {"name": "set_time", "arguments": ["lista"]}}]):
-        monkeypatch.setattr(ai.requests, "post", lambda *a, **k: _Resp({
-            "choices": [{"message": {"tool_calls": tool_calls, "content": ""}}],
-        }))
-        resultado = ai.propose_command("haz de dia")
-        assert isinstance(resultado, dict) and "status" in resultado, resultado
-        assert resultado["status"] in ("ok", "error"), resultado
-
-
 def test_restart_guard_de_reentrada(monkeypatch):
     """POST /api/action/restart con un restart ya en vuelo responde busy en
     vez de apilar otro hilo de restart_wrapper (2026-09-25)."""

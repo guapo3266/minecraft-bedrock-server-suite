@@ -78,9 +78,6 @@ class Fixtures:
                 self.verify_routes.append(route)
                 return
             data = {"status": "ok"}
-            if path == "/api/ai/propose":
-                data = {"status": "ok", "proposed_command": "time set day", "explanation": "Cambiar a día.",
-                        "function": "set_time", "args": {"time": "day"}, "warning": None}
         elif path == "/api/setup_status":
             data = {"required": self.setup_required, "bds_installed": True}
             if self.setup_error:
@@ -111,8 +108,6 @@ class Fixtures:
         elif path == "/api/check_update":
             data = {"has_update": True, "current_version": "1.21.100.6", "latest_version": "1.21.110.2",
                     "has_previous": True, "previous_version": "1.21.90.3"}
-        elif path == "/api/ai/status":
-            data = {"online": True, "model": "Modelo ficticio de QA"}
         elif path == "/api/addons":
             data = json.loads((ROOT.parent / "tests" / "fixtures" / "addons_payload.json").read_text(encoding="utf-8"))
             for pack in data["packs"]:
@@ -133,7 +128,7 @@ class Fixtures:
 
 def screenshot(page, name):
     # Esperar un estado observable, no capturar a mitad de una transición.
-    page.wait_for_function("""() => [...document.querySelectorAll('.dialog,.modal-backdrop,.ai-panel,.glass-menu')]
+    page.wait_for_function("""() => [...document.querySelectorAll('.dialog,.modal-backdrop,.glass-menu')]
       .filter(el => el.getClientRects().length).every(el => Number(getComputedStyle(el).opacity) > .995)""")
     page.screenshot(path=str(OUT / name))
 
@@ -510,18 +505,6 @@ def run():
             page.keyboard.press("Escape")
             expect(page.get_by_role("button", name="Más acciones", exact=True)).to_be_focused()
             results["settings_direct_secondary_menu_keyboard"] = "passed"
-
-            # IA: consultar no debe ejecutar la propuesta.
-            page.get_by_role("button", name="Abrir asistente IA", exact=True).click()
-            page.locator(".ai-panel textarea").fill("Haz de día")
-            commands_before = sum(item["path"] == "/api/command" for item in fake.mutations)
-            page.get_by_role("button", name="Consultar", exact=True).click()
-            expect(page.get_by_role("button", name="Ejecutar Comando", exact=True)).to_be_visible()
-            assert sum(item["path"] == "/api/command" for item in fake.mutations) == commands_before
-            screenshot(page, "ai.png")
-            page.get_by_role("button", name="Cerrar panel del asistente", exact=True).click()
-            expect(page.get_by_role("button", name="Abrir asistente IA", exact=True)).to_be_focused()
-            results["ai_human_approval"] = "passed"
 
             open_appearance(page)
             page.keyboard.press("Shift+Tab")

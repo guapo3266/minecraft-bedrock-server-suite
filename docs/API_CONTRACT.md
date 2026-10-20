@@ -14,8 +14,8 @@ regresiones: los refactors no cambian rutas, códigos, respuestas ni protocolo W
 
 **Guarda temprana (middleware, 2026-09-10):** `create_app()` instala un middleware HTTP que aplica ambos guards a **todo** `/api/*` ANTES del routing y de la validación del body. Sin él, un cliente externo podía recibir un `422` de pydantic (p. ej. `POST /api/command` sin body) y enumerar rutas/esquema sin pasar por los guards internos. Los endpoints conservan sus propios chequeos (defensa en profundidad) y el WS valida en el handshake (no pasa por middleware HTTP). Cobertura anti-drift: `tests/test_router_guards.py` (inventario OpenAPI + `403` en todos los POST/GET de API con cliente externo u Origin externo).
 
-Lectura con `_ensure_local` (además del middleware de `/api/*`): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/connectivity`, `GET /api/addons`, `GET /api/ai/status`, `GET /`, `GET /favicon.svg`.
-Endpoints con `_ensure_local` + `_check_origin`: `POST /api/command`, `POST /api/ai/propose`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
+Lectura con `_ensure_local` (además del middleware de `/api/*`): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/connectivity`, `GET /api/addons`, `GET /`, `GET /favicon.svg`.
+Endpoints con `_ensure_local` + `_check_origin`: `POST /api/command`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
 
 **Modo LAN opt-in (`GUI_ALLOW_LAN=1`, ver `server_gui_server.py`)**: ambos guards se relajan
 de forma controlada — S1 acepta también IPs privadas RFC1918/ULA (`_is_allowed_client_host`
@@ -245,21 +245,6 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 - 400 `"Nombre de backup invalido"`; 404 `"Backup no encontrado"`; 500 error genérico.
 - 200 `{"status": "ok", "filename": "<filename>"}` — CRC correcto.
 - 200 `{"status": "corrupt", "filename": "<filename>", "entry": "<str>"}` — `testzip` o `BadZipFile` (no es error HTTP).
-
-### `GET /api/ai/status`
-
-- Consulta LM Studio local y devuelve `{"status":"ok","online":<bool>,"model":<str|null>}`.
-- La consulta corre en el threadpool. No arranca modelos ni ejecuta comandos BDS.
-
-### `POST /api/ai/propose`
-
-- Body: `{"prompt":"<instrucción>"}`. Body inválido: 422 tras superar los guards.
-- Éxito HTTP 200: `{"status":"ok","proposed_command":"...","explanation":"...","function":"...","args":{...},"warning":null}`; `warning` puede ser texto.
-- Prompt vacío, fallo de LM Studio, respuesta truncada o llamada no interpretable:
-  HTTP 200 con `{"status":"error","message":"..."}`. No equivale a una ejecución.
-- Usa una copia de los jugadores online y sanea argumentos antes de construir
-  la propuesta. La GUI requiere pulsar Ejecutar, que usa `POST /api/command`.
-  El servicio IA no escribe a stdin ni toma esa aprobación por el usuario.
 
 ## WebSocket `/ws`
 

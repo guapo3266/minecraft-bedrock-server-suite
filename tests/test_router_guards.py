@@ -27,7 +27,6 @@ _POST_PROBES = {
     "/api/setup/install_bds": "/api/setup/install_bds",
     "/api/setup/complete": "/api/setup/complete",
     "/api/command": "/api/command",
-    "/api/ai/propose": "/api/ai/propose",
 }
 
 _GET_PROBES = {
@@ -46,7 +45,6 @@ _GET_PROBES = {
     "/api/history/metrics": "/api/history/metrics",
     "/api/history/logs": "/api/history/logs",
     "/api/history/sessions": "/api/history/sessions",
-    "/api/ai/status": "/api/ai/status",
     "/api/addons": "/api/addons",
 }
 

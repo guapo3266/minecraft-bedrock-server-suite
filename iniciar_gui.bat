@@ -12,9 +12,6 @@ if exist "%~dp0runtime\python.exe" (
     "%~dp0runtime\python.exe" -B "%~dp0server_gui_server.py"
     exit /b
 )
-:: Modelo de LM Studio para el asistente IA (ai_assistant.py: LMSTUDIO_MODEL).
-:: Si ya viene definido en el entorno, se respeta el valor existente.
-if not defined LMSTUDIO_MODEL set "LMSTUDIO_MODEL=qwen3-minecraft-v3"
 cls
 echo ================================================================
 echo   MINECRAFT BEDROCK SERVER SUITE

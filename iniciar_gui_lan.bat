@@ -22,8 +22,6 @@ if errorlevel 1 (
 :python_ready
 :: Activar modo LAN: la GUI escuchara en 0.0.0.0 y permitira IPs privadas
 set GUI_ALLOW_LAN=1
-:: Modelo de LM Studio para el asistente IA (ai_assistant.py: LMSTUDIO_MODEL).
-if not defined LMSTUDIO_MODEL set "LMSTUDIO_MODEL=qwen3-minecraft-v3"
 :: Opcional: fija puerto (si lo cambias, abre ese puerto en el firewall)
 if "%GUI_PORT%"=="" set GUI_PORT=8000
 
