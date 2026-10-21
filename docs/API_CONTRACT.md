@@ -33,7 +33,7 @@ la coincidencia de Origin con el host del propio request.
 
 ```json
 {
-  "suite_version": "2.1.1",
+  "suite_version": "2.2.0",
   "running": false,
   "players": ["NombreJugador"],
   "player_count": 0,

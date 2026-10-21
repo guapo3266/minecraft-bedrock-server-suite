@@ -57,9 +57,9 @@ Evidencia del 20 de octubre:
 
 ### Problema conocido al actualizar desde 2.1.0
 
-El auxiliar que aplica la actualización se copia de la versión instalada: de
-2.1.0 a 2.1.1 se usa el de 2.1.0, que reemplaza sus archivos de estado sin
-reintentar. Si la GUI o el antivirus los están leyendo en ese instante, Windows
+El auxiliar que aplica la actualización se copia de la versión instalada:
+desde 2.1.0, a 2.1.1 o a cualquier versión posterior, se usa el de 2.1.0, que
+reemplaza sus archivos de estado sin reintentar. Si la GUI o el antivirus los están leyendo en ese instante, Windows
 responde «Acceso denegado» («Access is denied»). Mundos, propiedades, packs,
 backups y configuración no se tocan en ningún caso. Según el momento:
 
@@ -69,8 +69,9 @@ backups y configuración no se tocan en ningún caso. Según el momento:
   Si el reemplazo quedó a medias, recupera la versión anterior antes de arrancar.
 - **La ventana queda en una fase que no avanza**, por ejemplo «Comprobando el
   arranque del panel actualizado…»: solo quedó atrasado el aviso de progreso.
-  Si **Más acciones → Acerca de** muestra 2.1.1, la actualización terminó; si
-  muestra 2.1.0, sigue instalada la versión anterior y se puede reintentar. En ambos casos,
+  Si **Más acciones → Acerca de** muestra la versión nueva, la actualización
+  terminó; si muestra 2.1.0, sigue instalada la versión anterior y se puede
+  reintentar. En ambos casos,
   cerrar la pestaña de la GUI, borrar `data\suite_updates\recovery\progress.json`
   (solo guarda ese aviso; la recuperación usa `journal.json`) y volver a abrirla.
 
@@ -241,7 +242,7 @@ arranque. Usar una carpeta de salida **nueva y corta** en cada intento, fuera de
 una instalación real (rechaza una carpeta que ya tenga escenarios):
 
 ```powershell
-python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.1.2
+python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.2.0
 ```
 
 Genera `VERIFICACION.json` y logs por escenario. Descarga un Python anterior

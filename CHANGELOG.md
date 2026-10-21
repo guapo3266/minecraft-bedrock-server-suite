@@ -5,7 +5,11 @@ es independiente de la versión de Minecraft Bedrock Dedicated Server (BDS).
 Este historial empieza en 2.0.0; el desarrollo anterior se conserva en Git y en
 los informes de `docs/`, sin asignarle versiones retrospectivas.
 
-## [Sin publicar]
+## [2.2.0] - 2026-10-21
+
+Nueva función y correcciones sobre 2.1.1. Se instala desde **Más acciones →
+Actualizar la suite** (siempre con confirmación) o con el ZIP de la Release.
+Mundos, propiedades, packs, backups y configuración quedan fuera del reemplazo.
 
 ### Añadido
 
@@ -70,8 +74,9 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 
 ### Documentación y mantenimiento
 
-- Registro de la publicación de 2.1.1 (hash, procedencia y evidencia) y guía de
-  versionado con 2.1.2 como siguiente número.
+- El README empieza con capturas de la GUI y un resumen de lo que hace la suite.
+- Registro de la publicación de 2.1.1 (hash, procedencia y evidencia) en la
+  guía de versionado.
 - Guía de actualizaciones: alcance real de la QA de 2.1.1 (no ejercitó el
   auxiliar de 2.1.0), problema conocido al actualizar desde 2.1.0 y cómo
   salir de él, conteo exacto de archivos del ZIP y publicación paso a paso con
