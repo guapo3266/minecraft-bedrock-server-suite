@@ -533,7 +533,7 @@ def should_run_initial_backup():
 # PUNTO DE ENTRADA PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    wrapper_mutex = wpg.NamedMutex(f"BDS_Wrapper_{wpg.get_installation_hash(wstate.BASE_DIR)}")
+    wrapper_mutex = wpg.NamedMutex(wpg.wrapper_mutex_name(wstate.BASE_DIR))
     # Guard de instancia por ADQUISICION, nunca por existencia. El wrapper
     # retiene el mutex desde aqui hasta morir; una sonda ajena (p. ej. el loop
     # de metricas de otra GUI) solo abre el handle un instante sin retenerlo,
@@ -616,6 +616,9 @@ if __name__ == "__main__":
                     pass
                 wrapper_mutex.close()
                 sys.exit(1)
+        # BDS lanzado: desde aqui read_stdin entrega el 'stop' encolado. La GUI
+        # deja de dar margen extra a su fase 1 (cubria el backup inicial).
+        _emit_event("bds_launched", pid=wstate.server_process.pid)
     except Exception as e:
         print(L(f"[Wrapper] Error al iniciar BDS: {e}", f"[Wrapper] Error starting BDS: {e}"))
         wrapper_mutex.close()

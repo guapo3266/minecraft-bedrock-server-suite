@@ -71,6 +71,7 @@ def _spawn_wrapper_process():
     # al recibir wrapper_started; hasta entonces rige el parseo de stdout).
     manager.events_file = events_file
     manager.events_alive = False
+    manager.wrapper_pre_bds = False
     with manager.lock:
         manager.final_backup_result = None
     return process
@@ -111,6 +112,7 @@ def run_wrapper_thread(process=None):
         # Cada arranque debe volver a descubrir la versión del proceso actual.
         manager.installed_version = None
         manager.events_alive = False  # lo activa el lector con wrapper_started
+        manager.wrapper_pre_bds = False
         manager.wrapper_exit_event.clear()
         manager.server_stopped_event.clear()
         manager.is_running = True
@@ -252,6 +254,7 @@ def run_wrapper_thread(process=None):
                 manager.backup_in_progress = False
                 manager.wrapper_process = None
                 manager.events_alive = False
+                manager.wrapper_pre_bds = False
                 manager.wrapper_exit_event.set()
                 # G8: respaldo: si el hilo muere, BDS ya no corre.
                 manager.server_stopped_event.set()
@@ -274,9 +277,15 @@ def _apply_event(ev):
     event = ev.get("event")
     if event == "wrapper_started":
         manager.events_alive = True
+        # Con backup inicial, BDS aun no corre ni se lee stdin (ver state.py).
+        manager.wrapper_pre_bds = ev.get("initial_backup") is True
+    elif event == "bds_launched":
+        manager.wrapper_pre_bds = False
     elif event == "version_captured":
         manager.installed_version = ev.get("version")
+        manager.wrapper_pre_bds = False  # BDS ya imprime: esta lanzado
     elif event == "server_stopped":
+        manager.wrapper_pre_bds = False
         manager.server_stopped_event.set()
     elif event == "shutdown_initiated":
         manager.add_log(L(f"[Wrapper] Apagado iniciado ({ev.get('reason')}).", f"[Wrapper] Shutdown initiated ({ev.get('reason')})."), "system")

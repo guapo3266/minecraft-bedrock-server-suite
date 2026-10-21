@@ -159,6 +159,9 @@ def test_cli_detecta_servidor_corriendo(monkeypatch):
         return
 
     target_exe = os.path.join(restore_backup.BASE_DIR, "bedrock_server.exe")
+    # Solo se ejercita la rama psutil: un wrapper real de esta instalacion no
+    # debe decidir el resultado (su sonda tiene test propio).
+    monkeypatch.setattr(restore_backup, "_wrapper_holds_mutex", lambda: False)
 
     class FakeProc:
         def __init__(self, name, exe=None):
@@ -200,6 +203,7 @@ def test_cli_ignora_bds_de_otra_instalacion(monkeypatch):
         def exe(self):
             return r"C:\otra\instalacion\bedrock_server.exe"
 
+    monkeypatch.setattr(restore_backup, "_wrapper_holds_mutex", lambda: False)
     monkeypatch.setattr(restore_backup.psutil, "process_iter", lambda attrs: [FakeProc()])
     assert restore_backup._server_is_running() is False
 

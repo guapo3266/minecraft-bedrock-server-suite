@@ -52,6 +52,25 @@ def resolve_world_dir(base_dir):
     return validate_world_dir(base_dir, os.path.join(base_dir, "worlds", name))
 
 
+def parse_line(raw_line):
+    """(clave en minusculas, valor) de una linea activa `clave=valor` en bytes, o None.
+
+    Regla UNICA de lineas para leer (read_value) y para escribir (editor de la
+    GUI, gui_backend/services/properties.py): UTF-8 linea a linea (una linea
+    no decodificable se ignora), comentarios `#`/`;`, espacios alrededor de la
+    clave y del valor, y BOM inicial. Con reglas distintas, el editor
+    reescribia otras lineas que las que el lector mostraba (2026-10-20).
+    """
+    try:
+        line = raw_line.decode("utf-8").lstrip("﻿").strip()
+    except UnicodeDecodeError:
+        return None
+    if not line or line.startswith("#") or line.startswith(";") or "=" not in line:
+        return None
+    k, _, v = line.partition("=")
+    return k.strip().lower(), v.strip()
+
+
 def read_value(path, key, default=None):
     """Valor de `key` en un .properties, tolerante a espacios y comentarios.
 
@@ -70,14 +89,9 @@ def read_value(path, key, default=None):
             raw = f.read()
     except OSError:
         return default
+    wanted = key.lower()
     for raw_line in raw.splitlines():
-        try:
-            line = raw_line.decode("utf-8").strip()
-        except UnicodeDecodeError:
-            continue
-        if not line or line.startswith("#") or line.startswith(";") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        if k.strip().lower() == key.lower():
-            return v.strip()
+        parsed = parse_line(raw_line)
+        if parsed is not None and parsed[0] == wanted:
+            return parsed[1]
     return default

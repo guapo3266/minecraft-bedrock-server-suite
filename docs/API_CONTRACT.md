@@ -79,8 +79,14 @@ Tipo especial `session_start`: separador entre el historial precargado y la sesi
   hilo, bajo `op_lock`. 400 si no se confirma, 409 si está ocupado/bloqueado,
   422 si hay campos extra o tipos inválidos. Nunca acepta URLs ni rutas del cliente.
 - `GET /api/suite_update/progress`: fase y resultado sin volver a consultar GitHub.
+  Una fase en curso (`downloading`…`rolling_back`) que ya nadie avanza (sin
+  actualización en esta GUI ni auxiliar vivo) se devuelve como el resultado del
+  diario: `complete`, `rolled_back`, `error` (cancelada antes de reemplazar el
+  programa) o `rollback_failed` (pendiente de `Recuperar_suite.bat`), con
+  `interrupted_phase` y sin `version`.
 - `GET /api/suite_update/health`: versión, token de relevo, PID y versión de Python.
-  Permite comprobar la instancia nueva y liberar el guard tras verificarla.
+  Permite comprobar la instancia nueva y liberar el guard tras verificarla (el
+  loop de métricas también lo libera al ver el diario `complete`).
 
 Los cuatro endpoints tienen guards de IP/Host/Origin. Durante la actualización,
 el middleware bloquea otros POST con 409 y el WS rechaza comandos. La GUI nueva
@@ -228,6 +234,7 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 - 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`) / `"Hay una instancia externa del servidor en ejecución; restauración cancelada"` (sonda externa bajo `op_lock`).
 - 404: `FileNotFoundError` (texto del error).
 - 500: error genérico (extracción/swap). Un ZIP sin `level.dat` en el staging — vacío o solo-packs — se rechaza con `RuntimeError` SIN tocar el mundo (ronda 2026-09-11).
+- Restaura el mundo y los addons de `server_resource_packs/` y `server_behavior_packs/`; los packs que distribuye BDS se quedan en su versión instalada (`zip_safety.is_bds_pack`, 2026-10-20).
 - 500: `level-name` inválido o destino fuera de `worlds/`/redirigido por enlaces; se rechaza antes de abrir el ZIP. Si falla el rollback por rename y se recurre a copiar, el `.bak` se conserva para recuperación exacta manual.
 - 200: `{"status": "ok", "backup": "<filename>"}` + log.
 
@@ -282,7 +289,7 @@ Cliente → servidor:
 - `manager.op_lock`: exclusión mutua de start/restore/update BDS/update suite/backup frío/install.
 - Stop deliberado: `stop_requested` solo se marca DESPUÉS de entregar el `stop` por stdin (router stop, `POST /api/command`, comando WS, `restart_wrapper`, `stop_and_wait`); si el write falla, la operación se cancela sin inhibir al watchdog.
 - Eventos G8: `server_stopped_event` (BDS muerto) ≠ `wrapper_exit_event` (wrapper terminado, backup final incluido).
-- `SERVER_STOP_TIMEOUT_SEC=75`, `WRAPPER_EXIT_TIMEOUT_SEC=450` (piso de la fase 2; la espera efectiva suma `wrapper_state.shutdown_extra_sec` según el tamaño del mundo, ver `lifecycle.wrapper_exit_timeout_sec()`).
+- `SERVER_STOP_TIMEOUT_SEC=75`, `WRAPPER_EXIT_TIMEOUT_SEC=450` (piso de la fase 2; la espera efectiva suma `wrapper_state.shutdown_extra_sec` según el tamaño del mundo, ver `lifecycle.wrapper_exit_timeout_sec()`). Los 75 s de la fase 1 no corren mientras el wrapper siga en su backup inicial previo a BDS (`lifecycle._wait_server_stopped`).
 - `manager` es un singleton global; nunca crear instancias por petición.
 
 ## Arranque (no modificar)

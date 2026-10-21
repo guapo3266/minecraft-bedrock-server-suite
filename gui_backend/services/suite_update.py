@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlsplit
 import psutil
 import requests
 
+from console_lang import L
 from gui_backend import config
 from gui_backend.services import external_probe, lifecycle
 from gui_backend.state import manager
@@ -52,13 +53,27 @@ def enter_handoff_guard():
 
 
 def release_handoff_guard():
+    """Libera el guard de relevo cuando el diario dice "complete". True si lo libero.
+
+    La llaman /api/suite_update/health y el loop de metricas (cada ~2 s, mismo
+    hilo del event loop). Antes solo la llamada de health del auxiliar lo
+    liberaba: si esa unica llamada fallaba, la GUI nueva quedaba con op_lock
+    tomado y todo POST en 409 hasta reiniciarla (2026-10-20). Un diario
+    ilegible en ese instante no rompe el endpoint: se reintenta despues.
+    """
     global _handoff_guard
-    if _handoff_guard:
+    if not _handoff_guard:
+        return False
+    try:
         journal = json.loads((_job_path() / "journal.json").read_text(encoding="utf-8"))
-        if journal["phase"] == "complete":
-            _handoff_guard = False
-            manager.suite_update_in_progress = False
-            manager.op_lock.release()
+    except (OSError, ValueError):
+        return False
+    if not isinstance(journal, dict) or journal.get("phase") != "complete":
+        return False
+    _handoff_guard = False
+    manager.suite_update_in_progress = False
+    manager.op_lock.release()
+    return True
 
 
 def _area():
@@ -72,13 +87,61 @@ def _area():
     return current
 
 
+# Fases que solo avanzan con una actualizacion viva (esta GUI o el auxiliar).
+_ACTIVE_PHASES = frozenset({"downloading", "verifying", "stopping", "waiting_gui",
+                            "applying", "checking", "rolling_back"})
+
+
+def _update_alive(job):
+    """True si alguien puede seguir escribiendo progress.json: esta GUI o su auxiliar."""
+    if manager.suite_update_in_progress:
+        return True
+    try:
+        request = json.loads((job / "request.json").read_text(encoding="utf-8"))
+        return process_alive(request.get("helper_pid", 0), request.get("helper_created", 0))
+    except Exception:
+        return False
+
+
+def _stale_progress(job, phase):
+    """Resultado real de una fase activa que ya nadie avanza, segun el diario.
+
+    El aviso de progreso puede quedar atrasado aunque la operacion terminara:
+    el auxiliar de 2.1.0 no reintenta el reemplazo y, si la GUI leia
+    progress.json en ese instante, el ultimo aviso no se guardaba con la
+    actualizacion ya completada. journal.json es la fuente autoritativa.
+    """
+    try:
+        journal_phase = json.loads((job / "journal.json").read_text(encoding="utf-8")).get("phase")
+    except (OSError, ValueError, AttributeError):
+        journal_phase = None
+    if journal_phase in ("complete", "rolled_back"):
+        # Sin "version": no debe disparar la recarga del navegador.
+        return {"phase": journal_phase, "interrupted_phase": phase}
+    if journal_phase in (None, "prepared"):
+        return {"phase": "error", "interrupted_phase": phase,
+                "detail": L("La actualización anterior se interrumpió antes de reemplazar el programa. Puedes volver a intentarla.",
+                            "The previous update was interrupted before replacing the program. You can try it again.")}
+    return {"phase": "rollback_failed", "interrupted_phase": phase,
+            "detail": L("La actualización anterior quedó a medias. Cierra la GUI y ejecuta Recuperar_suite.bat (o vuelve a abrir iniciar_gui.bat) para recuperar la versión anterior.",
+                        "The previous update was left halfway. Close the GUI and run Recuperar_suite.bat (or reopen iniciar_gui.bat) to restore the previous version.")}
+
+
 def last_progress():
     if _early_progress is not None:
         return dict(_early_progress)
     try:
-        return json.loads((_job_path() / "progress.json").read_text(encoding="utf-8"))
+        job = _job_path()
+        value = json.loads((job / "progress.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {"phase": "idle"}
+    # Una fase activa sin nadie que la avance es residuo: GUI cerrada a mitad,
+    # auxiliar que no llego a arrancar o un ultimo aviso que no se pudo guardar.
+    # Devolverla tal cual dejaba la ventana "en curso" para siempre, con
+    # Instalar y Comprobar deshabilitados (2026-10-20).
+    if isinstance(value, dict) and value.get("phase") in _ACTIVE_PHASES and not _update_alive(job):
+        return _stale_progress(job, value["phase"])
+    return value
 
 
 def _job_path():

@@ -23,7 +23,8 @@ reemplazar el programa; extraer la instalación en una ruta corta permite repeti
 
 La [Release v2.1.1](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.1)
 se publicó el **20 de octubre de 2026** como estable y Latest. El ZIP incluye
-CPython **3.13.16**, ocupa **16 484 670 bytes**, tiene 756 archivos y su
+CPython **3.13.16**, ocupa **16 484 670 bytes** y contiene 757 archivos: los 756
+que inventaría su manifiesto más el propio `suite_release_manifest.json`. El
 manifiesto identifica el commit público `39cd5bb177ca8c74b6a0e50458626afd02162797`
 (etiqueta `v2.1.1`; en TESTTEST apunta a `53f1a9f`). Su SHA-256 es:
 
@@ -37,6 +38,11 @@ Evidencia del 20 de octubre:
   carpeta nueva: actualización, migración desde scripts y rollback ante un
   fallo de arranque inyectado, con los seis testigos de datos intactos. GUI y
   Python fueron reales; GitHub y el wrapper, simulados; no se ejecutó BDS.
+- Esa QA no recorre la ruta que siguen los usuarios: el verificador arma la
+  instalación «anterior» con el propio paquete y solo cambia su número de
+  versión, así que ejercitó el auxiliar de 2.1.1. La actualización real
+  2.1.0 → 2.1.1 usa el auxiliar de 2.1.0 y no se probó de extremo a extremo
+  (ver el problema conocido de abajo).
 - Un intento previo con otro ZIP falló en el escenario de actualización por un
   `PermissionError` en `os.replace` de `progress.json`; se corrigió con
   `suite_release._replace` y el ZIP publicado se construyó después de esa
@@ -44,9 +50,29 @@ Evidencia del 20 de octubre:
   para actualizaciones que parten de 2.1.1.
 - Los assets publicados se descargaron de GitHub y sus bytes coincidieron con
   los del ZIP probado y con el digest de la API. El actualizador, ejecutado
-  contra la API real, detectó la Release con su URL y SHA-256 y la ofreció solo
-  a instalaciones 2.1.0. No se instaló en el servidor real: esa instalación se
-  sincronizó por separado desde TESTTEST.
+  contra la API real, detectó la Release con su URL y SHA-256. La ofrece a toda
+  instalación con una versión anterior que tenga actualizador (en la práctica,
+  2.1.0) y no a una 2.1.1. No se instaló en el servidor real: esa instalación
+  se sincronizó por separado desde TESTTEST.
+
+### Problema conocido al actualizar desde 2.1.0
+
+El auxiliar que aplica la actualización se copia de la versión instalada: de
+2.1.0 a 2.1.1 se usa el de 2.1.0, que reemplaza sus archivos de estado sin
+reintentar. Si la GUI o el antivirus los están leyendo en ese instante, Windows
+responde «Acceso denegado» («Access is denied»). Mundos, propiedades, packs,
+backups y configuración no se tocan en ningún caso. Según el momento:
+
+- **La ventana indica que se recuperó la versión anterior**, con ese error en
+  el detalle: la instalación quedó como estaba y se puede volver a intentar.
+- **La GUI no vuelve a abrirse**: abrir `iniciar_gui.bat` (o `Recuperar_suite.bat`).
+  Si el reemplazo quedó a medias, recupera la versión anterior antes de arrancar.
+- **La ventana queda en una fase que no avanza**, por ejemplo «Comprobando el
+  arranque del panel actualizado…»: solo quedó atrasado el aviso de progreso.
+  Si **Más acciones → Acerca de** muestra 2.1.1, la actualización terminó; si
+  muestra 2.1.0, sigue instalada la versión anterior y se puede reintentar. En ambos casos,
+  cerrar la pestaña de la GUI, borrar `data\suite_updates\recovery\progress.json`
+  (solo guarda ese aviso; la recuperación usa `journal.json`) y volver a abrirla.
 
 ## Entrega 2.1.0 publicada
 
@@ -124,6 +150,15 @@ también puede abrirse directamente. Usa el Python auxiliar, fuera del runtime
 reemplazado. Si el actualizador sigue activo, no abre otra GUI. Tras recuperar
 un apagón, revisar la GUI y arrancar Minecraft manualmente.
 
+`progress.json` solo es el aviso que muestra la ventana; `journal.json` decide la
+recuperación. Si el aviso queda en una fase en curso que ya nadie avanza (GUI
+cerrada a mitad, auxiliar que no arrancó o un último aviso que no se pudo
+guardar), la GUI muestra el resultado que registra el diario: actualización
+terminada, versión anterior recuperada, cancelada antes de reemplazar el
+programa o pendiente de `Recuperar_suite.bat`. La 2.1.1 publicada aún muestra
+esos casos como en curso; ver
+[el problema conocido](#problema-conocido-al-actualizar-desde-210).
+
 Los resguardos anteriores quedan en `data/suite_updates/previous_*`. No se borran
 automáticamente. Guardan código/runtime; no duplican los mundos. El backup final
 conserva su ubicación y sus reglas de retención habituales.
@@ -142,6 +177,11 @@ python tools/build_release.py
 python tools/release_notes.py --output output/releases/NOTAS.md
 ```
 
+`release_notes.py` copia la sección de la versión del `CHANGELOG.md` y convierte
+sus enlaces relativos en enlaces a `main` del repositorio público: la página de
+la Release no resuelve rutas del repo, y el registro de cada entrega (hash,
+procedencia, evidencia) se añade a `docs/` después de etiquetarla.
+
 El build publicable exige un checkout limpio. `--allow-dirty` solo sirve para QA:
 ese ZIP queda marcado y el actualizador lo rechaza. `release_python.json` fija
 CPython y su hash oficial; `requirements-release.txt` fija las dependencias.
@@ -152,26 +192,56 @@ Los workflows **tests** y **Release Windows** se ejecutan solo manualmente desde
 Actions. Los pushes de ramas/tags y las PR no los activan. **Release Windows**
 valida y construye el ZIP: ejecutarlo sobre una rama crea un artifact; sobre un
 tag `vX.Y.Z` coincidente con `version.json` también publica la Release con ZIP y
-checksum. El ZIP ya validado puede publicarse directamente mediante la API de
-GitHub. No mover tags existentes. Push, publicación y despliegue son operaciones
+checksum. El ZIP ya validado puede publicarse directamente con GitHub CLI (abajo).
+No mover tags existentes. Push, publicación y despliegue son operaciones
 separadas que requieren el pedido del usuario.
 
-Para publicar directamente, usar el **checkout público** y una etiqueta ya
-creada en el commit aprobado. Crear una Release en borrador para esa etiqueta,
-adjuntar el ZIP validado y su `.sha256`, comprobar sus hashes y publicarla como
-estable/Latest. Descargar ambos assets y comprobar de nuevo los bytes y
-[la última Release en la API](https://api.github.com/repos/guapo3266/minecraft-bedrock-server-suite/releases/latest). No sustituir silenciosamente los assets de una versión
-ya publicada; una corrección distribuible recibe un nuevo número.
+### Publicar con GitHub CLI
+
+2.1.1 se publicó con este procedimiento: borrador, digests verificados y recién
+entonces Latest. Requiere `gh` (instalado en `C:\Program Files\GitHub CLI`)
+con una sesión que inicia el propio usuario (`gh auth login`). Se publica desde
+el **checkout público**, con la etiqueta `vX.Y.Z` ya creada en el commit aprobado
+y subida, y con el MISMO ZIP que pasó `tools/verify_release.py`: un ZIP
+reconstruido es otro ZIP. Primero, un borrador con sus dos assets:
+
+```powershell
+gh release create vX.Y.Z output/releases/BedrockSuite-Windows-x64.zip output/releases/BedrockSuite-Windows-x64.zip.sha256 --draft --verify-tag --title "Bedrock Suite vX.Y.Z" --notes-file output/releases/NOTAS.md
+gh api repos/guapo3266/minecraft-bedrock-server-suite/releases --jq '.[0] | .tag_name, .draft, (.assets[] | {name, size, digest})'
+Get-FileHash output/releases/BedrockSuite-Windows-x64.zip -Algorithm SHA256
+```
+
+El borrador recién creado es el primero de la lista. Solo si el `digest` del ZIP
+(`sha256:…`, el valor exacto que verifica el actualizador) coincide con
+`Get-FileHash` y con el `.sha256`, publicarlo como estable y Latest:
+
+```powershell
+gh release edit vX.Y.Z --draft=false --latest
+```
+
+Después, descargar los assets publicados en una carpeta nueva, comprobar otra
+vez sus bytes y que la API ya devuelve esta Release como la última:
+
+```powershell
+mkdir C:\SuiteQA\descarga-vX.Y.Z
+gh release download vX.Y.Z --dir C:\SuiteQA\descarga-vX.Y.Z
+Get-FileHash C:\SuiteQA\descarga-vX.Y.Z\BedrockSuite-Windows-x64.zip -Algorithm SHA256
+gh api repos/guapo3266/minecraft-bedrock-server-suite/releases/latest --jq '.tag_name, (.assets[] | {name, digest})'
+```
+
+Las expresiones `--jq` evitan comillas dobles: Windows PowerShell 5.1 las altera
+al pasarlas a programas externos. No sustituir silenciosamente los assets de una
+versión ya publicada; una corrección distribuible recibe un nuevo número.
 
 ## Validar sin ejecutar BDS
 
 Además de los checks de [versionado](VERSIONADO.md), el verificador opt-in
 ejercita actualización, migración desde scripts y rollback de un fallo de
-arranque. Usar una carpeta de salida **nueva y corta**, fuera de una instalación
-real:
+arranque. Usar una carpeta de salida **nueva y corta** en cada intento, fuera de
+una instalación real (rechaza una carpeta que ya tenga escenarios):
 
 ```powershell
-python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.1.0
+python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.1.2
 ```
 
 Genera `VERIFICACION.json` y logs por escenario. Descarga un Python anterior
@@ -180,10 +250,16 @@ GitHub y el wrapper se simulan. No ejecuta ni incluye `bedrock_server.exe`.
 Conserva seis testigos de configuración/datos y comprueba que los archivos
 idénticos mantienen su fecha. Las copias con fallos inyectados son solo de QA.
 
-En la validación local del 16 de octubre de 2026 pasaron los tres escenarios,
+La instalación «anterior» de cada escenario se arma con el propio paquete y
+solo cambia su número de versión: el auxiliar que se ejercita es siempre el de
+la versión verificada. La transición desde la versión publicada anterior, con
+su propio auxiliar, no la cubre este verificador.
+
+En la validación de 2.1.0 (16 de octubre de 2026) pasaron los tres escenarios,
 1051 tests Python del perfil público (2 omitidos, 2 e2e excluidos), 96 tests
 frontend y lint/build. El lanzador del ZIP arrancó con solo `C:\Windows\System32`
-en el PATH, desde otro directorio y con espacios/acentos en la ruta. Esto
-acredita el paquete y su recuperación; no una prueba E2E de Minecraft ni una
-ejecución de CI en GitHub. Nunca interpretar un job que no arrancó como un test
-aprobado.
+en el PATH, desde otro directorio y con espacios/acentos en la ruta. La
+evidencia de 2.1.1 está en [Entrega 2.1.1 publicada](#entrega-211-publicada).
+Esto acredita el paquete y su recuperación; no una prueba E2E de Minecraft ni
+una ejecución de CI en GitHub. Nunca interpretar un job que no arrancó como un
+test aprobado.

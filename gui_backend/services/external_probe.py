@@ -5,7 +5,6 @@ Permite a la GUI detectar si BDS o el wrapper están corriendo por fuera de la G
 """
 
 import os
-import time
 
 import psutil
 import windows_process_guard as wpg
@@ -37,18 +36,10 @@ def _wrapper_mutex_held_by_other(mutex_name: str) -> bool:
     quedaban bloqueados con 409 sin haber wrapper real. El wrapper retiene el
     mutex desde el arranque hasta morir, asi que solo un acquire que sigue
     fallando tras un reintento corto (una colision entre dos probes se
-    libera en microsegundos) indica una instancia externa real.
+    libera en microsegundos) indica una instancia externa real. La regla vive
+    en windows_process_guard.mutex_held_by_other (la comparte la CLI).
     """
-    probe = wpg.NamedMutex(mutex_name)
-    try:
-        for _attempt in range(2):
-            if probe.acquire(timeout_ms=0):
-                probe.release()
-                return False
-            time.sleep(0.05)
-        return True
-    finally:
-        probe.close()
+    return wpg.mutex_held_by_other(mutex_name)
 
 
 def detect_external_bds(base_dir: str = None) -> tuple[bool, str | None]:
@@ -63,7 +54,7 @@ def detect_external_bds(base_dir: str = None) -> tuple[bool, str | None]:
     target_base = base_dir or config.BASE_DIR
 
     # 1. Comprobar si el NamedMutex del wrapper está retenido por otra instancia
-    mutex_name = f"BDS_Wrapper_{wpg.get_installation_hash(target_base)}"
+    mutex_name = wpg.wrapper_mutex_name(target_base)
     if _wrapper_mutex_held_by_other(mutex_name):
         return True, "wrapper_mutex"
 

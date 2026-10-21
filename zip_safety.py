@@ -17,7 +17,9 @@ consumidores sin drift silencioso. Tests en test_pbt_properties.py
 verifican consenso e identidad de los alias.
 """
 
+import json
 import os
+import re
 import shutil
 
 from console_lang import L
@@ -25,6 +27,89 @@ from console_lang import L
 # Carpetas de nivel servidor incluidas en backups junto al mundo.
 SERVER_PACK_DIRS = ("resource_packs", "behavior_packs")
 PACK_ZIP_PREFIX = "server_"
+
+# Packs que distribuye el propio BDS (vanilla, chemistry, editor,
+# experimental_*, server_*_library...). Viajan en los backups junto a los
+# addons, pero NO se restauran: devolverlos desde un backup anterior a una
+# actualizacion de BDS dejaba el bedrock_server.exe nuevo con los packs
+# vanilla viejos, la mezcla de versiones que el actualizador evita
+# (2026-10-20). Fuente autoritativa: el registro que escribe bds_update con las
+# carpetas de cada ZIP oficial instalado (union acumulada). Sin registro
+# (BDS instalado a mano o antes de existir), se reconocen por el nombre.
+BDS_PACKS_RECORD_NAME = "bds_shipped_packs.json"
+_BDS_PACK_NAME_RE = re.compile(
+    r"^(?:vanilla|chemistry)(?:_(?:base|\d[\d.]*))?$"
+    r"|^editor$"
+    r"|^experimental_\w+$"
+    r"|^server(?:_\w+)?_library$",
+    re.IGNORECASE,
+)
+
+
+def bds_packs_record_path(base_dir):
+    """Ruta del registro de packs de BDS de una instalacion (dato en data/)."""
+    return os.path.join(base_dir, "data", BDS_PACKS_RECORD_NAME)
+
+
+def read_bds_shipped_packs(base_dir):
+    """{kind: nombres en minusculas} del registro, o None si no hay uno util.
+
+    Un registro sin ningun nombre no aporta informacion (BDS siempre trae
+    packs) y se trata como ausente: si no, desactivaria el patron de nombres.
+    """
+    try:
+        with open(bds_packs_record_path(base_dir), encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    shipped = {
+        kind: {n.casefold() for n in raw.get(kind, []) if isinstance(n, str)}
+        for kind in SERVER_PACK_DIRS
+    }
+    return shipped if any(shipped.values()) else None
+
+
+def is_bds_pack(kind, folder, shipped):
+    """True si la carpeta `folder` de `kind` la distribuye BDS.
+
+    `shipped` es el resultado de read_bds_shipped_packs: con registro decide
+    solo el registro (un addon propio con nombre parecido se sigue
+    restaurando); sin registro (None) decide el patron de nombres de Mojang.
+    """
+    if not folder:
+        return False
+    if shipped is not None:
+        return folder.casefold() in shipped.get(kind, ())
+    return _BDS_PACK_NAME_RE.match(folder) is not None
+
+
+def record_bds_shipped_packs(base_dir, packs):
+    """Une `packs` ({kind: nombres}) al registro con escritura atomica."""
+    actual = read_bds_shipped_packs(base_dir) or {}
+    datos = {
+        kind: sorted(set(actual.get(kind, ())) | {n.casefold() for n in packs.get(kind, ())})
+        for kind in SERVER_PACK_DIRS
+    }
+    if not any(datos.values()):
+        return  # nada que anotar: un registro vacio se leeria como ausente
+    path = bds_packs_record_path(base_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + ".tmp_" + os.urandom(4).hex()
+    try:
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(datos, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 # Marcadores canonicos de backup NO apto para restaurar ni para las capas
 # recientes/diarias de rotacion (evidencia retenida 7 dias). Unico punto de

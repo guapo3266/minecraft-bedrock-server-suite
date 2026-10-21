@@ -50,6 +50,10 @@ async def hardware_metrics_loop():
             # Sonda psutil (itera procesos) y muestreo de hardware: fuera del
             # event loop para no congelar WebSockets/endpoints cada 2s.
             await run_in_threadpool(external_probe_service.update_external_instance_state)
+            # Guard de relevo de una actualizacion de la suite: se libera en
+            # cuanto el diario dice "complete", aunque falle la llamada de
+            # health del auxiliar (mismo hilo que el endpoint: sin carreras).
+            suite_update_service.release_handoff_guard()
             manager.update_status()
             tick += 1
             if tick % 15 == 0:  # cada ~30s: persistir metricas + retencion diaria

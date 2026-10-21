@@ -38,17 +38,25 @@ def list_backup_info(backup_dir):
     """
     if not os.path.exists(backup_dir):
         return []
-    zips = _list_backup_files(backup_dir)
-    backups_info = []
-    for z in sorted(zips, key=os.path.getmtime, reverse=True):
-        size_mb = round(os.path.getsize(z) / (1024 * 1024), 2)
-        mtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(z)))
-        backups_info.append({
+    # Un stat por ZIP y tolerante: la rotacion del wrapper (otro proceso)
+    # puede borrar uno entre el glob y el stat. Antes el FileNotFoundError
+    # convertia GET /api/backups en un 500 (2026-10-20).
+    entries = []
+    for z in _list_backup_files(backup_dir):
+        try:
+            st = os.stat(z)
+        except OSError:
+            continue
+        entries.append((st.st_mtime, st.st_size, z))
+    entries.sort(key=lambda e: e[0], reverse=True)
+    return [
+        {
             "filename": os.path.basename(z),
-            "size_mb": size_mb,
-            "date": mtime
-        })
-    return backups_info
+            "size_mb": round(size / (1024 * 1024), 2),
+            "date": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime)),
+        }
+        for mtime, size, z in entries
+    ]
 
 
 def restore_backup_under_lock(manager, filename):

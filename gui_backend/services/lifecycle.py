@@ -44,6 +44,47 @@ def wrapper_exit_timeout_sec():
     return config.WRAPPER_EXIT_TIMEOUT_SEC + extra
 
 
+# Sondeo de la fase 1 mientras el wrapper sigue en su backup inicial.
+_PRE_BDS_POLL_SEC = 0.5
+
+
+def _pre_bds_allowance_sec():
+    """Margen maximo para que el wrapper termine su backup inicial y lance BDS.
+
+    El backup inicial empaqueta el mismo mundo + packs que el backup final:
+    misma escala (`wrapper_state.scaled_backup_timeout_sec`, piso 240 s).
+    Nunca lanza: un fallo al estimar deja el piso.
+    """
+    try:
+        return wrapper_state.scaled_backup_timeout_sec(
+            _estimate_world_bytes(), wrapper_state.FINAL_BACKUP_TIMEOUT_SEC)
+    except Exception:
+        return wrapper_state.FINAL_BACKUP_TIMEOUT_SEC
+
+
+def _wait_server_stopped():
+    """Fase 1 G8: espera a que BDS muera. Devuelve (detenido, segundos esperados).
+
+    El wrapper hace su backup inicial ANTES de lanzar BDS y no lee stdin hasta
+    entonces: un 'stop' enviado en esa ventana queda en la tuberia y se aplica
+    cuando BDS arranca. Con el tope fijo de SERVER_STOP_TIMEOUT_SEC, un backup
+    inicial largo cancelaba el reinicio/actualizacion y despues el stop
+    encolado apagaba igual el servidor, ya sin re-arranque porque
+    stop_requested quedaba en True (2026-10-20). Mientras el canal NDJSON diga
+    que BDS aun no se lanzo (manager.wrapper_pre_bds), el plazo no corre; el
+    margen del backup inicial acota esa espera. Sin backup inicial en curso es
+    exactamente la espera de siempre (una sola wait de SERVER_STOP_TIMEOUT_SEC).
+    """
+    start = time.monotonic()
+    if manager.wrapper_pre_bds and manager.is_running:
+        limit = start + _pre_bds_allowance_sec()
+        while manager.wrapper_pre_bds and manager.is_running and time.monotonic() < limit:
+            if manager.server_stopped_event.wait(timeout=_PRE_BDS_POLL_SEC):
+                return True, time.monotonic() - start
+    stopped = manager.server_stopped_event.wait(timeout=config.SERVER_STOP_TIMEOUT_SEC)
+    return stopped, time.monotonic() - start
+
+
 def _launch_wrapper():
     """Lanza el wrapper bajo op_lock, SIN sonda de instancia externa.
 
@@ -79,6 +120,10 @@ def _launch_wrapper():
         with manager.lock:
             manager.wrapper_process = proc
             manager.is_running = True
+            # El hilo lector lo reafirma; fijarlo ya evita que un tick del
+            # watchdog vea is_running=True con el start_time de la sesion
+            # anterior (decide el reinicio diario por el arranque, 2026-10-20).
+            manager.start_time = time.time()
             manager.wrapper_exit_event.clear()
             manager.server_stopped_event.clear()
     finally:
@@ -128,11 +173,14 @@ def restart_wrapper():
         #  Fase 1: que BDS muera (evento propio, independiente del cierre del
         #    wrapper). Esperar solo la salida del wrapper con 30s abortaba el
         #    reinicio en mundos grandes: ese evento llega tras el backup final.
-        if not manager.server_stopped_event.wait(timeout=config.SERVER_STOP_TIMEOUT_SEC):
+        #    Un backup inicial en curso no consume el plazo (_wait_server_stopped).
+        stopped, waited = _wait_server_stopped()
+        if not stopped:
+            waited_s = round(waited)
             manager.add_log(
-                L(f"[GUI Backend] El servidor no se detuvo en {config.SERVER_STOP_TIMEOUT_SEC}s. "
+                L(f"[GUI Backend] El servidor no se detuvo en {waited_s}s. "
                   "Reinicio cancelado.",
-                  f"[GUI Backend] The server did not stop within {config.SERVER_STOP_TIMEOUT_SEC}s. "
+                  f"[GUI Backend] The server did not stop within {waited_s}s. "
                   "Restart cancelled."),
                 "error",
             )
@@ -194,11 +242,14 @@ def stop_and_wait(tag="[Actualizador BDS]"):
     manager.add_log(L(f"{tag} Deteniendo servidor de Minecraft...", f"{tag} Stopping Minecraft server..."), "system")
     # G8: dos fases — BDS muerto primero, despues el wrapper completo
     # (backup final de cierre incluido) antes de tocar binarios o mundos.
-    if not manager.server_stopped_event.wait(timeout=config.SERVER_STOP_TIMEOUT_SEC):
+    # Un backup inicial en curso no consume el plazo (_wait_server_stopped).
+    stopped, waited = _wait_server_stopped()
+    if not stopped:
+        waited_s = round(waited)
         manager.add_log(
-            L(f"{tag} El servidor no se detuvo en {config.SERVER_STOP_TIMEOUT_SEC}s. "
+            L(f"{tag} El servidor no se detuvo en {waited_s}s. "
               "Operación cancelada; si el servidor quedó detenido, reinícialo con ▶ Iniciar.",
-              f"{tag} The server did not stop within {config.SERVER_STOP_TIMEOUT_SEC}s. "
+              f"{tag} The server did not stop within {waited_s}s. "
               "Operation cancelled; if the server ended up stopped, restart it with ▶ Start."),
             "error",
         )

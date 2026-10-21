@@ -76,39 +76,58 @@ def _validate_props(values):
     return True, ""
 
 
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
 def _write_props_values(values):
     """Actualiza las claves dadas preservando el resto del archivo de forma atómica bajo lock.
 
-    Reemplaza la primera linea activa 'clave=...'; si la clave no existe (o
-    solo esta comentada), la anade al final. Si server.properties aun no
-    existe (instalacion nueva antes del primer boot), se crea con las claves
-    dadas. Devuelve las claves escritas.
+    Las lineas se reconocen con la MISMA regla que el lector
+    (server_properties.parse_line: sin distinguir mayusculas, espacios
+    alrededor del '=', comentarios #/;). Se reemplazan TODAS las lineas activas
+    de cada clave por 'clave=valor', para que la GUI y BDS no lean valores
+    distintos; si no hay ninguna (o solo esta comentada), se anade al final.
+    El resto se copia byte a byte, con su salto de linea. Antes el archivo se
+    leia en UTF-8 estricto (un acento guardado en ANSI daba 500 al guardar) y
+    solo se reconocia 'clave=' / 'clave =': con 'Server-Name = X' se anadia
+    una linea duplicada que el lector ignoraba (2026-10-20). Si
+    server.properties aun no existe (instalacion nueva antes del primer
+    boot), se crea con las claves dadas. Devuelve las claves escritas.
     """
+    from server_properties import parse_line
+
     with _props_lock:
-        if os.path.exists(config.PROPS_PATH):
-            with open(config.PROPS_PATH, encoding="utf-8") as f:
-                lines = f.readlines()
-        else:
-            lines = []
-        written = []
-        for key, val in values.items():
-            replaced = False
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if stripped.startswith(key + "=") or stripped.startswith(key + " ="):
-                    lines[i] = f"{key}={val}\n"
-                    replaced = True
-                    break
-            if not replaced:
-                lines.append(f"{key}={val}\n")
-            written.append(key)
+        try:
+            with open(config.PROPS_PATH, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            raw = b""
+        newline = b"\r\n" if b"\r\n" in raw else b"\n"
+        pending = {key.lower(): (key, val) for key, val in values.items()}
+        found = set()
+        lines = []
+        for raw_line in raw.splitlines(keepends=True):
+            parsed = parse_line(raw_line)
+            if parsed is None or parsed[0] not in pending:
+                lines.append(raw_line)
+                continue
+            key, val = pending[parsed[0]]
+            body = raw_line.rstrip(b"\r\n")
+            bom = _UTF8_BOM if body.startswith(_UTF8_BOM) else b""
+            lines.append(bom + f"{key}={val}".encode("utf-8") + raw_line[len(body):])
+            found.add(parsed[0])
+        missing = [k for k in pending if k not in found]
+        if missing and lines and not lines[-1].endswith((b"\n", b"\r")):
+            lines[-1] += newline
+        for k in missing:
+            key, val = pending[k]
+            lines.append(f"{key}={val}".encode("utf-8") + newline)
+        written = list(values)
 
         nonce = os.urandom(4).hex()
         tmp_path = config.PROPS_PATH + f".tmp_{nonce}"
         try:
-            with open(tmp_path, "w", encoding="utf-8", newline="") as f:
+            with open(tmp_path, "wb") as f:
                 f.writelines(lines)
                 f.flush()
                 os.fsync(f.fileno())

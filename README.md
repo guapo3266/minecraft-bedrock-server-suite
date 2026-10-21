@@ -64,7 +64,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 
 - Backups automáticos en caliente sin molestar a los jugadores (por defecto cada 30 minutos).
 - Programación desde la GUI: cada cuánto, solo cuando hay alguien jugando, o a una hora fija todos los días (aunque el servidor esté apagado).
-- Watchdog opcional: si el servidor se cae solo, se re-levanta; también puede reiniciarse a una hora fija cada día.
+- Watchdog opcional: si el servidor se cae solo, se re-levanta; también puede reiniciarse a una hora fija cada día (si ese día arrancó después de esa hora, no se reinicia).
 - Gestión de jugadores: permisos (operator/member/visitor), allowlist y kick/ban desde la GUI, con registro de quién jugó y cuánto.
 - Historial persistente: gráficas de RAM/CPU/disco de las últimas 24 h, logs que sobreviven al reinicio de la GUI (marcados con un separador de sesión) y tiempo de juego por jugador.
 - Borra automáticamente los backups viejos (guarda los últimos 15 y 1 diario por una semana).
@@ -119,6 +119,7 @@ Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arr
 ### Solución de problemas
 
 - **El backup inicial tarda varios minutos**: comprobá en **Más acciones → Acerca de** que la suite sea 2.1.1 o posterior; si ya lo es, aplicá las exclusiones de Windows Defender (sección anterior) o poné `backup-inicio=false` en `server.properties`.
+- **Actualizar desde 2.1.0 termina en «Acceso denegado» o se queda en «Comprobando…»**: es un problema conocido del auxiliar de 2.1.0; no toca mundos ni configuración. La salida para cada caso está en [la guía de actualizaciones](docs/ACTUALIZACIONES_SUITE.md#problema-conocido-al-actualizar-desde-210).
 - **`409 Hay una instancia externa del servidor en ejecución`**: hay un wrapper o BDS de ESTA instalación corriendo por fuera de la GUI. Cerralo y reintentá; la sonda compara la ruta del ejecutable, así que un BDS de otra carpeta no bloquea.
 - **El puerto 8000 está ocupado**: la GUI salta sola al siguiente libre y abre el navegador ahí; para fijarlo, ejecutá `set GUI_PORT=8001` antes de arrancar.
 - **La GUI no muestra jugadores**: las detecciones leen el log de BDS en inglés (`Player connected: ...`). No cambies el idioma del servidor; si Mojang cambia el formato, se pierden jugadores pero los backups en caliente siguen funcionando.
@@ -136,10 +137,11 @@ Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arr
 - **Dónde quedan**: fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`. Se conservan 15 recientes + 1 por día durante 7 días; los marcados (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`), 7 días como evidencia y nunca se ofrecen para restaurar.
 - **Forzar un backup ahora**: botón "Backup" de la GUI o `backup` en la consola del wrapper.
 - **Restaurar (GUI)**: pestaña Backups → elegir el punto → [Restaurar]. Exige el servidor apagado; si algo falla a mitad del intercambio, se intenta recuperar el mundo anterior (rollback). Si Windows impide renombrar la carpeta, la recuperación por copia conserva el `.bak` para una recuperación exacta manual: no lo borres hasta revisar el mundo y los packs.
-- **Restaurar (CLI)**: `python restore_backup.py` → elegir número → escribir `SI`. Antes de tocar nada recupera restos de restauraciones interrumpidas.
+- **Qué se restaura**: el mundo y los addons de `resource_packs/` y `behavior_packs/`. Los packs que trae BDS (vanilla, chemistry, editor, experimental…) se quedan en la versión instalada: un backup de otra versión de BDS los mezclaría con el ejecutable actual. La suite anota cuáles son al instalar o actualizar BDS (`data/bds_shipped_packs.json`); sin ese registro, los reconoce por el nombre.
+- **Restaurar (CLI)**: `python restore_backup.py` → elegir número → escribir `SI`. Se niega mientras el servidor o su wrapper sigan en marcha, también durante el backup de cierre. Antes de tocar nada recupera restos de restauraciones interrumpidas.
 - **Verificar integridad**: `python tools\verify_backups.py` comprueba CRC y que cada ZIP tenga `level.dat` (sin él no es restaurable) y marca los malos automáticamente. Recomendado correrlo de vez en cuando; es lento con backups grandes porque los lee enteros.
 - **Ante un apagón a mitad de restauración**: en el próximo arranque (GUI o wrapper) los restos se limpian solos; si ves carpetas `.bak_huerfano_*`, son resguardos conservados a propósito (no se borran solos: revísalos y bórralos cuando confirmes que no los necesitás).
-- **Ante una actualización BDS interrumpida**: la GUI intenta recuperar los binarios al arrancar. Si sigue habiendo errores, conserva las carpetas `bds_update_prev_*`: contienen el manifiesto y los originales pendientes de recuperar.
+- **Ante una actualización BDS interrumpida**: la GUI intenta recuperar los binarios al arrancar. Si sigue habiendo errores, conserva las carpetas `bds_update_prev_*`: contienen el manifiesto y los originales pendientes de recuperar. Una `bds_update_prev_*` **sin** manifiesto es otra cosa: la actualización terminó, pero su versión anterior no pudo pasar a `data/bds_previous` (el log lo avisa); guarda esa versión para revisión manual y no se aplica sola.
 
 ### Para usarlo desde código fuente
 
@@ -237,7 +239,7 @@ Both modes share the same wrapper and folder — you can start with the GUI and 
 
 - Automatic hot backups without kicking anyone (every 30 minutes by default).
 - Scheduling from the GUI: how often, only when someone is playing, or at a fixed daily time (even with the server off).
-- Optional watchdog: if the server crashes on its own, it restarts by itself; it can also restart at a fixed time every day.
+- Optional watchdog: if the server crashes on its own, it restarts by itself; it can also restart at a fixed time every day (if it was started after that time, it is not restarted that day).
 - Player management: permissions (operator/member/visitor), allowlist and kick/ban from the GUI, with a record of who played and for how long.
 - Persistent history: 24-hour RAM/CPU/disk charts, logs that survive GUI restarts (marked with a session separator) and playtime per player.
 - Auto-deletes old backups (keeps the last 15 and 1 daily for a week).
@@ -289,6 +291,7 @@ If the initial startup backup still takes several minutes on 2.1.1 or later (on 
 ### Troubleshooting
 
 - **The initial backup takes several minutes**: check in **More actions → About** that the suite is 2.1.1 or later; if it is, apply the Windows Defender exclusions (previous section) or set `backup-inicio=false` in `server.properties`.
+- **Updating from 2.1.0 ends in "Access is denied" or stays at "Checking…"**: a known issue of the 2.1.0 helper; it never touches worlds or configuration. The way out for each case is in [the update guide](docs/ACTUALIZACIONES_SUITE.md#problema-conocido-al-actualizar-desde-210) (Spanish).
 - **`409 Hay una instancia externa del servidor en ejecución`**: a wrapper or BDS of THIS installation is running outside the GUI. Close it and retry; the probe compares the executable path, so a BDS from another folder does not block.
 - **Port 8000 is taken**: the GUI automatically jumps to the next free port and opens the browser there; to pin it, run `set GUI_PORT=8001` before starting.
 - **The GUI shows no players**: detections read the BDS log in English (`Player connected: ...`). Do not change the server language; if Mojang changes the format, players are lost but hot backups keep working.
@@ -306,10 +309,11 @@ If the initial startup backup still takes several minutes on 2.1.1 or later (on 
 - **Where they live**: outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`. The last 15 plus 1 daily for 7 days are kept; marked ones (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`) stay 7 days as evidence and are never offered for restore.
 - **Force a backup now**: the GUI "Backup" button or `backup` in the wrapper console.
 - **Restore (GUI)**: Backups tab → pick the point → [Restore]. Requires the server to be off; if the swap fails midway, recovery of the previous world is attempted (rollback). If Windows prevents renaming the folder, recovery by copy keeps the `.bak` for exact manual recovery: keep it until you have checked the world and packs.
-- **Restore (CLI)**: `python restore_backup.py` → pick a number → type `SI`. Before touching anything it recovers leftovers from interrupted restores.
+- **What gets restored**: the world and the addons in `resource_packs/` and `behavior_packs/`. The packs that ship with BDS (vanilla, chemistry, editor, experimental…) stay at the installed version: a backup from another BDS version would mix them with the current executable. The suite records them when it installs or updates BDS (`data/bds_shipped_packs.json`); without that record, it recognizes them by name.
+- **Restore (CLI)**: `python restore_backup.py` → pick a number → type `SI`. It refuses while the server or its wrapper is still running, including during the shutdown backup. Before touching anything it recovers leftovers from interrupted restores.
 - **Verify integrity**: `python tools\verify_backups.py` checks the CRC and that every ZIP contains `level.dat` (without it a backup is not restorable) and quarantines the bad ones. Worth running once in a while; it is slow with large backups because it reads them fully.
 - **After a blackout mid-restore**: leftovers are cleaned up on the next start (GUI or wrapper); if you see `.bak_huerfano_*` folders they are preserved safety copies on purpose (never auto-deleted: review them and remove them once you are sure).
-- **After an interrupted BDS update**: the GUI attempts to recover the binaries on startup. If errors remain, keep the `bds_update_prev_*` folders: they contain the manifest and originals still awaiting recovery.
+- **After an interrupted BDS update**: the GUI attempts to recover the binaries on startup. If errors remain, keep the `bds_update_prev_*` folders: they contain the manifest and originals still awaiting recovery. A `bds_update_prev_*` **without** a manifest is different: the update finished, but its previous version could not be moved to `data/bds_previous` (the log says so); it keeps that version for manual review and is never applied on its own.
 
 ### Running from source
 

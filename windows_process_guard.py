@@ -9,6 +9,7 @@ Proporciona utilidades ligeras con ctypes estándar (sin dependencias externas):
 """
 import os
 import sys
+import time
 import hashlib
 import ctypes
 from ctypes import wintypes
@@ -123,6 +124,32 @@ class NamedMutex:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
+
+
+def wrapper_mutex_name(base_dir: str) -> str:
+    """Nombre del mutex que retiene el wrapper de la instalacion `base_dir`."""
+    return f"BDS_Wrapper_{get_installation_hash(base_dir)}"
+
+
+def mutex_held_by_other(name: str, attempts: int = 2, retry_delay_sec: float = 0.05) -> bool:
+    """True si OTRO proceso (u otro hilo) RETIENE el mutex `name`.
+
+    Sondeo por ADQUISICION, nunca por existencia: cualquier sonda ajena tiene
+    el objeto abierto un instante sin retenerlo, y por-existencia daba falsos
+    "ya existe". Un acquire que sigue fallando tras un reintento corto indica
+    un titular real. Fuente unica de la regla: la usan la sonda de la GUI
+    (external_probe) y la restauracion por consola (restore_backup).
+    """
+    probe = NamedMutex(name)
+    try:
+        for _attempt in range(attempts):
+            if probe.acquire(timeout_ms=0):
+                probe.release()
+                return False
+            time.sleep(retry_delay_sec)
+        return True
+    finally:
+        probe.close()
 
 
 def create_job_object_for_process(process_handle_or_pid) -> wintypes.HANDLE:

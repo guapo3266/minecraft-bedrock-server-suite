@@ -5,6 +5,51 @@ es independiente de la versión de Minecraft Bedrock Dedicated Server (BDS).
 Este historial empieza en 2.0.0; el desarrollo anterior se conserva en Git y en
 los informes de `docs/`, sin asignarle versiones retrospectivas.
 
+## [Sin publicar]
+
+### Corregido
+
+- Restaurar un backup ya no devuelve los packs que distribuye BDS (vanilla,
+  chemistry, editor, experimental, librerías de scripts): tras actualizar BDS,
+  restaurar un backup anterior dejaba el ejecutable nuevo con los packs
+  vanilla viejos. Los addons se siguen restaurando. Cada instalación de BDS
+  desde la suite anota sus carpetas en `data/bds_shipped_packs.json`.
+- El reinicio diario ya no reinicia un servidor recién arrancado cuando a la
+  hora programada estaba apagado, y el backup diario en frío no repite el que
+  el wrapper ya hizo en caliente (bloqueaba **Iniciar** tras el primer
+  **Detener** del día).
+- Reiniciar, actualizar BDS o la suite durante el backup inicial del wrapper
+  ya no se cancela a los 75 s para después apagar el servidor igualmente.
+- La ventana de actualización de la suite ya no queda «en curso» para siempre
+  si su aviso de progreso quedó atrasado (GUI cerrada a mitad, auxiliar que no
+  arrancó, último aviso sin guardar): muestra el resultado que registra el
+  diario de la actualización y permite reintentar. Una pestaña que recordaba una
+  actualización en curso también deja de esperarla si el servidor ya no tiene
+  ninguna registrada.
+- Si no se puede guardar la versión anterior de BDS, la actualización ya no se
+  revierte en silencio en el siguiente arranque.
+- Los backups en caliente funcionan con mundos cuyo nombre lleva comas.
+- Guardar `server.properties` desde la GUI ya no falla con acentos guardados en
+  ANSI ni duplica claves escritas con otras mayúsculas o espacios.
+- La restauración por consola no actúa mientras el wrapper hace su backup
+  inicial o final, aunque BDS no esté en ejecución.
+- Tras actualizar la suite, la GUI nueva se desbloquea sola aunque falle la
+  confirmación del auxiliar.
+- La lista de backups ya no falla si la rotación borra un ZIP en ese momento.
+
+### Documentación y mantenimiento
+
+- Registro de la publicación de 2.1.1 (hash, procedencia y evidencia) y guía de
+  versionado con 2.1.2 como siguiente número.
+- Guía de actualizaciones: alcance real de la QA de 2.1.1 (no ejercitó el
+  auxiliar de 2.1.0), problema conocido al actualizar desde 2.1.0 y cómo
+  salir de él, conteo exacto de archivos del ZIP y publicación paso a paso con
+  GitHub CLI.
+- Las notas de cada Release convierten los enlaces relativos del CHANGELOG en
+  enlaces al repositorio (`tools/release_notes.py`): copiados tal cual daban 404.
+- README, arquitectura y contrato de API al día con los cambios de restauración,
+  programación diaria y actualización de esta versión.
+
 ## [2.1.1] - 2026-10-20
 
 [Publicada el 20 de octubre de 2026](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.1)

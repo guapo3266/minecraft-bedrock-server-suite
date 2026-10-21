@@ -48,7 +48,11 @@ los componentes adaptados y sus licencias está en los archivos `NOTICE.md`.
   comprobación manual, confirmación de instalación y progreso/reconexión tras
   cerrar la GUI. `sessionStorage` (`bedrock-suite-updating`) conserva el flujo
   durante el relevo. `src/suiteUpdateLogic.js` define fases activas y terminales;
-  los resultados de rollback o fallo de reinicio siguen visibles.
+  los resultados de rollback o fallo de reinicio siguen visibles. Su
+  `startProgressPolling` (sin React, cubierto por `tests/suite-update.test.jsx`)
+  decide cada respuesta con `nextPollAction`: `idle` termina el sondeo (el
+  backend no tiene ninguna actualización registrada) y una fase desconocida lo
+  mantiene, por si es una fase nueva del backend durante el relevo.
 - `GlassStage.jsx`: canvas decorativo, cabecera/dock vacíos para el motor local;
   **no captura el DOM de consola ni de formularios**. WebGL se importa bajo
   demanda y cae a CSS ante fallos. Pausa en segundo plano.

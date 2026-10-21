@@ -142,6 +142,23 @@ def terminate_owned(process):
             process.wait(timeout=10)
 
 
+def confirm_handoff(port, attempts=10, delay=.5):
+    """Avisa a la GUI nueva de que la entrega quedo confirmada (libera su guard).
+
+    Reintenta: con una sola llamada, un fallo puntual dejaba a la GUI con el
+    guard tomado y el reinicio de Minecraft en 409 (2026-10-20). La GUI nueva
+    tambien lo libera sola al ver el diario "complete".
+    """
+    for attempt in range(attempts):
+        try:
+            get_json(port, "/api/suite_update/health")
+            return
+        except (OSError, ValueError):
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 def resume_minecraft(request):
     if not request["restart_bds"]:
         return True
@@ -207,7 +224,7 @@ def run_job(job):
     finally:
         mutex.close()
     try:
-        get_json(request["port"], "/api/suite_update/health")  # libera el guard tras confirmar el arranque.
+        confirm_handoff(request["port"])  # libera el guard tras confirmar el arranque.
         restarted = resume_minecraft(request)
     except Exception:
         restarted = False

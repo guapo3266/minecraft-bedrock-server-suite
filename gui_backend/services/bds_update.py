@@ -18,6 +18,7 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 
+import zip_safety
 from console_lang import L
 from gui_backend import config
 from gui_backend.security import _is_safe_zip_entry
@@ -232,21 +233,80 @@ def recover_interrupted_updates(base_dir=None):
             print(f"[Actualizador BDS] No se pudo recuperar {os.path.basename(prev_dir)}: {exc}")
 
 
+class PreviousVersionNotSaved(RuntimeError):
+    """La actualizacion quedo aplicada, pero su resguardo no paso a data/bds_previous.
+
+    No es un fallo de la actualizacion: los binarios nuevos ya estan en su
+    sitio y el manifiesto de recuperacion ya se retiro. Solo falta la version
+    anterior para revertir con un clic; el resguardo queda en
+    bds_update_prev_* para revision manual.
+    """
+
+
 def _save_prev_dir(prev_dir, keep_prev_dir, prev_version):
     """Conserva el resguardo como version anterior: lo mueve atómico, quita
     el manifiesto (solo sirve para la recuperación de crashes) y escribe la
-    metadata de version."""
-    if os.path.isdir(keep_prev_dir):
-        shutil.rmtree(keep_prev_dir, ignore_errors=True)
-    os.makedirs(os.path.dirname(keep_prev_dir), exist_ok=True)
-    os.replace(prev_dir, keep_prev_dir)
+    metadata de version.
+
+    La version anterior previa se APARTA con un rename antes de colocar la
+    nueva y se borra despues. Antes se hacia rmtree + os.replace: si el rmtree
+    dejaba un archivo (bloqueado, solo lectura), data/bds_previous quedaba a
+    medias y el replace fallaba (2026-10-20).
+    """
+    aside = None
+    if os.path.lexists(keep_prev_dir):
+        aside = keep_prev_dir + ".old_" + os.urandom(4).hex()
+        os.replace(keep_prev_dir, aside)
+    else:
+        os.makedirs(os.path.dirname(keep_prev_dir), exist_ok=True)
+    try:
+        os.replace(prev_dir, keep_prev_dir)
+    except OSError:
+        if aside is not None:
+            try:
+                os.replace(aside, keep_prev_dir)
+            except OSError:
+                pass
+        raise
+    if aside is not None:
+        shutil.rmtree(aside, ignore_errors=True)
     manifest_path = os.path.join(keep_prev_dir, _UPDATE_MANIFEST_NAME)
     if os.path.isfile(manifest_path):
         os.remove(manifest_path)
-    meta_tmp = os.path.join(keep_prev_dir, _PREVIOUS_META_NAME + ".tmp")
-    with open(meta_tmp, "w", encoding="utf-8") as f:
-        json.dump({"version": prev_version, "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
-    os.replace(meta_tmp, os.path.join(keep_prev_dir, _PREVIOUS_META_NAME))
+    # La metadata solo pone nombre a la version: sin ella el resguardo sigue
+    # siendo aplicable (read_previous_version devuelve version None).
+    try:
+        meta_tmp = os.path.join(keep_prev_dir, _PREVIOUS_META_NAME + ".tmp")
+        with open(meta_tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": prev_version, "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
+        os.replace(meta_tmp, os.path.join(keep_prev_dir, _PREVIOUS_META_NAME))
+    except OSError:
+        pass
+
+
+def _shipped_pack_dirs(root):
+    """Carpetas de pack de un arbol de BDS ({kind: [nombres]}); nunca lanza."""
+    packs = {}
+    for kind in zip_safety.SERVER_PACK_DIRS:
+        kind_dir = os.path.join(root, kind)
+        try:
+            packs[kind] = [n for n in os.listdir(kind_dir) if os.path.isdir(os.path.join(kind_dir, n))]
+        except OSError:
+            packs[kind] = []
+    return packs
+
+
+def _record_shipped_packs(packs, tag, log_fn):
+    """Une al registro las carpetas de pack de BDS recien instaladas (best-effort).
+
+    El restore lo usa para no devolver packs de BDS desde un backup de otra
+    version (zip_safety.is_bds_pack). Un fallo aqui no deshace la instalacion.
+    """
+    try:
+        zip_safety.record_bds_shipped_packs(config.BASE_DIR, packs)
+    except OSError as exc:
+        log_fn(L(f"{tag} No se pudo registrar los packs de BDS instalados ({exc}); el restore usará el registro anterior o el nombre de cada pack.",
+                 f"{tag} Could not record the installed BDS packs ({exc}); restore will use the previous record or each pack's name."), "error")
 
 
 def read_previous_version():
@@ -340,6 +400,14 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 os.replace(os.path.join(root, n), target)
                 applied.append(rel)
+
+        # Punto de confirmacion: con todos los archivos nuevos en su sitio, el
+        # manifiesto ya no describe una actualizacion a medias. Se retira ANTES
+        # de mover el resguardo a keep_prev_dir: si eso fallaba despues, el
+        # manifiesto seguia en bds_update_prev_* y recover_interrupted_updates
+        # revertia en el siguiente arranque una actualizacion completada
+        # (2026-10-20). Si retirarlo falla, el except revierte ahora mismo.
+        os.remove(os.path.join(prev_dir, _UPDATE_MANIFEST_NAME))
     except Exception:
         failed = True
         return_failed = False
@@ -378,7 +446,14 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
         else:
             shutil.rmtree(staging_dir, ignore_errors=True)
         if keep_prev_dir and not failed:
-            _save_prev_dir(prev_dir, keep_prev_dir, prev_version)
+            try:
+                _save_prev_dir(prev_dir, keep_prev_dir, prev_version)
+            except OSError as exc:
+                # Ya confirmada: no se informa como fallo de la actualizacion.
+                raise PreviousVersionNotSaved(L(
+                    f"el resguardo no pasó a data/bds_previous ({exc}) y queda en {os.path.basename(prev_dir)} para revisión manual",
+                    f"the backup was not moved to data/bds_previous ({exc}) and stays in {os.path.basename(prev_dir)} for manual review",
+                )) from exc
         elif not failed or rollback_complete:
             shutil.rmtree(prev_dir, ignore_errors=True)
         # Si el rollback falla, prev_dir + manifiesto quedan para recuperacion.
@@ -486,14 +561,21 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         # D3: raiz efectiva del staging (zip plano actual o una unica
         # carpeta raiz historica); falla cerrada ante estructuras ambiguas.
         update_root = _resolve_update_root(staging_dir)
+        # Antes de aplicar: la fase 2 vacia el staging al mover los archivos.
+        shipped_packs = _shipped_pack_dirs(update_root)
 
         # Aplica con rollback: si algo falla a mitad, la instalacion
         # vuelve a los binarios anteriores (sin versiones mezcladas). El
         # resguardo queda en data/bds_previous para volver con un clic.
         # Si falla tambien el rollback, se conserva bds_update_prev_*.
-        _apply_staged_update(update_root, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
-                             keep_prev_dir=PREVIOUS_VERSION_DIR,
-                             prev_version=manager.installed_version)
+        try:
+            _apply_staged_update(update_root, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
+                                 keep_prev_dir=PREVIOUS_VERSION_DIR,
+                                 prev_version=manager.installed_version)
+        except PreviousVersionNotSaved as exc:
+            log_fn(L(f"{tag} BDS quedó actualizado, pero sin versión anterior para revertir: {exc}.",
+                     f"{tag} BDS was updated, but without a previous version to roll back to: {exc}."), "error")
+        _record_shipped_packs(shipped_packs, tag, log_fn)
         if downloaded_version:
             manager.installed_version = downloaded_version
         return True, downloaded_version
@@ -527,14 +609,25 @@ def rollback_bds(tag="[Rollback BDS]", log_fn=None):
         return False, None
     version_label = restore_version or "?"
     log_fn(L(f"{tag} Restaurando la versión anterior ({version_label})...", f"{tag} Restoring the previous version ({version_label})..."), "system")
+    shipped_packs = _shipped_pack_dirs(PREVIOUS_VERSION_DIR)
+    swap_saved = True
     try:
         _apply_staged_update(PREVIOUS_VERSION_DIR, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
                              keep_prev_dir=PREVIOUS_VERSION_DIR,
                              prev_version=manager.installed_version,
                              preserve_staging_on_failure=True)
+    except PreviousVersionNotSaved as exc:
+        # La reversion SI quedo aplicada; solo falta la nueva version anterior.
+        swap_saved = False
+        log_fn(L(f"{tag} Reversión aplicada, pero la versión que se dejó de usar no queda recuperable: {exc}.",
+                 f"{tag} Rollback applied, but the version just left behind is not recoverable: {exc}."), "error")
     except Exception as exc:
         log_fn(L(f"{tag} Error al restaurar; revisa los resguardos de recuperación: {exc}", f"{tag} Error restoring; check the recovery backups: {exc}"), "error")
         return False, None
+    _record_shipped_packs(shipped_packs, tag, log_fn)
     manager.installed_version = restore_version
-    log_fn(L(f"{tag} Versión anterior restaurada ({version_label}). La versión que se dejó de usar ahora es la recuperable.", f"{tag} Previous version restored ({version_label}). The version just left behind is now the recoverable one."), "system")
+    if swap_saved:
+        log_fn(L(f"{tag} Versión anterior restaurada ({version_label}). La versión que se dejó de usar ahora es la recuperable.", f"{tag} Previous version restored ({version_label}). The version just left behind is now the recoverable one."), "system")
+    else:
+        log_fn(L(f"{tag} Versión anterior restaurada ({version_label}).", f"{tag} Previous version restored ({version_label})."), "system")
     return True, restore_version

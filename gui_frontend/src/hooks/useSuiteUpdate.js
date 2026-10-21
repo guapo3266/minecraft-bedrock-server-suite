@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { version } from '../../../version.json';
-import { ACTIVE_PHASES, FINAL_PHASES } from '../suiteUpdateLogic';
+import { ACTIVE_PHASES, startProgressPolling } from '../suiteUpdateLogic';
 
 const KEY = 'bedrock-suite-updating';
 const remembered = () => { try { return sessionStorage.getItem(KEY) === '1'; } catch { return false; } };
@@ -34,31 +34,22 @@ export default function useSuiteUpdate() {
   }, []);
   useEffect(() => { check(); }, [check]);
   useEffect(() => {
-    if (!inFlight) return;
-    let stopped = false;
-    let timer;
-    const poll = async () => {
-      try {
+    if (!inFlight) return undefined;
+    return startProgressPolling({
+      bundleVersion: version,
+      fetchProgress: async () => {
         const response = await fetch('/api/suite_update/progress');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const next = await response.json();
-        if (stopped) return;
-        setProgress(next);
-        if (FINAL_PHASES.has(next.phase)) {
-          if (['complete', 'restart_failed'].includes(next.phase) && next.version && next.version !== version) {
-            window.location.reload();
-            return;
-          }
-          remember(false);
-          setInFlight(false);
-          check();
-          return;
-        }
-      } catch { if (!stopped) setProgress({ phase: 'reconnecting' }); }
-      if (!stopped) timer = setTimeout(poll, 2000);
-    };
-    poll();
-    return () => { stopped = true; clearTimeout(timer); };
+        return response.json();
+      },
+      onProgress: setProgress,
+      onReload: () => window.location.reload(),
+      onFinish: () => {
+        remember(false);
+        setInFlight(false);
+        check();
+      }
+    });
   }, [inFlight, check]);
   const install = async () => {
     setError(null);

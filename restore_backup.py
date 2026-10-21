@@ -10,6 +10,7 @@ except ImportError:
 import restore_core
 import console_lang
 import server_properties
+import windows_process_guard as wpg
 from zip_safety import CORRUPT_MARKERS
 
 # Rutas RESUELTAS desde la propia ubicacion del script: cada instalacion
@@ -83,12 +84,28 @@ def _list_backup_files(backup_dir):
 
 
 
+def _wrapper_holds_mutex():
+    """True si el wrapper de ESTA instalacion esta vivo (retiene su mutex).
+
+    Misma regla por adquisicion que la sonda de la GUI. Cubre las ventanas
+    sin bedrock_server.exe: el backup inicial (antes de lanzar BDS) y el backup
+    final de cierre, en las que el wrapper esta leyendo el mundo. Antes la CLI
+    solo miraba BDS y restauraba igual, y ese ZIP podia publicarse mezclando el
+    mundo viejo y el nuevo (2026-10-20). Fail-closed si la sonda falla.
+    """
+    try:
+        return wpg.mutex_held_by_other(wpg.wrapper_mutex_name(BASE_DIR))
+    except Exception:
+        return True
+
+
 def _server_is_running():
-    """True si bedrock_server.exe DE ESTA INSTALACION esta en ejecucion.
+    """True si el wrapper o bedrock_server.exe DE ESTA INSTALACION estan en ejecucion.
 
     H3: escopado por la ruta del ejecutable (misma regla que la sonda de la
     GUI en gui_backend/services/external_probe.py): un BDS de otra instalacion
-    no debe vetar la restauracion de esta.
+    no debe vetar la restauracion de esta. El wrapper se detecta por su mutex
+    (_wrapper_holds_mutex): sin BDS vivo puede estar haciendo un backup.
 
     Fail-closed (operacion destructiva):
       - sin psutil no se puede comprobar -> True;
@@ -98,6 +115,8 @@ def _server_is_running():
       - si el listado de procesos falla -> True.
     """
     if psutil is None:
+        return True
+    if _wrapper_holds_mutex():
         return True
     target_exe = os.path.normcase(os.path.abspath(
         os.path.join(BASE_DIR, "bedrock_server.exe")
@@ -132,8 +151,8 @@ def list_and_restore():
 
     # H3: guard anticipado: restaurar con BDS vivo pisaria un mundo en uso.
     if _server_is_running():
-        print("[ERROR] El servidor de Minecraft parece estar corriendo (bedrock_server.exe).")
-        print("        Apaga el servidor antes de restaurar un backup.")
+        print("[ERROR] El servidor de Minecraft (o su wrapper) parece estar corriendo.")
+        print("        Apaga el servidor y espera a que termine su backup de cierre antes de restaurar.")
         input("\nPresiona Enter para salir...")
         return
 

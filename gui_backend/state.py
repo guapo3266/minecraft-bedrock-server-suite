@@ -68,6 +68,11 @@ class ServerManager:
         # con False el parseo de stdout de supervisor sigue siendo autoritativo).
         self.events_file = None
         self.events_alive = False
+        # True mientras el wrapper hace su backup inicial ANTES de lanzar BDS
+        # (wrapper_started con initial_backup=True y aun sin bds_launched): en
+        # esa ventana no lee stdin y un 'stop' espera en la tuberia hasta que
+        # BDS arranca. La fase 1 de lifecycle no cuenta su plazo mientras dure.
+        self.wrapper_pre_bds = False
         # True = la ausencia del wrapper es esperada (nunca arranco o alguien
         # pidio pararlo). El watchdog solo trata como crash un wrapper muerto
         # con False; _spawn_wrapper_process lo limpia en cada arranque.

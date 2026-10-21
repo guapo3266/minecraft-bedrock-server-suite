@@ -215,6 +215,7 @@ L_PY_FILES = [
     "gui_backend/supervisor.py",
     "gui_backend/services/bds_update.py",
     "gui_backend/services/lifecycle.py",
+    "gui_backend/services/suite_update.py",
     "gui_backend/services/watchdog.py",
     "gui_backend/routers/actions.py",
     "gui_backend/routers/addons.py",

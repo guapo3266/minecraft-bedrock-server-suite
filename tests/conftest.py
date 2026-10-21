@@ -61,6 +61,24 @@ def _eventos_wrapper_en_tmp(tmp_path, monkeypatch):
     wrapper_events._reset_events_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _estado_diario_del_wrapper_en_tmp(tmp_path, monkeypatch):
+    """El backup diario del wrapper se anota en data/schedule_state_wrapper.json.
+
+    El watchdog de la GUI lo lee para no repetir en frio el backup diario que
+    el wrapper ya hizo en caliente (2026-10-20): ningun test debe leer ni
+    escribir el estado real. Los tests que fijan su propia ruta
+    (test_wrapper_schedule_unit) corren despues y ganan.
+    """
+    import wrapper_schedule
+
+    monkeypatch.setattr(
+        wrapper_schedule, "SCHEDULE_STATE_PATH",
+        os.path.join(str(tmp_path), "schedule_state_wrapper.json"),
+    )
+    yield
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _watchdog_de_fondo_desactivado():
     """Desactiva el loop de fondo del watchdog durante TODA la suite (F1).
@@ -154,4 +172,29 @@ def _recuperaciones_no_tocan_la_instalacion_real():
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(auto_backup, "recover_interrupted_restores", guarded_restores)
         mp.setattr(bds_update, "recover_interrupted_updates", guarded_updates)
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _registro_de_packs_bds_no_toca_la_instalacion_real():
+    """El registro de packs de BDS (data/bds_shipped_packs.json) es dato real.
+
+    Algunos tests recorren el pipeline de actualizacion con `config.BASE_DIR`
+    real y el apply simulado (test_review_hallazgos): sin este guard, el
+    registro se escribia en la instalacion con las carpetas del ZIP falso. Los
+    tests con `tmp_path` siguen ejercitando la escritura real.
+    """
+    import zip_safety
+    from gui_backend import config
+
+    real = os.path.normcase(os.path.abspath(config.BASE_DIR))
+    orig_record = zip_safety.record_bds_shipped_packs
+
+    def guarded_record(base_dir, packs):
+        if os.path.normcase(os.path.abspath(base_dir)) == real:
+            return None
+        return orig_record(base_dir, packs)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(zip_safety, "record_bds_shipped_packs", guarded_record)
         yield

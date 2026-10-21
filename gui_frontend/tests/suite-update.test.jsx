@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider, STRINGS } from '../src/i18n.jsx';
 import SuiteUpdateModal from '../src/components/SuiteUpdateModal.jsx';
 import ControlsBar from '../src/components/ControlsBar.jsx';
-import { ACTIVE_PHASES, FINAL_PHASES, PHASE_KEYS } from '../src/suiteUpdateLogic';
+import { ACTIVE_PHASES, FINAL_PHASES, PHASE_KEYS, nextPollAction, startProgressPolling } from '../src/suiteUpdateLogic';
 
 vi.mock('../src/components/Modal', () => ({ default: ({ children }) => <section>{children}</section> }));
 const render = element => renderToStaticMarkup(<LanguageProvider>{element}</LanguageProvider>);
@@ -46,5 +46,85 @@ describe('actualizador de la suite', () => {
     const html = render(<SuiteUpdateModal update={value} />);
     expect(html).toContain(STRINGS.es.suitePhaseRestartFailed);
     expect(html).not.toContain(STRINGS.es.suitePhaseComplete);
+  });
+});
+
+describe('sondeo del progreso de la actualización', () => {
+  it('idle termina el sondeo: no hay ninguna actualización que esperar', () => {
+    expect(nextPollAction({ phase: 'idle' }, '2.1.1')).toBe('finish');
+  });
+  it('las fases finales terminan y solo una entrega nueva recarga la página', () => {
+    for (const phase of FINAL_PHASES) expect(nextPollAction({ phase }, '2.1.1')).toBe('finish');
+    for (const phase of ['complete', 'restart_failed']) {
+      expect(nextPollAction({ phase, version: '9.9.9' }, '2.1.1')).toBe('reload');
+      expect(nextPollAction({ phase, version: '2.1.1' }, '2.1.1')).toBe('finish');
+    }
+    expect(nextPollAction({ phase: 'rolled_back', version: '9.9.9' }, '2.1.1')).toBe('finish');
+  });
+  it('las fases activas, la reconexión y lo desconocido siguen sondeando', () => {
+    for (const phase of ACTIVE_PHASES) expect(nextPollAction({ phase }, '2.1.1')).toBe('continue');
+    for (const value of [{ phase: 'fase_de_un_backend_nuevo' }, {}, null]) {
+      expect(nextPollAction(value, '2.1.1')).toBe('continue');
+    }
+  });
+
+  const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+  const poller = responses => {
+    const pending = [];
+    const calls = { progress: [], finish: 0, reload: 0 };
+    const stop = startProgressPolling({
+      bundleVersion: '2.1.1',
+      fetchProgress: async () => {
+        const next = responses.shift();
+        if (next instanceof Error) throw next;
+        return next;
+      },
+      onProgress: value => calls.progress.push(value.phase),
+      onFinish: () => { calls.finish += 1; },
+      onReload: () => { calls.reload += 1; },
+      schedule: fn => pending.push(fn),
+      cancel: () => {}
+    });
+    const runNext = async () => {
+      pending.shift()();
+      await flush();
+    };
+    return { calls, pending, runNext, stop };
+  };
+
+  it('una pestaña que recordaba una actualización deja de sondear con idle', async () => {
+    const { calls, pending } = poller([{ phase: 'idle' }]);
+    await flush();
+    expect(calls.progress).toEqual(['idle']);
+    expect(calls.finish).toBe(1);
+    expect(pending).toHaveLength(0);
+  });
+  it('sigue sondeando durante el relevo y termina al completarse', async () => {
+    const { calls, pending, runNext } = poller([
+      { phase: 'downloading' }, new Error('GUI caída durante el relevo'), { phase: 'checking' },
+      { phase: 'complete', version: '2.1.1' }
+    ]);
+    await flush();
+    await runNext();
+    await runNext();
+    await runNext();
+    expect(calls.progress).toEqual(['downloading', 'reconnecting', 'checking', 'complete']);
+    expect(calls.finish).toBe(1);
+    expect(calls.reload).toBe(0);
+    expect(pending).toHaveLength(0);
+  });
+  it('recarga la página cuando la GUI nueva sirve otra versión', async () => {
+    const { calls, pending } = poller([{ phase: 'complete', version: '9.9.9' }]);
+    await flush();
+    expect(calls.reload).toBe(1);
+    expect(calls.finish).toBe(0);
+    expect(pending).toHaveLength(0);
+  });
+  it('detenerlo descarta la respuesta pendiente', async () => {
+    const { calls, pending, stop } = poller([{ phase: 'checking' }]);
+    stop();
+    await flush();
+    expect(calls.progress).toEqual([]);
+    expect(pending).toHaveLength(0);
   });
 });

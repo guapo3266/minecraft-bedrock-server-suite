@@ -30,6 +30,8 @@ from zip_safety import (
     _extract_pack_entry,
     _quarantine_and_restore,
     _exceeds_expansion_limit,
+    is_bds_pack,
+    read_bds_shipped_packs,
 )
 
 
@@ -78,7 +80,8 @@ def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
     """Restaura `zip_path` sobre `world_dir` con staging + swap recuperable.
 
     `base_dir` resuelve el destino de los packs de servidor
-    (`server_resource_packs/...` -> `resource_packs/...`). El ZIP se valida
+    (`server_resource_packs/...` -> `resource_packs/...`); los que distribuye
+    BDS (`zip_safety.is_bds_pack`) se dejan como estan. El ZIP se valida
     ANTES de tocar el mundo (entradas seguras, CRC y limite de expansion); la
     extraccion va a `.restore_staging_<nonce>` y solo despues del guard de
     `level.dat` se intercambia con el mundo/packs activos. Si el intercambio
@@ -116,6 +119,20 @@ def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
         if bad is not None:
             raise ValueError(L(f"Backup corrupto (CRC fallido): {bad}",
                                f"Corrupt backup (CRC failed): {bad}"))
+
+    # Los packs que distribuye BDS se quedan en su version instalada: el
+    # backup puede venir de un BDS anterior y devolverlos mezclaria versiones
+    # (exe nuevo con vanilla viejo). Solo se restauran los addons (2026-10-20).
+    shipped = read_bds_shipped_packs(base_dir)
+    bds_folders = {
+        (kind, folder) for _entry, (kind, folder, _rel) in pack_infos
+        if is_bds_pack(kind, folder, shipped)
+    }
+    if bds_folders:
+        pack_infos = [item for item in pack_infos if (item[1][0], item[1][1]) not in bds_folders]
+        conservados = len(bds_folders)
+        log(L(f"[*] Packs de BDS conservados en su versión instalada (no se restauran del backup): {conservados}.",
+              f"[*] BDS packs kept at their installed version (not restored from the backup): {conservados}."))
 
     nonce = os.urandom(4).hex()
     world_staging = world_dir + f".restore_staging_{nonce}"

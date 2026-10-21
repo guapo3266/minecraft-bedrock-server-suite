@@ -14,6 +14,7 @@ import os
 import threading
 import time
 
+import wrapper_schedule
 from console_lang import L
 from server_wrapper import _crossed_daily_time
 
@@ -215,6 +216,19 @@ def _tick_crash_restart(now):
         )
 
 
+def _started_after_scheduled(start_time, localtime, hhmm):
+    """True si la sesion actual arranco despues de la hora programada de hoy."""
+    if not start_time:
+        return False  # arranque desconocido: se conserva el reinicio
+    try:
+        hour, minute = (int(x) for x in hhmm.split(":"))
+    except ValueError:
+        return False
+    scheduled = time.mktime((localtime.tm_year, localtime.tm_mon, localtime.tm_mday,
+                             hour, minute, 0, 0, 0, -1))
+    return start_time >= scheduled
+
+
 def _tick_daily_restart(cfg, now):
     global last_daily_restart_date
     if not manager.is_running:
@@ -224,6 +238,16 @@ def _tick_daily_restart(cfg, now):
         return
     last_daily_restart_date = time.strftime("%Y-%m-%d", localtime)
     _save_gui_state()
+    # Si el servidor estaba apagado a la hora programada, la fecha no se
+    # consumia y el primer tick tras arrancarlo lo reiniciaba al instante
+    # (2026-10-20). Un arranque posterior a la hora ya es la sesion fresca de hoy.
+    if _started_after_scheduled(manager.start_time, localtime, cfg["daily_restart_time"]):
+        manager.add_log(
+            L(f"[Watchdog] Reinicio diario de hoy omitido: el servidor arrancó después de las {cfg['daily_restart_time']}.",
+              f"[Watchdog] Today's daily restart skipped: the server started after {cfg['daily_restart_time']}."),
+            "system",
+        )
+        return
     manager.add_log(
         L(f"[Watchdog] Reinicio diario programado ({cfg['daily_restart_time']}).",
           f"[Watchdog] Daily scheduled restart ({cfg['daily_restart_time']})."),
@@ -244,6 +268,17 @@ def _tick_daily_cold_backup(cfg, now):
         return
     last_daily_cold_backup_date = time.strftime("%Y-%m-%d", localtime)
     _save_gui_state()
+    # Con el servidor encendido a la hora programada, el wrapper ya hizo el
+    # backup diario en caliente (y lo anota en su estado). Sin este chequeo,
+    # el primer Detener del dia lanzaba otro backup completo en frio que
+    # retenia op_lock: Iniciar respondia "busy" hasta que terminara (2026-10-20).
+    if wrapper_schedule._load_last_daily_backup_date() == last_daily_cold_backup_date:
+        manager.add_log(
+            L("[Watchdog] Backup diario en frío omitido: el wrapper ya hizo hoy el backup diario en caliente.",
+              "[Watchdog] Daily cold backup skipped: the wrapper already made today's daily hot backup."),
+            "backup",
+        )
+        return
     manager.add_log(
         L(f"[Watchdog] Backup diario programado ({cfg['daily_backup_time']}) con el servidor detenido.",
           f"[Watchdog] Daily scheduled backup ({cfg['daily_backup_time']}) with the server stopped."),

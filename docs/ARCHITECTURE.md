@@ -100,6 +100,9 @@ lanza `backup_worker.py` con el mismo intérprete Python y los canales de
 entrada/salida correspondientes. Los backups se guardan por instalación en
 `../../Backups_Minecraft/auto_backups/<carpeta>`. Cada ZIP lleva el mundo y
 los packs de servidor (`server_resource_packs/`, `server_behavior_packs/`).
+Al restaurar, los packs que distribuye BDS se quedan en su versión instalada
+(`zip_safety.is_bds_pack`: registro `data/bds_shipped_packs.json` que escribe
+`bds_update` en cada instalación o, sin él, patrón de nombres de Mojang).
 `auto_backup._write_file_chunked` escribe por chunks cancelables y acota cada
 lectura al tamaño del archivo (`_read_size`); PNG/OGG/MP3 se guardan con
 `ZIP_STORED` porque deflate no los reduce.
@@ -128,10 +131,14 @@ el código anterior y conserva la evidencia.
 
 La GUI nueva mantiene el guard de operación durante el relevo. El auxiliar
 verifica versión, token, API, HTML y hashes de assets antes de confirmar el
-diario y liberar ese guard. Después reinicia Minecraft si estaba encendido;
-un fallo de ese reinicio se comunica por separado. Los lanzadores ejecutan
-`Recuperar_suite.bat` cuando existe un diario pendiente. Ver protocolo, límites
-y QA en [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
+diario y liberar ese guard; la GUI también lo libera sola (loop de métricas)
+en cuanto el diario dice `complete`, aunque falle esa confirmación. Después
+reinicia Minecraft si estaba encendido; un fallo de ese reinicio se comunica
+por separado. Los lanzadores ejecutan `Recuperar_suite.bat` cuando existe un
+diario pendiente. `progress.json` solo es el aviso de la ventana: una fase en
+curso que ya nadie avanza se resuelve con el diario
+(`suite_update._stale_progress`). Ver protocolo, límites y QA en
+[ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 
 ## Wrapper de consola
 
@@ -196,7 +203,11 @@ vía `manager.add_log`.
   fases con `config.SERVER_STOP_TIMEOUT_SEC` (75s) y
   `config.WRAPPER_EXIT_TIMEOUT_SEC` (450s, piso: la espera efectiva suma lo que
   el tamaño del mundo añade al join del worker y al backup final del wrapper,
-  `lifecycle.wrapper_exit_timeout_sec()`).
+  `lifecycle.wrapper_exit_timeout_sec()`). Mientras el wrapper hace su backup
+  inicial antes de lanzar BDS (`manager.wrapper_pre_bds`, eventos
+  `wrapper_started`/`bds_launched`) la fase 1 no consume sus 75 s: el `stop`
+  espera en la tubería hasta que BDS arranca (`lifecycle._wait_server_stopped`,
+  acotado por la escala del backup final).
 - El registro WebSocket (`active_websockets`) y `broadcast()` viven en
   `state.py`; el router WS solo añade/descarta conexiones. El `finally` del
   router cubre TODA la sesión registrada, incluido el envío del `init`: un
@@ -308,7 +319,10 @@ vía `manager.add_log`.
   jugadores; si el servidor está apagado a esa hora, el watchdog hace el
   backup en frío (`trigger="scheduled"`). Cada lado persiste la fecha del
   último disparo (`data/schedule_state_wrapper.json` /
-  `schedule_state_gui.json`) para no re-disparar tras un reinicio.
+  `schedule_state_gui.json`) para no re-disparar tras un reinicio. El
+  watchdog no repite en frío el backup diario que el wrapper ya anotó hoy, y
+  el reinicio diario se omite si la sesión actual arrancó después de la hora
+  programada (`manager.start_time`): ya es la sesión fresca del día.
 - El watchdog (`services/watchdog.py`) arranca en el lifespan, es daemon y
   opt-in: sin nada activado en la config nunca actúa. Backoff de re-arranques
   `WATCHDOG_BACKOFF_SCHEDULE` que se reinicia tras `WATCHDOG_STABLE_UPTIME_SEC`.

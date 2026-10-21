@@ -48,7 +48,8 @@ archivo de eventos; solo el wrapper lo hace, tras su propio gate de chat.
 
 | evento | campos | punto de emisión (wrapper) | efecto en la GUI |
 |---|---|---|---|
-| `wrapper_started` | pid, initial_backup | `__main__` tras mutex + recuperación de restauraciones | `manager.events_alive = True` (activa el gate) |
+| `wrapper_started` | pid, initial_backup | `__main__` tras mutex + recuperación de restauraciones | `manager.events_alive = True` (activa el gate); con `initial_backup`, `manager.wrapper_pre_bds = True` |
+| `bds_launched` | pid | `__main__` tras lanzar BDS y su Job Object, antes de leer stdin | `manager.wrapper_pre_bds = False` (la fase 1 de stop vuelve a contar sus 75 s) |
 | `shutdown_initiated` | reason | `initiate_shutdown` (junto al print "Apagado iniciado") | log informativo bilingüe |
 | `server_stopped` | returncode | `__main__` finally (junto al marcador G8 "BDS detenido") | `server_stopped_event.set()` |
 | `version_captured` | version | eco de la línea `Version: x` en `read_stdout` (detección NUEVA en el wrapper) | `manager.installed_version` |

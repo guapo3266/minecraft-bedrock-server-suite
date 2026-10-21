@@ -83,3 +83,9 @@ ejecutan; no reactivar esos disparadores al sincronizar repositorios. La
 publicación del código, la Release con sus assets y el despliegue en una
 instalación son tres operaciones independientes. Una Release pública no
 autoriza a sincronizar ni actualizar el servidor real.
+
+Las notas de la Release salen de la sección de la versión en `CHANGELOG.md`
+(`tools/release_notes.py`, que convierte los enlaces relativos en enlaces al
+repositorio). La publicación con GitHub CLI (borrador, digests verificados y
+recién entonces Latest) está en
+[Publicar con GitHub CLI](ACTUALIZACIONES_SUITE.md#publicar-con-github-cli).
