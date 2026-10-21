@@ -19,6 +19,41 @@ Se recomienda una ruta corta, por ejemplo `C:\BedrockSuite`. Si Windows rechaza
 las rutas largas del staging o del auxiliar, la preparación se cancela antes de
 reemplazar el programa; extraer la instalación en una ruta corta permite repetirla.
 
+## Entrega 2.2.0 publicada
+
+La [Release v2.2.0](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.0)
+se publicó el **21 de octubre de 2026** como estable y Latest. El ZIP incluye
+CPython **3.13.16**, ocupa **16 510 231 bytes** y contiene 759 archivos: los 758
+que inventaría su manifiesto más el propio `suite_release_manifest.json`. El
+manifiesto identifica el commit público `0905c4b5b549c3824977588feaafc87266d69c8e`
+(etiqueta `v2.2.0`; en TESTTEST apunta a `b83d172`). Su SHA-256 es:
+
+```text
+5e73b6d898facc6d4a55235f3a4102bb40a5fe169d6729141a0835363f632b7a
+```
+
+Evidencia del 21 de octubre:
+
+- Un primer ZIP salió sin `backup_location.py` y no se publicó (ver
+  [Qué puede reemplazar](#qué-puede-reemplazar)). El publicado se construyó
+  desde un checkout limpio, después de mover el módulo a `gui_backend/`.
+- Pasó `tools/verify_release.py` en una carpeta nueva: actualización, migración
+  desde scripts y rollback, con los seis testigos intactos. Igual que en 2.1.1,
+  esos escenarios ejercitan el auxiliar de la propia 2.2.0.
+- Esta vez también se probó la ruta real desde 2.1.1, con un script de QA que
+  no está en el repo: una instalación extraída del ZIP publicado de 2.1.1, con
+  su GUI y su auxiliar, recibió el ZIP 2.2.0 sin reempaquetar (GitHub simulado,
+  sin BDS ni Minecraft encendido). Terminó en `complete`; la GUI nueva respondió
+  2.2.0 y `GET /api/backups/location`; el árbol coincidió con el manifiesto; el
+  wrapper y la CLI importaron con el Python incluido, y los seis testigos
+  quedaron intactos. La ruta desde 2.1.0 no se probó (ver el problema conocido).
+- Tests sin e2e: 1177 en TESTTEST y 1175 en el perfil público (2 omitidos);
+  108 tests frontend, lint y build.
+- Los assets publicados se descargaron de GitHub y sus bytes coincidieron con
+  los del ZIP probado y con el digest de la API. El actualizador de una 2.1.1,
+  contra la API real, detectó 2.2.0 con su URL, tamaño y SHA-256. No se
+  instaló en el servidor real.
+
 ## Entrega 2.1.1 publicada
 
 La [Release v2.1.1](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.1)

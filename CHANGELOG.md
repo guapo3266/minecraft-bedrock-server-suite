@@ -5,7 +5,18 @@ es independiente de la versión de Minecraft Bedrock Dedicated Server (BDS).
 Este historial empieza en 2.0.0; el desarrollo anterior se conserva en Git y en
 los informes de `docs/`, sin asignarle versiones retrospectivas.
 
+## [Sin publicar]
+
+### Documentación y mantenimiento
+
+- Registro de la publicación de 2.2.0 (hash, procedencia y evidencia), con la
+  prueba de actualización real desde el ZIP publicado de 2.1.1.
+
 ## [2.2.0] - 2026-10-21
+
+[Publicada el 21 de octubre de 2026](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.0)
+con ZIP Windows x64 y checksum. Procedencia, hash y alcance de la validación
+en [ACTUALIZACIONES_SUITE.md](docs/ACTUALIZACIONES_SUITE.md).
 
 Nueva función y correcciones sobre 2.1.1. Se instala desde **Más acciones →
 Actualizar la suite** (siempre con confirmación) o con el ZIP de la Release.

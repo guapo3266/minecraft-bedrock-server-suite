@@ -34,10 +34,13 @@ se publicó el 16 de octubre de 2026. Su etiqueta pública identifica `0632a58`;
 la etiqueta local de TESTTEST identifica `41cc161`. La
 [Release v2.1.1](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.1)
 se publicó el 20 de octubre de 2026: su etiqueta pública identifica `39cd5bb`
-y la local de TESTTEST `53f1a9f`. No mover ninguna etiqueta publicada para
+y la local de TESTTEST `53f1a9f`. La
+[Release v2.2.0](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.0)
+se publicó el 21 de octubre de 2026: su etiqueta pública identifica `0905c4b`
+y la local de TESTTEST `b83d172`. No mover ninguna etiqueta publicada para
 incluir commits posteriores de documentación o CI. Estos commits pueden
-conservar la versión 2.1.1 mientras no se prepare otro paquete; la siguiente
-entrega es 2.2.0.
+conservar la versión 2.2.0 mientras no se prepare otro paquete; la siguiente
+corrección distribuible partiría de 2.2.1.
 
 ## Preparar una entrega local
 
