@@ -324,6 +324,12 @@ def _write_server_packs(zipf, total_bytes, cancel_event):
         src_dir = os.path.join(BASE_DIR, pack_dir)
         if not os.path.isdir(src_dir):
             continue
+        if _es_punto_reparse(src_dir):
+            # La poda de os.walk solo mira subcarpetas: una raiz que es una
+            # junction metia en el backup el contenido externo (2026-10-20).
+            print(L(f"[!] {pack_dir} es un enlace o junction: no se incluye en el backup.",
+                    f"[!] {pack_dir} is a link or junction: it is not included in the backup."))
+            continue
         prefix = _PACK_ZIP_PREFIX + pack_dir + "/"
         for root, dirs, files in os.walk(src_dir):
             _poda_reparse_points(root, dirs)
@@ -529,6 +535,10 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     # (respetando el protocolo nativo de Bedrock save query).
                     zinfo = zipfile.ZipInfo(arcname, date_time=datetime.datetime.now().timetuple()[:6])
                     zinfo.compress_type = zipfile.ZIP_DEFLATED
+                    # Tamaño declarado = el del snapshot: con file_size=0,
+                    # zipfile no activa ZIP64 y aborta con archivos de mas de
+                    # 2 GiB ("File size too large") (2026-10-20).
+                    zinfo.file_size = byte_length
                     try:
                         with open(full_path, 'rb') as f, zipf.open(zinfo, 'w') as zout:
                             remaining = byte_length
@@ -840,7 +850,9 @@ def recover_interrupted_restores(base_dir=None):
     ]
 
     for parent in target_dirs:
-        if not os.path.isdir(parent):
+        # Una raiz redirigida (enlace o junction) apunta fuera de la
+        # instalacion: el restore no deja residuos alli y aqui no se borran.
+        if not os.path.isdir(parent) or _es_punto_reparse(parent):
             continue
         try:
             entries = os.listdir(parent)

@@ -72,16 +72,35 @@ def _wait_server_stopped():
     encolado apagaba igual el servidor, ya sin re-arranque porque
     stop_requested quedaba en True (2026-10-20). Mientras el canal NDJSON diga
     que BDS aun no se lanzo (manager.wrapper_pre_bds), el plazo no corre; el
-    margen del backup inicial acota esa espera. Sin backup inicial en curso es
-    exactamente la espera de siempre (una sola wait de SERVER_STOP_TIMEOUT_SEC).
+    margen del backup inicial acota esa espera.
+
+    El flag se observa durante la espera, no solo al entrar: un stop pedido
+    justo tras arrancar, antes de leer `wrapper_started`, veia el flag aun en
+    False y caia en la espera fija aunque el backup inicial empezara despues
+    (2026-10-20). Mientras el canal no confirme la sesion (`events_alive`) o
+    BDS no se haya lanzado, se sondea; despues es la espera de siempre. Los
+    plazos se descuentan con el timeout de cada espera, no con el reloj.
     """
     start = time.monotonic()
-    if manager.wrapper_pre_bds and manager.is_running:
-        limit = start + _pre_bds_allowance_sec()
-        while manager.wrapper_pre_bds and manager.is_running and time.monotonic() < limit:
-            if manager.server_stopped_event.wait(timeout=_PRE_BDS_POLL_SEC):
-                return True, time.monotonic() - start
-    stopped = manager.server_stopped_event.wait(timeout=config.SERVER_STOP_TIMEOUT_SEC)
+    stop_budget = config.SERVER_STOP_TIMEOUT_SEC
+    pre_bds_budget = None
+    while manager.is_running and (manager.wrapper_pre_bds or not manager.events_alive):
+        pre_bds = manager.wrapper_pre_bds
+        if pre_bds and pre_bds_budget is None:
+            pre_bds_budget = _pre_bds_allowance_sec()
+        if pre_bds and pre_bds_budget > 0:
+            # BDS aun no se lanzo: el plazo de la fase 1 vuelve a estar entero.
+            stop_budget = config.SERVER_STOP_TIMEOUT_SEC
+            step = min(_PRE_BDS_POLL_SEC, pre_bds_budget)
+            pre_bds_budget -= step
+        else:
+            if stop_budget <= 0:
+                return False, time.monotonic() - start
+            step = min(_PRE_BDS_POLL_SEC, stop_budget)
+            stop_budget -= step
+        if manager.server_stopped_event.wait(timeout=step):
+            return True, time.monotonic() - start
+    stopped = manager.server_stopped_event.wait(timeout=max(0.0, stop_budget))
     return stopped, time.monotonic() - start
 
 

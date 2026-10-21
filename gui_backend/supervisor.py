@@ -276,9 +276,11 @@ def _apply_event(ev):
     """Aplica un evento del canal al estado del manager (nunca lanza)."""
     event = ev.get("event")
     if event == "wrapper_started":
-        manager.events_alive = True
         # Con backup inicial, BDS aun no corre ni se lee stdin (ver state.py).
+        # El flag va ANTES de events_alive: lifecycle._wait_server_stopped deja
+        # de sondear al ver events_alive y debe encontrar el flag ya fijado.
         manager.wrapper_pre_bds = ev.get("initial_backup") is True
+        manager.events_alive = True
     elif event == "bds_launched":
         manager.wrapper_pre_bds = False
     elif event == "version_captured":

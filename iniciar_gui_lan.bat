@@ -55,9 +55,9 @@ rem abrir el puerto en redes Publicas/Dominio, solo en la red de confianza.
 netsh advfirewall firewall delete rule name="Minecraft GUI LAN" >nul 2>&1
 netsh advfirewall firewall add rule name="Minecraft GUI LAN" dir=in action=allow protocol=TCP localport=%GUI_PORT% profile=private >nul 2>&1
 if not errorlevel 1 (
-    echo [LAN] Regla de firewall lista: permite TCP %GUI_PORT% (solo red privada)
+    echo [LAN] Regla de firewall lista: permite TCP %GUI_PORT% ^(solo red privada^)
 ) else (
-    echo [AVISO] No se pudo crear regla de firewall (ejecuta como Administrador si falla el acceso desde el movil).
+    echo [AVISO] No se pudo crear regla de firewall ^(ejecuta como Administrador si falla el acceso desde el movil^).
 )
 echo.
 

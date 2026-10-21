@@ -12,7 +12,11 @@ import sys
 import time
 import hashlib
 import ctypes
+import threading
+from contextlib import contextmanager
 from ctypes import wintypes
+
+from console_lang import L
 
 if sys.platform == "win32":
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -150,6 +154,69 @@ def mutex_held_by_other(name: str, attempts: int = 2, retry_delay_sec: float = 0
         return True
     finally:
         probe.close()
+
+
+def installation_ops_mutex_name(base_dir: str) -> str:
+    """Mutex de las operaciones que reescriben archivos de la instalacion."""
+    return f"BDS_Ops_{get_installation_hash(base_dir)}"
+
+
+class InstallationBusy(RuntimeError):
+    """Otro proceso esta restaurando, actualizando o recuperando la instalacion."""
+
+
+# Margen de espera: una sonda ajena (installation_busy_by_other) retiene el
+# mutex microsegundos; una operacion real lo retiene segundos o minutos.
+_OPS_TIMEOUT_MS = 2000
+_local_ops = {}  # nombre del mutex -> operaciones de ESTE proceso en curso
+_local_ops_lock = threading.Lock()
+
+
+@contextmanager
+def installation_operation(base_dir: str, timeout_ms=None):
+    """Exclusion entre procesos para modificar archivos de la instalacion.
+
+    La toman el restore (GUI y CLI), aplicar o revertir BDS y las
+    recuperaciones de arranque (GUI y wrapper). Sin ella, el recovery de una
+    segunda GUI, del wrapper o de la CLI trataba como interrumpida la
+    operacion en curso de otro proceso: borraba el staging de un restore o
+    revertia a mitad una actualizacion de BDS (2026-10-20). El mutex de
+    Windows pertenece al hilo: se adquiere y se libera en el mismo hilo.
+    Lanza InstallationBusy si otro proceso (u otro hilo) la retiene.
+    """
+    name = installation_ops_mutex_name(base_dir)
+    mutex = NamedMutex(name)
+    try:
+        if not mutex.acquire(timeout_ms=_OPS_TIMEOUT_MS if timeout_ms is None else timeout_ms):
+            raise InstallationBusy(L(
+                "Otra operación está modificando esta instalación (restauración, actualización de BDS o recuperación en curso). Inténtalo cuando termine.",
+                "Another operation is modifying this installation (restore, BDS update or recovery in progress). Try again when it finishes.",
+            ))
+        with _local_ops_lock:
+            _local_ops[name] = _local_ops.get(name, 0) + 1
+        try:
+            yield
+        finally:
+            with _local_ops_lock:
+                _local_ops[name] -= 1
+                if not _local_ops[name]:
+                    del _local_ops[name]
+    finally:
+        mutex.close()
+
+
+def installation_busy_by_other(base_dir: str) -> bool:
+    """True si OTRO proceso tiene en curso una operacion sobre la instalacion.
+
+    Las operaciones de este mismo proceso (p. ej. el restore de la propia GUI
+    en un hilo del threadpool) no cuentan: la sonda de instancias externas no
+    debe vetarse a si misma.
+    """
+    name = installation_ops_mutex_name(base_dir)
+    with _local_ops_lock:
+        if _local_ops.get(name):
+            return False
+    return mutex_held_by_other(name)
 
 
 def create_job_object_for_process(process_handle_or_pid) -> wintypes.HANDLE:

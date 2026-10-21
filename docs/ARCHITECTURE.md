@@ -207,7 +207,9 @@ vía `manager.add_log`.
   inicial antes de lanzar BDS (`manager.wrapper_pre_bds`, eventos
   `wrapper_started`/`bds_launched`) la fase 1 no consume sus 75 s: el `stop`
   espera en la tubería hasta que BDS arranca (`lifecycle._wait_server_stopped`,
-  acotado por la escala del backup final).
+  acotado por la escala del backup final). El flag se observa durante toda la
+  espera mientras el canal no confirme la sesión (`events_alive`): un stop
+  pedido antes de leer `wrapper_started` también se beneficia.
 - El registro WebSocket (`active_websockets`) y `broadcast()` viven en
   `state.py`; el router WS solo añade/descarta conexiones. El `finally` del
   router cubre TODA la sesión registrada, incluido el envío del `init`: un
@@ -265,6 +267,18 @@ vía `manager.add_log`.
   valida el manifiesto completo antes de tocar archivos, reemplaza destinos
   con los originales resguardados y conserva originales aún no movidos o ya
   recuperados; así permite reintentos tras interrupciones durante cualquier fase.
+  En el rollback el staging ES `data/bds_previous`: el manifiesto (formato
+  `{"entries": [...], "staging": "data/bds_previous"}`) lo anota y el recovery
+  devuelve allí los archivos ya aplicados antes de reponer los originales,
+  así el resguardo sigue completo. El formato antiguo (lista) se sigue leyendo.
+- Exclusión entre procesos: `windows_process_guard.installation_operation`
+  (mutex `BDS_Ops_<hash>` por instalación) envuelve aplicar/revertir BDS, el
+  restore de la GUI y de la CLI y los recoveries de arranque de la GUI
+  (`server_gui_server._recover_installation`) y del wrapper. Un recovery que
+  encuentra el mutex tomado se omite (los residuos son de una operación en
+  curso, no de una interrupción); el wrapper aborta. La sonda externa lo
+  reporta como `installation_busy`; las operaciones del propio proceso no
+  cuentan (`installation_busy_by_other`).
 - La descarga valida HTTPS y hosts exactos `www.minecraft.net`/`minecraft.net`
   tanto en el metadato como antes de cada petición/redirección (máximo 5 saltos).
   No verifica firmas ni hashes del binario; un cambio de dominio exige actualizar
@@ -312,7 +326,9 @@ vía `manager.add_log`.
   corrupto) los defaults reproducen el comportamiento histórico: intervalo
   30 min, backups solo con jugadores, watchdog inactivo.
 - El wrapper relee el archivo por mtime en cada tick de `backup_scheduler`;
-  la GUI lo escribe atómico (`services/schedule_config.py`). Los defaults
+  la GUI lo escribe atómico (`services/schedule_config.py`), combinando lo
+  enviado con lo ya guardado bajo el mismo lock (un guardado parcial no
+  devuelve las demás claves al default). Los defaults
   del wrapper (`SCHEDULE_DEFAULTS`) y de la GUI (`DEFAULTS`) deben coincidir
   (test anti-drift).
 - La hora fija de backup diario dispara en caliente aunque no haya
@@ -427,7 +443,9 @@ vía `manager.add_log`.
   externo da 403, no 422). Cobertura: `tests/test_router_guards.py` (inventario
   OpenAPI anti-drift + probes).
 - `lifespan`: fija `manager.loop`, ejecuta `recover_interrupted_restores()` +
-  `recover_interrupted_updates()`, precarga historial SQLite, arranca el bucle
+  `recover_interrupted_updates()` bajo el mutex de operación de la instalación
+  (`_recover_installation`; se omiten si otro proceso está operando), precarga
+  historial SQLite, arranca el bucle
   de métricas cada 2s (incluye sonda externa y persistencia cada 30s) y el
   watchdog (hilo daemon, opt-in). Al apagarse cancela el task de métricas y
   resetea `manager.loop = None` (no dejar un loop cerrado como global).

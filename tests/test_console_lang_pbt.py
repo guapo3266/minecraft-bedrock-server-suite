@@ -211,6 +211,7 @@ L_PY_FILES = [
     "restore_core.py",
     "server_properties.py",
     "zip_safety.py",
+    "windows_process_guard.py",
     "addon_inventory_cli.py",
     "gui_backend/supervisor.py",
     "gui_backend/services/bds_update.py",

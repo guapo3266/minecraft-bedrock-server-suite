@@ -18,6 +18,7 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 
+import windows_process_guard as wpg
 import zip_safety
 from console_lang import L
 from gui_backend import config
@@ -187,9 +188,26 @@ def recover_interrupted_updates(base_dir=None):
     binario. Si el proceso muere entre las dos fases, el manifiesto permite
     quitar archivos nuevos y devolver exactamente los archivos que existían.
     Un directorio antiguo sin manifiesto se conserva para inspección manual.
+
+    Con `staging` en el manifiesto (rollback: el staging ES data/bds_previous),
+    los archivos ya aplicados vuelven a ese staging en lugar de borrarse o
+    pisarse. Antes el recovery reponía la versión actual encima y el resguardo
+    se quedaba sin esos archivos, pero se seguía ofreciendo como válido: un
+    segundo rollback mezclaba EXE de una versión y DLL de otra (2026-10-20).
+    El formato antiguo (lista de entradas, sin staging) se sigue aceptando.
     """
     if base_dir is None:
         base_dir = config.BASE_DIR
+    root = os.path.abspath(base_dir)
+
+    def _inside(rel, error):
+        if not isinstance(rel, str) or not rel or not _is_safe_zip_entry(rel):
+            raise ValueError(error)
+        path = os.path.abspath(os.path.join(root, rel.replace("/", os.sep)))
+        if os.path.commonpath([root, path]) != root:
+            raise ValueError("ruta fuera de la instalacion")
+        return path
+
     pattern = os.path.join(base_dir, "bds_update_prev_*")
     for prev_dir in glob.glob(pattern):
         if not os.path.isdir(prev_dir):
@@ -199,9 +217,15 @@ def recover_interrupted_updates(base_dir=None):
             continue
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
-                entries = json.load(f)
+                doc = json.load(f)
+            if isinstance(doc, dict):
+                entries = doc.get("entries")
+                staging_rel = doc.get("staging")
+            else:
+                entries, staging_rel = doc, None
             if not isinstance(entries, list):
                 raise ValueError("manifiesto no es una lista")
+            staging = None if staging_rel is None else _inside(staging_rel, "staging invalido en manifiesto")
 
             # Validar TODO antes de mover nada; un manifiesto parcialmente
             # invalido tampoco debe provocar una recuperacion parcial.
@@ -209,15 +233,26 @@ def recover_interrupted_updates(base_dir=None):
             for entry in entries:
                 rel = entry.get("path") if isinstance(entry, dict) else None
                 had_previous = entry.get("had_previous") if isinstance(entry, dict) else None
-                if not isinstance(rel, str) or not rel or not isinstance(had_previous, bool) or not _is_safe_zip_entry(rel):
+                if not isinstance(had_previous, bool):
                     raise ValueError("entrada invalida en manifiesto")
-                target = os.path.abspath(os.path.join(base_dir, rel.replace("/", os.sep)))
-                if os.path.commonpath([os.path.abspath(base_dir), target]) != os.path.abspath(base_dir):
-                    raise ValueError("ruta fuera de la instalacion")
-                validated.append((target, os.path.join(prev_dir, rel.replace("/", os.sep)), had_previous))
-            for target, old_path, had_previous in validated:
+                target = _inside(rel, "entrada invalida en manifiesto")
+                staged = None if staging is None else os.path.join(staging, rel.replace("/", os.sep))
+                validated.append((target, os.path.join(prev_dir, rel.replace("/", os.sep)), staged, had_previous))
+
+            def _return_to_staging(target, staged):
+                # El archivo aplicado salio del staging: vuelve alli. Si el
+                # staging ya tiene ese archivo, el estado no es el esperado y
+                # se conserva todo (manifiesto incluido) para revision manual.
+                if os.path.lexists(staged):
+                    raise RuntimeError(f"El staging ya contiene {staged}: estado inesperado")
+                os.makedirs(os.path.dirname(staged), exist_ok=True)
+                os.replace(target, staged)
+
+            for target, old_path, staged, had_previous in validated:
                 if had_previous:
                     if os.path.isfile(old_path):
+                        if staged is not None and os.path.isfile(target):
+                            _return_to_staging(target, staged)
                         os.makedirs(os.path.dirname(target), exist_ok=True)
                         os.replace(old_path, target)
                     elif not os.path.isfile(target):
@@ -225,7 +260,10 @@ def recover_interrupted_updates(base_dir=None):
                     # Sin old_path, el original no se movio todavia O ya fue
                     # recuperado. Conservar target hace el recovery idempotente.
                 elif os.path.isfile(target):
-                    os.remove(target)
+                    if staged is not None:
+                        _return_to_staging(target, staged)
+                    else:
+                        os.remove(target)
             shutil.rmtree(prev_dir, ignore_errors=True)
         except Exception as exc:
             # No borrar un resguardo que no se pudo interpretar: conserva la
@@ -333,6 +371,22 @@ def read_previous_version():
 def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
                          keep_prev_dir=None, prev_version=None,
                          preserve_staging_on_failure=False):
+    """Aplica el staging bajo el mutex de operacion de la instalacion.
+
+    Sin la exclusion, el arranque de otra GUI tomaba el manifiesto activo por
+    el de una actualizacion interrumpida y la revertia a mitad (2026-10-20).
+    Si otro proceso esta operando, falla sin tocar ningun archivo.
+    """
+    with wpg.installation_operation(base_dir):
+        return _apply_staged_update_unlocked(
+            staging_dir, base_dir, preserve_files, preserve_dirs,
+            keep_prev_dir=keep_prev_dir, prev_version=prev_version,
+            preserve_staging_on_failure=preserve_staging_on_failure)
+
+
+def _apply_staged_update_unlocked(staging_dir, base_dir, preserve_files, preserve_dirs,
+                                  keep_prev_dir=None, prev_version=None,
+                                  preserve_staging_on_failure=False):
     """Aplica un staging extraido a base_dir con rollback ante fallo.
 
     Fase 1: mueve los archivos actuales que seran reemplazados a un dir
@@ -367,9 +421,20 @@ def _apply_staged_update(staging_dir, base_dir, preserve_files, preserve_dirs,
                     "path": rel.replace("\\", "/"),
                     "had_previous": os.path.isfile(target),
                 })
+        # Si el staging es el resguardo (rollback), el recovery debe devolverle
+        # los archivos ya aplicados: se anota su ruta relativa a la instalacion.
+        staging_rel = None
+        if preserve_staging_on_failure:
+            root = os.path.abspath(base_dir)
+            staging_abs = os.path.abspath(staging_dir)
+            try:
+                if os.path.commonpath([root, staging_abs]) == root:
+                    staging_rel = os.path.relpath(staging_abs, root).replace("\\", "/")
+            except ValueError:  # otra unidad: no es un staging de la instalacion
+                pass
         manifest_tmp = os.path.join(prev_dir, _UPDATE_MANIFEST_NAME + ".tmp")
         with open(manifest_tmp, "w", encoding="utf-8") as f:
-            json.dump(manifest, f)
+            json.dump({"entries": manifest, "staging": staging_rel}, f)
             f.flush()
             os.fsync(f.fileno())
         os.replace(manifest_tmp, os.path.join(prev_dir, _UPDATE_MANIFEST_NAME))
@@ -575,6 +640,10 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         except PreviousVersionNotSaved as exc:
             log_fn(L(f"{tag} BDS quedó actualizado, pero sin versión anterior para revertir: {exc}.",
                      f"{tag} BDS was updated, but without a previous version to roll back to: {exc}."), "error")
+        except wpg.InstallationBusy as exc:
+            # Otro proceso restaura o actualiza esta instalacion: no se toco nada.
+            log_fn(f"{tag} {exc}", "error")
+            return False, None
         _record_shipped_packs(shipped_packs, tag, log_fn)
         if downloaded_version:
             manager.installed_version = downloaded_version
@@ -621,6 +690,9 @@ def rollback_bds(tag="[Rollback BDS]", log_fn=None):
         swap_saved = False
         log_fn(L(f"{tag} Reversión aplicada, pero la versión que se dejó de usar no queda recuperable: {exc}.",
                  f"{tag} Rollback applied, but the version just left behind is not recoverable: {exc}."), "error")
+    except wpg.InstallationBusy as exc:
+        log_fn(f"{tag} {exc}", "error")
+        return False, None
     except Exception as exc:
         log_fn(L(f"{tag} Error al restaurar; revisa los resguardos de recuperación: {exc}", f"{tag} Error restoring; check the recovery backups: {exc}"), "error")
         return False, None

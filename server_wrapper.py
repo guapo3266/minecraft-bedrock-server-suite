@@ -552,11 +552,22 @@ if __name__ == "__main__":
     print(L("  INICIANDO SERVIDOR CON WRAPPER", "  STARTING SERVER WITH WRAPPER"))
     print("=========================================================")
 
-    # Recuperación de restauraciones interrumpidas (.bak o .restore_staging_*)
+    # Recuperación de restauraciones interrumpidas (.bak o .restore_staging_*),
+    # bajo el mutex de operación de la instalación. Si otro proceso (CLI, GUI)
+    # está restaurando o actualizando BDS, sus residuos no son de una
+    # interrupción y el servidor no debe arrancar sobre un mundo a medias. Con
+    # el mutex del wrapper ya retenido, un restore posterior verá el wrapper
+    # vivo y se negará (2026-10-20).
     try:
-        auto_backup.recover_interrupted_restores(wstate.BASE_DIR)
-    except Exception as e:
-        print(L(f"[Wrapper] [WARN] Error en recuperación de restauraciones: {e}", f"[Wrapper] [WARN] Error in restore recovery: {e}"))
+        with wpg.installation_operation(wstate.BASE_DIR):
+            try:
+                auto_backup.recover_interrupted_restores(wstate.BASE_DIR)
+            except Exception as e:
+                print(L(f"[Wrapper] [WARN] Error en recuperación de restauraciones: {e}", f"[Wrapper] [WARN] Error in restore recovery: {e}"))
+    except wpg.InstallationBusy as e:
+        print(L(f"[Wrapper] [ERROR] {e} Abortando.", f"[Wrapper] [ERROR] {e} Aborting."))
+        wrapper_mutex.close()
+        sys.exit(1)
 
     # Canal de eventos: rotar viejos y anunciar el boot (la GUI usa este
     # evento como señal de "canal vivo" y pasa a consumir eventos como

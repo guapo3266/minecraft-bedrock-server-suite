@@ -347,6 +347,9 @@ def test_fase1_margen_del_backup_inicial_acotado(monkeypatch):
 
 def test_fase1_sin_backup_inicial_espera_lo_de_siempre(monkeypatch):
     _fase1(monkeypatch, 75, False)
+    # El canal ya confirmo la sesion sin backup inicial (wrapper_started leido):
+    # antes de eso se sondea (ronda 2, test_revision_2026-10-20_ronda2.py).
+    monkeypatch.setattr(manager, "events_alive", True)
     llamadas = []
     monkeypatch.setattr(manager.server_stopped_event, "wait",
                         lambda timeout=None: llamadas.append(timeout) or False)

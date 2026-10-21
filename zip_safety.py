@@ -118,6 +118,24 @@ def record_bds_shipped_packs(base_dir, packs):
 CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO", "_CRASH", "_crash")
 _CORRUPT_MARKERS = CORRUPT_MARKERS
 
+def is_redirected_path(base_dir, path):
+    """True si `path` (dentro de base_dir) resuelve a otro sitio por un enlace o junction.
+
+    Misma regla que server_properties.validate_world_dir para worlds/, aplicada
+    a los packs: una junction en resource_packs/ (o en una carpeta de pack)
+    hacia fuera de la instalacion hacia que el restore reemplazara y borrara
+    contenido ajeno (2026-10-20). Una ruta que aun no existe no esta redirigida
+    salvo por sus ancestros. Ante un error se asume redirigida (fail-closed).
+    """
+    try:
+        root = os.path.realpath(base_dir)
+        rel = os.path.relpath(os.path.abspath(path), os.path.abspath(base_dir))
+        expected = os.path.normcase(os.path.normpath(os.path.join(root, rel)))
+        return os.path.normcase(os.path.realpath(path)) != expected
+    except (OSError, ValueError):
+        return True
+
+
 # Tope de expansion al RESTAURAR (defensa ante zip-bomb o backup corrupto):
 # el limite de creacion (auto_backup.MAX_BACKUP_BYTES) es 10 GB SIN comprimir,
 # asi que 20 GB da margen de sobra para mundos legitimos.

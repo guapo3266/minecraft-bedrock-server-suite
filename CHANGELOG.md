@@ -36,6 +36,27 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 - Tras actualizar la suite, la GUI nueva se desbloquea sola aunque falle la
   confirmación del auxiliar.
 - La lista de backups ya no falla si la rotación borra un ZIP en ese momento.
+- `iniciar_servidor.bat` vuelve a arrancar el servidor: desde agosto se
+  cerraba con «No se esperaba . en este momento.» justo después de comprobar
+  BDS. Con el Python incluido en el ZIP, además, ahora ofrece descargar BDS si
+  falta en lugar de intentar lanzar un ejecutable inexistente.
+- `iniciar_gui_lan.bat` ya no muestra el aviso de fallo del firewall cuando la
+  regla sí se creó.
+- Abrir una segunda GUI, el wrapper o la restauración por consola mientras otra
+  ventana restaura un backup o actualiza BDS ya no deshace esa operación a mitad
+  creyéndola interrumpida: las operaciones que reescriben archivos de la
+  instalación se excluyen entre procesos.
+- La restauración por consola vuelve a comprobar que el servidor esté apagado
+  después de escribir `SI`, y mientras restaura nadie puede arrancarlo.
+- Si se cortaba una vuelta a la versión anterior de BDS, la recuperación dejaba
+  esa copia incompleta y un segundo intento mezclaba versiones. Ahora la copia
+  queda entera.
+- Reiniciar o actualizar justo después de arrancar ya no se cancela a los 75 s
+  si el backup inicial empieza en ese momento.
+- Los packs cuya carpeta es un enlace o junction ya no se restauran fuera de la
+  instalación ni se incluyen en los backups.
+- Los backups en caliente funcionan con archivos de más de 2 GiB.
+- Guardar solo algunos ajustes de programación por la API conserva los demás.
 
 ### Documentación y mantenimiento
 

@@ -216,15 +216,30 @@ def list_and_restore():
     previo = os.environ.get("WRAPPER_LANG")
     console_lang.set_lang("es")
     try:
-        # Recuperar residuos de restauraciones interrumpidas ANTES de crear
-        # residuos nuevos (H6-2026-09-25). Se llama por atributo de modulo
-        # (convencion de monkeypatch del repo). Best-effort.
-        import auto_backup
-        try:
-            auto_backup.recover_interrupted_restores()
-        except Exception as e_rec:
-            print(f"[AVISO] No se pudo recuperar restauraciones interrumpidas: {e_rec}")
-        restore_core.restore_from_zip(selected_zip, BASE_DIR, get_world_dir())
+        # Exclusion durante TODO el restore: otra GUI o el wrapper no pueden
+        # recuperar este staging como si fuera de una interrupcion, la GUI no
+        # arranca el servidor (la sonda lo ve) y el wrapper se niega a arrancar.
+        with wpg.installation_operation(BASE_DIR):
+            # Re-chequeo bajo la exclusion: el servidor pudo arrancar mientras
+            # se elegia el backup o se escribia SI (2026-10-20).
+            if _server_is_running():
+                print("\n[ERROR] El servidor de Minecraft (o su wrapper) arrancó mientras elegías el backup.")
+                print("        No se restauró nada. Apágalo y vuelve a intentarlo.")
+                input("\nPresiona Enter para salir...")
+                return
+            # Recuperar residuos de restauraciones interrumpidas ANTES de crear
+            # residuos nuevos (H6-2026-09-25). Se llama por atributo de modulo
+            # (convencion de monkeypatch del repo). Best-effort.
+            import auto_backup
+            try:
+                auto_backup.recover_interrupted_restores()
+            except Exception as e_rec:
+                print(f"[AVISO] No se pudo recuperar restauraciones interrumpidas: {e_rec}")
+            restore_core.restore_from_zip(selected_zip, BASE_DIR, get_world_dir())
+    except wpg.InstallationBusy as e:
+        print(f"\n[ERROR] {e}")
+        input("\nPresiona Enter para salir...")
+        return
     except Exception as e:
         print(f"[ERROR] Falló la restauración: {e}. Revisa los resguardos conservados si el rollback no pudo completarse.")
         input("\nPresiona Enter para salir...")

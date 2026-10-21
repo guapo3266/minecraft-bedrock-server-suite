@@ -25,6 +25,7 @@ from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 import auto_backup
+import windows_process_guard as wpg
 from console_lang import L
 from suite_version import VERSION
 
@@ -72,18 +73,33 @@ async def hardware_metrics_loop():
                         f"[Metrics] Degraded sampling ({_metric_errs} failures): {type(e).__name__}: {e}"))
         await asyncio.sleep(2.0)
 
+def _recover_installation():
+    """Recupera restores y actualizaciones de BDS interrumpidos, en exclusion.
+
+    Bajo el mutex de operacion de la instalacion: si otra GUI, la CLI o el
+    wrapper estan restaurando o actualizando BDS, sus residuos no son de una
+    interrupcion y se omite la recuperacion de este arranque (2026-10-20).
+    """
+    try:
+        with wpg.installation_operation(config.BASE_DIR):
+            try:
+                auto_backup.recover_interrupted_restores(config.BASE_DIR)
+            except Exception as exc:
+                manager.add_log(L(f"[Backups] Error en recuperación de restauraciones: {exc}", f"[Backups] Error in restore recovery: {exc}"), "error")
+            try:
+                bds_update_service.recover_interrupted_updates()
+            except Exception as exc:
+                manager.add_log(L(f"[Actualizador BDS] No se pudo revisar una actualizacion interrumpida: {exc}", f"[Actualizador BDS] Could not check for an interrupted update: {exc}"), "error")
+    except wpg.InstallationBusy as exc:
+        manager.add_log(L(f"[Recuperación] {exc} No se revisan restauraciones ni actualizaciones interrumpidas en este arranque.",
+                          f"[Recovery] {exc} Interrupted restores and updates are not checked on this start."), "error")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     manager.loop = asyncio.get_running_loop()
     suite_update_service.enter_handoff_guard()
-    try:
-        auto_backup.recover_interrupted_restores(config.BASE_DIR)
-    except Exception as exc:
-        manager.add_log(L(f"[Backups] Error en recuperación de restauraciones: {exc}", f"[Backups] Error in restore recovery: {exc}"), "error")
-    try:
-        bds_update_service.recover_interrupted_updates()
-    except Exception as exc:
-        manager.add_log(L(f"[Actualizador BDS] No se pudo revisar una actualizacion interrumpida: {exc}", f"[Actualizador BDS] Could not check for an interrupted update: {exc}"), "error")
+    _recover_installation()
     task = asyncio.create_task(hardware_metrics_loop())
     # Watchdog opt-in (sin config no actua nunca). Hilo daemon: muere con la GUI.
     try:

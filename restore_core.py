@@ -31,6 +31,7 @@ from zip_safety import (
     _quarantine_and_restore,
     _exceeds_expansion_limit,
     is_bds_pack,
+    is_redirected_path,
     read_bds_shipped_packs,
 )
 
@@ -133,6 +134,22 @@ def restore_from_zip(zip_path, base_dir, world_dir, log_fn=None):
         conservados = len(bds_folders)
         log(L(f"[*] Packs de BDS conservados en su versión instalada (no se restauran del backup): {conservados}.",
               f"[*] BDS packs kept at their installed version (not restored from the backup): {conservados}."))
+
+    # Packs cuyo destino (la carpeta del pack o la raiz resource_packs/
+    # behavior_packs) es un enlace o junction: restaurarlos escribia y borraba
+    # fuera de la instalacion. No se restauran; el mundo si (2026-10-20).
+    destinos = {(kind, folder or rel) for _entry, (kind, folder, rel) in pack_infos}
+    redirigidos = sorted(
+        f"{kind}/{name}" for kind, name in destinos
+        if is_redirected_path(base_dir, os.path.join(base_dir, kind, name))
+    )
+    if redirigidos:
+        pack_infos = [
+            item for item in pack_infos
+            if f"{item[1][0]}/{item[1][1] or item[1][2]}" not in redirigidos
+        ]
+        log(L(f"[!] Packs no restaurados porque su carpeta es un enlace o junction fuera de la instalación: {', '.join(redirigidos)}.",
+              f"[!] Packs not restored because their folder is a link or junction outside the installation: {', '.join(redirigidos)}."))
 
     nonce = os.urandom(4).hex()
     world_staging = world_dir + f".restore_staging_{nonce}"

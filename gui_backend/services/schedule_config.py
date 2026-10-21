@@ -73,11 +73,22 @@ def load():
 
 
 def save(cfg):
-    """Valida y escribe atomico (tmp + os.replace). Devuelve (ok, cfg, detalle)."""
-    cfg, detalle = validate(cfg)
-    if cfg is None:
-        return False, None, detalle
+    """Valida y escribe atomico (tmp + os.replace). Devuelve (ok, cfg, detalle).
+
+    Las claves omitidas conservan el valor GUARDADO (o el default si nunca se
+    guardo), como promete el contrato de POST /api/schedule. Antes se
+    completaban con DEFAULTS: enviar solo el intervalo apagaba el watchdog y
+    borraba las horas diarias (2026-10-20). Leer, combinar y escribir van bajo
+    el mismo lock para no pisar un guardado concurrente.
+    """
+    if not isinstance(cfg, dict):
+        return False, None, "cuerpo debe ser un objeto"
     with _lock:
+        merged = load()
+        merged.update({k: v for k, v in cfg.items() if k in DEFAULTS})
+        cfg, detalle = validate(merged)
+        if cfg is None:
+            return False, None, detalle
         os.makedirs(os.path.dirname(SCHEDULE_PATH), exist_ok=True)
         nonce = os.urandom(4).hex()
         tmp_path = SCHEDULE_PATH + f".tmp_{nonce}"

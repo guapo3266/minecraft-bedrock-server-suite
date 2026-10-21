@@ -59,6 +59,8 @@ El frontend incorpora esa misma fuente al compilar y la muestra en Acerca de.
 
 `installed_version`: versión de BDS capturada al arrancar el servidor (evento NDJSON `version_captured`, fallback stdout). `null` mientras no haya arranque en esta sesión de GUI.
 
+`external_instance`/`external_instance_reason`: solo con el servidor fuera del control de la GUI. Motivos: `"wrapper_mutex"` (un wrapper de esta instalación retiene su mutex), `"installation_busy"` (otro proceso restaura o aplica una actualización de BDS en esta instalación, p. ej. la CLI de restore; 2026-10-20) o `"bedrock_server_pid_<pid>"` (un `bedrock_server.exe` de esta instalación que no es hijo de la GUI). Con cualquiera de ellos, start/update/restore/instalación responden 409.
+
 ## Entrada de log (WS `log` y WS `init`)
 
 ```json
@@ -123,7 +125,7 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
   `{"backup_interval_min": <int 5-1440>, "backup_only_with_players": <bool>, "daily_backup_time": "<HH:MM>"|null, "auto_restart_on_crash": <bool>, "daily_restart_time": "<HH:MM>"|null}`.
 
 ### `POST /api/schedule`
-- Body: subset de las claves anteriores (las no enviadas conservan su valor/default).
+- Body: subset de las claves anteriores. Las no enviadas conservan el valor guardado, o el default si nunca se guardó (2026-10-20: antes volvían al default y un guardado parcial apagaba el watchdog). La combinación con lo guardado y la escritura van bajo el mismo lock.
 - 400 `"Cuerpo JSON invalido"` / validación (`backup_interval_min debe estar entre 5 y 1440`, `<campo> debe ser "HH:MM" o null`, etc.).
 - 200: `{"status": "ok", "config": <config normalizada>}` + log de sistema.
 - Efecto inmediato: el wrapper relee `data/schedule_config.json` por mtime en
@@ -231,10 +233,10 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 ### `POST /api/restore`
 - Body: `{"filename": "<str>"}`.
 - 400 `"Cuerpo JSON invalido"` / `"Nombre de backup invalido"` (basename != nombre).
-- 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`) / `"Hay una instancia externa del servidor en ejecución; restauración cancelada"` (sonda externa bajo `op_lock`).
+- 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`) / `"Hay una instancia externa del servidor en ejecución; restauración cancelada"` (sonda externa bajo `op_lock`) / `"Otra operación está modificando esta instalación…"` (otro proceso — la CLI, otra GUI o el recovery del wrapper — retiene el mutex de operación de la instalación, `windows_process_guard.installation_operation`; los rechecks anteriores corren bajo ese mutex, que se mantiene durante todo el restore; 2026-10-20).
 - 404: `FileNotFoundError` (texto del error).
 - 500: error genérico (extracción/swap). Un ZIP sin `level.dat` en el staging — vacío o solo-packs — se rechaza con `RuntimeError` SIN tocar el mundo (ronda 2026-09-11).
-- Restaura el mundo y los addons de `server_resource_packs/` y `server_behavior_packs/`; los packs que distribuye BDS se quedan en su versión instalada (`zip_safety.is_bds_pack`, 2026-10-20).
+- Restaura el mundo y los addons de `server_resource_packs/` y `server_behavior_packs/`; los packs que distribuye BDS se quedan en su versión instalada (`zip_safety.is_bds_pack`, 2026-10-20). Tampoco se restauran los packs cuyo destino (la carpeta del pack o la raíz `resource_packs/`/`behavior_packs/`) es un enlace o junction (`zip_safety.is_redirected_path`): el mundo sí se restaura y el log lo indica.
 - 500: `level-name` inválido o destino fuera de `worlds/`/redirigido por enlaces; se rechaza antes de abrir el ZIP. Si falla el rollback por rename y se recurre a copiar, el `.bak` se conserva para recuperación exacta manual.
 - 200: `{"status": "ok", "backup": "<filename>"}` + log.
 

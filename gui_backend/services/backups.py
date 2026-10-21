@@ -11,6 +11,7 @@ import time
 import zipfile
 
 import auto_backup
+import windows_process_guard as wpg
 from fastapi import HTTPException
 from zip_safety import CORRUPT_MARKERS
 
@@ -67,19 +68,26 @@ def restore_backup_under_lock(manager, filename):
     (el endpoint debe propagarla tal cual, sin convertirla a 500).
     """
     with manager.op_lock:
-        if manager.is_running:
-            raise HTTPException(
-                status_code=409,
-                detail="El servidor se encendió durante la restauración; operación cancelada",
-            )
-        from gui_backend.services import external_probe
-        is_ext, _ = external_probe.detect_external_bds()
-        if is_ext:
-            raise HTTPException(
-                status_code=409,
-                detail="Hay una instancia externa del servidor en ejecución; restauración cancelada",
-            )
-        return auto_backup.restore_backup(filename)
+        # op_lock excluye las operaciones de esta GUI; el mutex de operacion
+        # excluye a otros procesos (CLI de restore, otra GUI, el recovery del
+        # wrapper) durante TODO el restore. Los chequeos van bajo ambos.
+        try:
+            with wpg.installation_operation(auto_backup.BASE_DIR):
+                if manager.is_running:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="El servidor se encendió durante la restauración; operación cancelada",
+                    )
+                from gui_backend.services import external_probe
+                is_ext, _ = external_probe.detect_external_bds()
+                if is_ext:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Hay una instancia externa del servidor en ejecución; restauración cancelada",
+                    )
+                return auto_backup.restore_backup(filename)
+        except wpg.InstallationBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def verify_zip(full):

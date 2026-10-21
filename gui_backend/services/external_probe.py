@@ -58,6 +58,11 @@ def detect_external_bds(base_dir: str = None) -> tuple[bool, str | None]:
     if _wrapper_mutex_held_by_other(mutex_name):
         return True, "wrapper_mutex"
 
+    # 1b. Otro proceso restaurando o actualizando BDS en esta instalacion (p. ej.
+    #     la CLI de restore): arrancar ahora pisaria un mundo o binarios a medias.
+    if wpg.installation_busy_by_other(target_base):
+        return True, "installation_busy"
+
     # 2. Comprobar vía psutil procesos de bedrock_server DE ESTA INSTALACIÓN
     #    (misma ruta del ejecutable) que no sean descendientes de la GUI.
     #    Antes se reportaba cualquier bedrock_server.exe de la máquina: un BDS

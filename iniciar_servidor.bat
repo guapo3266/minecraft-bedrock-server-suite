@@ -4,10 +4,6 @@ if exist "data\suite_updates\recovery\journal.json" (
     call "%~dp0Recuperar_suite.bat"
     if errorlevel 1 exit /b 1
 )
-if exist "%~dp0runtime\python.exe" (
-    "%~dp0runtime\python.exe" -B "%~dp0server_wrapper.py"
-    exit /b
-)
 title Minecraft Bedrock Server Suite
 color 0a
 
@@ -34,6 +30,18 @@ cd /d "%~dp0"
 :: El .bat habla espanol: el wrapper arranca en espanol salvo que el usuario
 :: ya haya fijado otro idioma con WRAPPER_LANG.
 if not defined WRAPPER_LANG set "WRAPPER_LANG=es"
+
+:: ZIP de la Release: Python incluido en runtime\ (sin .venv ni pip). Va al
+:: mismo primer arranque que el resto: antes esta rama lanzaba el wrapper
+:: directamente y, en un ZIP nuevo sin BDS, terminaba intentando lanzar un
+:: ejecutable inexistente en lugar de ofrecer descargarlo (2026-10-20).
+:: -B: no escribir __pycache__ en el codigo que gestiona el actualizador.
+set "PY_FLAGS="
+if exist "%~dp0runtime\python.exe" (
+    set "RUN_PY=%~dp0runtime\python.exe"
+    set "PY_FLAGS=-B"
+    goto :first_run
+)
 
 :: [0/3] Verificar Python
 python --version >nul 2>&1
@@ -130,11 +138,12 @@ del "%REQ_SHA_TMP%" >nul 2>&1
 
 call :bootstrap_unlock
 
+:first_run
 :: [2/3] Si falta bedrock_server.exe, preguntar y descargarlo desde Mojang
-"%RUN_PY%" tools\bds_first_run.py
+"%RUN_PY%" %PY_FLAGS% tools\bds_first_run.py
 if errorlevel 2 (
     echo.
-    echo [INFO] Instalacion de BDS cancelada (sin respuesta o "no"). Vuelve a
+    echo [INFO] Instalacion de BDS cancelada ^(sin respuesta o "no"^). Vuelve a
     echo         ejecutar este .bat cuando quieras instalarla.
     pause
     exit /b 2
@@ -147,7 +156,7 @@ if errorlevel 1 (
 )
 
 :: [3/3] Arrancar el wrapper
-"%RUN_PY%" server_wrapper.py
+"%RUN_PY%" %PY_FLAGS% server_wrapper.py
 
 echo.
 echo  El servidor se ha detenido.

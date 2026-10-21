@@ -76,6 +76,34 @@ corrida no dejó restos.
 - Frontend (bug 11): `npm run lint` sin avisos, `npm test` con 103 tests en
   verde (7 nuevos de sondeo) y `npm run build`, que regeneró `dist/`.
 
+## Segunda revisión: 8 hallazgos externos
+
+Una revisión posterior del mismo día sobre `790f7b2` reportó 3 P1 y 5 P2. Se
+verificaron todos contra el código; ninguno era falso, aunque varios tenían
+menos alcance del indicado. Dos se reprodujeron (rollback y ZIP64). Al ejecutar
+de verdad el lanzador corregido apareció un fallo previo más grave (fila 9).
+
+| # | Hallazgo | Verificación | Corrección |
+|---|---|---|---|
+| 1 | Otra GUI recuperaba una operación en curso | Sin exclusión entre GUIs de la misma instalación (el puerto avanza). El recovery de arranque revertía un apply de BDS activo y también borraba el staging de un restore en curso; lo mismo el wrapper y la CLI. | `windows_process_guard.installation_operation` (mutex `BDS_Ops_<hash>`) envuelve aplicar/revertir BDS, el restore de GUI y CLI y los recoveries de GUI (`_recover_installation`) y wrapper. Con el mutex tomado el recovery se omite y el wrapper aborta. |
+| 2 | Recovery de un rollback interrumpido | Reproducido: tras morir en la fase 2, el resguardo quedaba sin el EXE, se seguía ofreciendo como v1 y un segundo rollback dejaba EXE-v2 con DLL-v1. | El manifiesto anota el staging (`{"entries", "staging"}`) y el recovery devuelve allí lo ya aplicado. Lee también el formato antiguo. |
+| 3 | La CLI comprobaba una sola vez | Un `input()` para elegir y otro para `SI` antes de restaurar, sin volver a mirar. Matiz: con BDS ya abierto, Windows suele impedir el swap. | Re-chequeo bajo el mutex de operación, retenido durante todo el restore. La GUI no arranca (sonda `installation_busy`) y el wrapper se niega. |
+| 4 | Junction en la raíz de packs | El backup recorría la raíz redirigida (la poda solo mira subcarpetas) y el restore no la validaba, al contrario que `worlds/`. Requiere una junction creada por el usuario. | `zip_safety.is_redirected_path`: esos packs no se restauran (el mundo sí, con aviso). El backup y el recovery saltan raíces redirigidas. |
+| 5 | ZIP64 con más de 2 GiB | Reproducido con Python 3.11.8. En un mundo de Bedrock los archivos pesan MB: casi inalcanzable. | `zinfo.file_size = byte_length` en el escritor del snapshot. |
+| 6 | Guardado parcial de la programación | Contradecía el contrato; la GUI siempre envía todo, así que solo afectaba a la API. | `schedule_config.save` combina con lo guardado bajo el mismo lock. |
+| 7 | Flag del backup inicial leído una vez | Código de este mismo día: con un stop en los 1-2 s previos a leer `wrapper_started`, la espera volvía a ser fija. | `_wait_server_stopped` sondea mientras `events_alive` sea falso o dure el backup inicial; `_apply_event` fija el flag antes de `events_alive`. |
+| 8 | El lanzador del ZIP no instalaba BDS | La rama de `runtime\python.exe` lanzaba el wrapper y salía. | La rama fija `RUN_PY` y `-B` y salta al mismo primer arranque. |
+| 9 | `iniciar_servidor.bat` nunca llegaba al wrapper (nuevo) | Ejecutado: «No se esperaba . en este momento.» tras `bds_first_run.py`, con runtime y con `.venv`. El `)` de `(sin respuesta o "no")` cerraba el bloque `if` (`1399d8a`, 2026-08-16). En `iniciar_gui_lan.bat` el mismo patrón hacía salir siempre el aviso de fallo del firewall. | Paréntesis escapados (`^(`/`^)`) y test que analiza todos los `.bat`. Verificado ejecutando el lanzador con un runtime real: éxito, cancelación (2) y error (1). |
+
+Validación de esta ronda: `tests/test_revision_2026-10-20_ronda2.py` (39 tests).
+Contra `790f7b2` fallan 23 de los 30 iniciales; los 7 restantes son controles
+(staging inseguro, guardado inválido, defaults y plazos que no deben cambiar).
+Los tests de los `.bat` detectan las tres líneas rotas de `790f7b2`. La espera
+de la fase 1 descuenta el plazo con el timeout de cada espera y no con el
+reloj: con un `wait` simulado que vuelve al instante, la primera versión del
+arreglo giraba 75 s reales. `test_fase1_sin_backup_inicial_espera_lo_de_siempre`
+fija ahora `events_alive`, porque sin el canal confirmado se sondea.
+
 ## Riesgo residual
 
 - Sin registro de packs, un addon propio con un nombre como los de Mojang no se
@@ -89,3 +117,11 @@ corrida no dejó restos.
 - En la 2.1.1 publicada, una pestaña que recuerda una actualización en curso
   sigue sondeando si el backend responde `idle`: la guía indica cerrarla. La
   corrección (bug 11) rige desde la versión que la incluya.
+- El mutex de operación no impide abrir dos GUIs de la misma instalación; solo
+  excluye las operaciones que reescriben archivos y los recoveries. Un recovery
+  omitido por estar ocupado se hace en el siguiente arranque.
+- Un archivo de más de 2 GiB en el modo tradicional ya usaba el tamaño real
+  (`ZipInfo.from_file`); el caso del snapshot se cubrió con un límite reducido,
+  no con un archivo real de ese tamaño.
+- El lanzador se probó en una carpeta temporal con `runtime\python.exe` real y
+  scripts de prueba en lugar de BDS; no se descargó BDS.
