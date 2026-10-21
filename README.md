@@ -1,23 +1,44 @@
 # Minecraft Bedrock Server Suite
 
-<div align="right">
-  <a href="#español">🇪🇸 Español</a> | <a href="#english">🇬🇧 English</a>
-</div>
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/4e0bc46f-a99d-45e8-9ea6-9fee207eb92d" alt="Panel Servidor de Bedrock Suite: consola en vivo, recursos y cómo invitar a tus amigos" width="900">
+</p>
+
+<p align="center">
+  <b>Panel web y backups en caliente para tu servidor de Minecraft Bedrock en Windows.</b><br>
+  <b>Web dashboard and zero-downtime backups for your Minecraft Bedrock server on Windows.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/latest/download/BedrockSuite-Windows-x64.zip"><b>⬇ Descargar para Windows · Download for Windows</b></a><br>
+  <a href="#español">🇪🇸 Español</a> · <a href="#english">🇬🇧 English</a>
+</p>
 
 <h2 id="español">🇪🇸 Español</h2>
 
-Suite de scripts en Python para manejar mi servidor de **Minecraft Bedrock** en Windows. La hice porque estaba cansado de tener que echar a mis amigos del servidor cada vez que quería hacer una copia de seguridad.
+La hice porque estaba cansado de echar a mis amigos del servidor cada vez que quería hacer una copia de seguridad. Ahora el servidor sigue abierto mientras se guarda el mundo.
 
-Usa los comandos nativos de Minecraft (`save hold`, `save query`, `save resume`) para hacer **backups en caliente** en segundo plano, sin apagar el servidor ni molestar a los jugadores.
+- **Backups sin echar a nadie.** Usa los comandos nativos de Minecraft (`save hold`, `save query`, `save resume`) para copiar el mundo en caliente: cada 30 minutos (configurable), al arrancar y al apagar. Restaurar es un clic; si algo falla a mitad, vuelve al mundo anterior.
+- **Todo desde el navegador.** Iniciar y detener, consola en vivo, jugadores (permisos, allowlist, kick/ban), propiedades del servidor, programación, addons y una tarjeta con tu IP para invitar amigos. Sin editar archivos.
+- **Listo con doble clic.** El ZIP trae Python incluido: lo descomprimes, abres `iniciar_gui.bat` y el asistente descarga el servidor oficial de Mojang.
+- **Actualizar sin miedo.** El servidor de Mojang y la propia suite se actualizan con backup previo y vuelven a la versión anterior si algo sale mal.
+- **A tu gusto.** Tema claro u oscuro, tu propio fondo con efecto de vidrio y la carpeta de backups que prefieras.
+- **Seguro por defecto.** Solo responde en tu PC; abrirlo a la red de casa es opcional.
+
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/ecb6589c-0fd1-4ae7-82b7-b17fd16a8695" alt="Pestaña Backups: historial de copias y carpeta donde se guardan"></td>
+    <td><img src="https://github.com/user-attachments/assets/7ebbc7ad-b317-45ce-8cc7-0e01813639b3" alt="Pestaña Jugadores: jugadores en línea, permisos y allowlist"></td>
+  </tr>
+  <tr>
+    <td align="center">Backups y la carpeta donde se guardan</td>
+    <td align="center">Jugadores, permisos y allowlist</td>
+  </tr>
+</table>
+
+<sub>Fondos elegidos en <b>Personalizar</b>: capturas propias del mapa <a href="https://www.curseforge.com/minecraft-bedrock/maps/stonehill-castle-medieval-castle"><i>Stonehill Castle</i></a> de TryzzMC / FALL Studios, con el shader <a href="https://www.curseforge.com/minecraft-bedrock/texture-packs/revolution-vibrant-visual"><i>Revolution Vibrant Visuals</i></a> de Aleeee sobre los Gráficos vibrantes de Minecraft. Los datos del panel son de ejemplo. Proyecto no oficial: no está aprobado por Mojang ni Microsoft ni asociado con ellos.</sub>
 
 > 💡 **Nota**: todo este proyecto fue hecho con ayuda de herramientas de IA generativa, usadas como copiloto para el código, los tests y la documentación.
-
-### Versión de la suite
-
-La versión común de backend e interfaz se define en `version.json` y aparece en
-**Más acciones → Acerca de**. Es independiente de la versión de BDS que muestra
-el dashboard. Cambios por versión: [CHANGELOG.md](CHANGELOG.md).
-Para preparar la siguiente entrega: [guía de versionado](docs/VERSIONADO.md).
 
 ### Dos formas de usarlo
 
@@ -154,6 +175,13 @@ Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arr
 
 En una instalación nueva la GUI muestra un **asistente de 3 pasos** (descarga de BDS, creación del mundo y configuración inicial) en vez del dashboard; cuando termina, aparece el panel normal.
 
+### Versión de la suite
+
+La versión común de backend e interfaz se define en `version.json` y aparece en
+**Más acciones → Acerca de**. Es independiente de la versión de BDS que muestra
+el dashboard. Cambios por versión: [CHANGELOG.md](CHANGELOG.md).
+Para preparar la siguiente entrega: [guía de versionado](docs/VERSIONADO.md).
+
 ### Tests
 
 ```bash
@@ -182,18 +210,33 @@ Distribuido bajo licencia MIT. Ver archivo `LICENSE`.
 
 <h2 id="english">🇬🇧 English</h2>
 
-A Python suite to manage my **Minecraft Bedrock** server on Windows. I mostly built it because I got annoyed having to kick my friends out of the server every time I wanted to run a backup.
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/9afdc24d-872c-4a74-96f3-7586b1ffa748" alt="Bedrock Suite Server panel: live console, resources and how to invite your friends" width="900">
+</p>
 
-It uses the native Minecraft commands (`save hold`, `save query`, `save resume`) to do **zero-downtime hot backups** in the background, without restarting the server or bothering players.
+I built it because I got tired of kicking my friends out of the server every time I wanted a backup. Now the server stays open while the world is saved.
+
+- **Backups without kicking anyone.** It uses the native Minecraft commands (`save hold`, `save query`, `save resume`) to copy the world while the server runs: every 30 minutes (configurable), on start and on stop. Restoring takes one click; if something fails halfway, the previous world comes back.
+- **Everything from your browser.** Start and stop, live console, players (permissions, allowlist, kick/ban), server properties, scheduling, addons and a card with your IP to invite friends. No file editing.
+- **Ready with a double-click.** The ZIP bundles Python: extract it, open `iniciar_gui.bat` and the setup wizard downloads the official server from Mojang.
+- **Update without fear.** Both Mojang's server and the suite itself update with a backup first and roll back if something goes wrong.
+- **Make it yours.** Light or dark theme, your own background with a glass effect, and the backup folder of your choice.
+- **Safe by default.** It only answers on your PC; opening it to your home network is optional.
+
+<table>
+  <tr>
+    <td><img src="https://github.com/user-attachments/assets/3099b0f3-9f4f-46d2-bc4e-8194f422d487" alt="Backups tab: backup history and the folder where they are saved"></td>
+    <td><img src="https://github.com/user-attachments/assets/89f6acea-ef5e-4d52-872e-aa6e175ea97a" alt="Players tab: online players, permissions and allowlist"></td>
+  </tr>
+  <tr>
+    <td align="center">Backups and where they are saved</td>
+    <td align="center">Players, permissions and allowlist</td>
+  </tr>
+</table>
+
+<sub>Backgrounds chosen in <b>Customize</b>: my own screenshots of the <a href="https://www.curseforge.com/minecraft-bedrock/maps/stonehill-castle-medieval-castle"><i>Stonehill Castle</i></a> map by TryzzMC / FALL Studios, with the <a href="https://www.curseforge.com/minecraft-bedrock/texture-packs/revolution-vibrant-visual"><i>Revolution Vibrant Visuals</i></a> shader by Aleeee on top of Minecraft's Vibrant Visuals. The dashboard data is sample data. Unofficial project: not approved by or associated with Mojang or Microsoft.</sub>
 
 > 💡 **Note**: this whole project was built with the help of generative AI tools, used as a copilot for the code, the tests and the documentation.
-
-### Suite version
-
-The backend and UI share the version defined in `version.json`, shown under
-**More actions → About**. It is independent of the BDS version displayed on the
-dashboard. Release history: [CHANGELOG.md](CHANGELOG.md).
-Maintenance instructions: [versioning guide](docs/VERSIONADO.md) (Spanish).
 
 ### Two ways to use it
 
@@ -326,6 +369,13 @@ If the initial startup backup still takes several minutes on 2.1.1 or later (on 
 5. **With GUI**: double-click `iniciar_gui.bat`. **Without GUI**: double-click `iniciar_servidor.bat`. Either one creates the `.venv` and installs dependencies only on the first run (and refreshes them when `requirements.txt` changes).
 
 On a fresh install the GUI shows a **3-step setup wizard** (BDS download, world creation and initial configuration) instead of the dashboard; the normal panel appears once it finishes.
+
+### Suite version
+
+The backend and UI share the version defined in `version.json`, shown under
+**More actions → About**. It is independent of the BDS version displayed on the
+dashboard. Release history: [CHANGELOG.md](CHANGELOG.md).
+Maintenance instructions: [versioning guide](docs/VERSIONADO.md) (Spanish).
 
 ### Tests
 
