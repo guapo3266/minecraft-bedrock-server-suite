@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Añade las carpetas de datos (worlds, resource_packs, behavior_packs) y la carpeta de
-    Backups_Minecraft a las exclusiones de Windows Defender para evitar lentitud y bloqueos
+    backups (Backups_Minecraft o la elegida en la GUI) a las exclusiones de Windows Defender para evitar lentitud y bloqueos
     por inspección en la nube (MAPS / Cloud Lookup) en el primer acceso a archivos.
     - Requiere elevación a Administrador (solicita UAC automáticamente).
     - Totalmente idempotente (solo añade rutas no presentes).
@@ -49,6 +49,24 @@ $WorldsDir         = Join-Path $BaseDir "worlds"
 $ResourcePacksDir  = Join-Path $BaseDir "resource_packs"
 $BehaviorPacksDir  = Join-Path $BaseDir "behavior_packs"
 $BackupsDir        = [System.IO.Path]::GetFullPath((Join-Path $BaseDir "..\..\Backups_Minecraft"))
+
+# Carpeta de backups elegida en la GUI (data\backup_location.json, misma regla
+# que backup_location.py): los backups van a <raiz>\<servidor> y se excluye
+# solo esa subcarpeta, nunca la raiz (podria ser una unidad entera). Una raiz
+# relativa cuelga de la instalacion.
+$LocationFile = Join-Path $BaseDir "data\backup_location.json"
+if (Test-Path -LiteralPath $LocationFile) {
+    try {
+        $location = Get-Content -LiteralPath $LocationFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $root = $location.backup_root
+        if ($root -is [string] -and $root.Trim()) {
+            if (-not [System.IO.Path]::IsPathRooted($root)) { $root = Join-Path $BaseDir $root }
+            $BackupsDir = [System.IO.Path]::GetFullPath((Join-Path $root $ServerName))
+        }
+    } catch {
+        Write-Host "[AVISO] No se pudo leer $LocationFile; se usa la carpeta de backups predeterminada." -ForegroundColor Yellow
+    }
+}
 
 $TargetPaths = @(
     $WorldsDir,

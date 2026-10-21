@@ -1,14 +1,17 @@
-import React, { useState, useRef, useId } from 'react';
+import React, { useState, useRef, useId, useEffect, useCallback, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import SpotlightCard from './reactbits/SpotlightCard';
 import AnimatedList from './reactbits/AnimatedList';
 import ConfirmButton from './hover/ConfirmButton';
 import Modal from './Modal';
-import { FolderArchive, RefreshCw, XCircle, Download, Trash2, ShieldCheck, CircleCheck as FilledCheckedIcon,
+import { FolderArchive, FolderCog, FolderOpen, RefreshCw, XCircle, Download, Trash2, ShieldCheck, CircleCheck as FilledCheckedIcon,
   TriangleAlert as TriangleAlertIcon, History as HistoryCircleIcon, EllipsisVertical as DotsVerticalIcon } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
 import useActionMenu from '../hooks/useActionMenu';
+
+// Se abre poco: fuera del bundle principal, igual que AddonsSidebar.
+const BackupLocationModal = lazy(() => import('./BackupLocationModal'));
 
 // Etiqueta del disparador SOLO para mostrar (la rotación usa mtime, no
 // parsea nombres): si el filename no matchea ninguno conocido, cae en
@@ -35,6 +38,32 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
   // un dropdown absoluto). menuRect = posicion calculada del boton "mas".
   const [menuFor, setMenuFor] = useState(null);
   const [menuRect, setMenuRect] = useState(null);
+  // Carpeta donde se guardan (GET /api/backups/location) y su diálogo.
+  const [location, setLocation] = useState(null);
+  const [locationOpen, setLocationOpen] = useState(false);
+
+  const fetchLocation = useCallback(async () => {
+    try {
+      const res = await fetch('/api/backups/location');
+      if (res.ok) setLocation(await res.json());
+    } catch {
+      // Sin la ruta el panel sigue siendo usable; se reintenta al refrescar.
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLocation();
+  }, [fetchLocation]);
+
+  const handleRefresh = () => {
+    onRefresh();
+    fetchLocation();
+  };
+
+  const handleLocationSaved = (next) => {
+    setLocation(next);
+    onRefresh();
+  };
 
   const hideMenu = () => {
     setMenuFor(null);
@@ -139,7 +168,7 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
           <h3>{t('backupsTitle')}</h3>
         </div>
         <button
-          onClick={onRefresh}
+          onClick={handleRefresh}
           aria-label={t('refresh')}
           className="rounded-md border border-white/10 bg-white/5 p-1.5 text-xs text-slate-400 hover:border-amber-500/50 hover:text-white transition"
         >
@@ -185,6 +214,44 @@ export default function BackupsSidebar({ backups = [], onRefresh, isRunning = fa
           />
         )}
       </div>
+
+      {location && (
+        <div className="mt-3 border-t border-white/10 pt-3">
+          <div className="flex items-start gap-2">
+            <FolderOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] text-slate-400">{t('backupDirLabel')}</p>
+              <p className="break-all font-mono text-[11px] text-slate-200">{location.backup_dir}</p>
+            </div>
+            <button
+              onClick={() => setLocationOpen(true)}
+              title={t('backupDirChange')}
+              aria-label={t('backupDirChange')}
+              className="shrink-0 rounded-md border border-white/10 bg-white/5 p-1.5 text-slate-400 transition hover:border-amber-500/50 hover:text-white"
+            >
+              <FolderCog className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {location.custom && !location.exists && (
+            <p className="mt-2 text-[11px] text-amber-300">{t('backupDirMissing')}</p>
+          )}
+          {location.setting_error && (
+            <p className="mt-2 text-[11px] text-amber-300">{t('backupDirSettingIgnored')}</p>
+          )}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {locationOpen && location && (
+          <Suspense fallback={null}>
+            <BackupLocationModal
+              location={location}
+              onClose={() => setLocationOpen(false)}
+              onSaved={handleLocationSaved}
+            />
+          </Suspense>
+        )}
+      </AnimatePresence>
 
       {/* Menu de acciones: PORTAL a document.body para que position:fixed sea
           relativo al viewport (un ancestro con transform lo desviaria). */}

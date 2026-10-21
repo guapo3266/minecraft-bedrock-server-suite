@@ -21,7 +21,36 @@ router = APIRouter()
 @router.get("/api/backups")
 async def list_backups(request: Request):
     _ensure_local(request.client.host if request.client else "")
-    return {"backups": backups_service.list_backup_info(auto_backup.BACKUP_DIR)}
+    return {"backups": backups_service.list_backup_info(auto_backup.get_backup_dir())}
+
+
+@router.get("/api/backups/location")
+async def get_backup_location(request: Request):
+    """Carpeta donde se guardan los backups de esta instalacion."""
+    _ensure_local(request.client.host if request.client else "")
+    return await run_in_threadpool(backups_service.backup_location_info)
+
+
+@router.post("/api/backups/location")
+async def set_backup_location(request: Request):
+    """Cambia la carpeta raiz de los backups ({"root": ruta | null}).
+
+    Errores con codigo estable en detail (la GUI los traduce): 400 si la ruta
+    no sirve, 409 busy/backup_in_progress. Crea la carpeta y prueba a
+    escribir en ella (puede ser un disco de red lento: threadpool).
+    """
+    _ensure_local(request.client.host if request.client else "")
+    _check_origin(request)
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cuerpo JSON invalido")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="cuerpo debe ser un objeto")
+    result = await run_in_threadpool(backups_service.set_backup_location, manager, body.get("root"))
+    nueva = result["location"]["backup_dir"]
+    manager.add_log(L(f"[GUI] Carpeta de backups: {nueva}", f"[GUI] Backup folder: {nueva}"), "backup")
+    return {"status": "ok", **result}
 
 
 @router.post("/api/restore")
@@ -83,7 +112,7 @@ async def download_backup(filename: str, request: Request):
         raise HTTPException(status_code=403, detail="Descarga cross-site rechazada")
     if not is_safe_backup_name(filename):
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
-    full = os.path.join(auto_backup.BACKUP_DIR, filename)
+    full = os.path.join(auto_backup.get_backup_dir(), filename)
     if not os.path.isfile(full):
         raise HTTPException(status_code=404, detail="Backup no encontrado")
     return FileResponse(full, filename=filename, media_type="application/zip")
@@ -105,7 +134,7 @@ async def delete_backup(filename: str, request: Request):
             status_code=409,
             detail="Hay un backup en curso; espera a que termine antes de eliminar",
         )
-    full = os.path.join(auto_backup.BACKUP_DIR, filename)
+    full = os.path.join(auto_backup.get_backup_dir(), filename)
     if not os.path.isfile(full):
         raise HTTPException(status_code=404, detail="Backup no encontrado")
     try:
@@ -127,7 +156,7 @@ async def verify_backup(filename: str, request: Request):
     _check_origin(request)
     if not is_safe_backup_name(filename):
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
-    full = os.path.join(auto_backup.BACKUP_DIR, filename)
+    full = os.path.join(auto_backup.get_backup_dir(), filename)
     if not os.path.isfile(full):
         raise HTTPException(status_code=404, detail="Backup no encontrado")
 

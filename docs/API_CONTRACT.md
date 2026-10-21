@@ -14,8 +14,8 @@ regresiones: los refactors no cambian rutas, códigos, respuestas ni protocolo W
 
 **Guarda temprana (middleware, 2026-09-10):** `create_app()` instala un middleware HTTP que aplica ambos guards a **todo** `/api/*` ANTES del routing y de la validación del body. Sin él, un cliente externo podía recibir un `422` de pydantic (p. ej. `POST /api/command` sin body) y enumerar rutas/esquema sin pasar por los guards internos. Los endpoints conservan sus propios chequeos (defensa en profundidad) y el WS valida en el handshake (no pasa por middleware HTTP). Cobertura anti-drift: `tests/test_router_guards.py` (inventario OpenAPI + `403` en todos los POST/GET de API con cliente externo u Origin externo).
 
-Lectura con `_ensure_local` (además del middleware de `/api/*`): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/connectivity`, `GET /api/addons`, `GET /`, `GET /favicon.svg`.
-Endpoints con `_ensure_local` + `_check_origin`: `POST /api/command`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
+Lectura con `_ensure_local` (además del middleware de `/api/*`): `GET /api/status`, `GET /api/server_properties`, `GET /api/schedule`, `GET /api/players`, `GET /api/history/metrics`, `GET /api/history/logs`, `GET /api/history/sessions`, `GET /api/setup_status`, `GET /api/check_update`, `GET /api/backups`, `GET /api/backups/location`, `GET /api/connectivity`, `GET /api/addons`, `GET /`, `GET /favicon.svg`.
+Endpoints con `_ensure_local` + `_check_origin`: `POST /api/command`, `POST /api/server_properties`, `POST /api/schedule`, `POST /api/setup/install_bds`, `POST /api/setup/complete`, `POST /api/action/{action_name}`, `POST /api/restore`, `POST /api/backups/location`, `GET /api/backups/{filename}/download` (bloquea además `Sec-Fetch-Site: cross-site`), `POST /api/backups/{filename}/delete`, `POST /api/backups/{filename}/verify`, `WS /ws`.
 
 **Modo LAN opt-in (`GUI_ALLOW_LAN=1`, ver `server_gui_server.py`)**: ambos guards se relajan
 de forma controlada — S1 acepta también IPs privadas RFC1918/ULA (`_is_allowed_client_host`
@@ -222,8 +222,19 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 
 ### `GET /api/backups`
 - 200: `{"backups": [{"filename": "<str>", "size_mb": <float>, "date": "YYYY-MM-DD HH:MM:SS"}, ...]}` ordenado por mtime desc.
-- 200 `{"backups": []}` si no existe `auto_backup.BACKUP_DIR`.
+- 200 `{"backups": []}` si no existe la carpeta de backups (`auto_backup.get_backup_dir()`, que relee el ajuste de `GET /api/backups/location` en cada petición; lo mismo usan descarga, borrado y verificación).
 - Excluye nombres que contengan `_CORRUPTO`, `_EXCEDIDO`, `_CRASH` o `_crash` (misma capa que `auto_backup.rotate_backups`; restaurar un backup marcado siempre falla).
+
+### `GET /api/backups/location` (2026-10-20)
+- 200: `{"backup_dir": <str>, "root": <str>, "custom": <bool>, "portable": <bool>, "default_root": <str>, "default_backup_dir": <str>, "server_name": <str>, "exists": <bool>, "setting_error": <str|null>}`.
+- `backup_dir` = `root\<server_name>`: carpeta donde esta instalación escribe, lista y rota sus backups. Sin ajuste, `root` = `default_root` (`..\..\Backups_Minecraft\auto_backups`). `portable`: la raíz está dentro de la instalación (bajo `backups\`) y se guarda relativa. `setting_error`: el ajuste de `data/backup_location.json` se ignora (`unreadable_setting` o un código de validación de abajo) y rige la carpeta predeterminada.
+
+### `POST /api/backups/location` (2026-10-20)
+- Body: `{"root": "<ruta absoluta>"}`; `null`, `""` o la propia raíz predeterminada vuelven a la predeterminada.
+- Crea `root\<servidor>` y prueba a escribir en ella antes de guardar. El wrapper toma el cambio en su próximo backup (relee el ajuste); los backups existentes no se mueven.
+- 400 con `detail` = código estable (la GUI lo traduce): `invalid_path` (caracteres no válidos, `..`, `:` fuera de la unidad, nombres de dispositivo, punto/espacio final, prefijos `\\?\`/`\\.\`, tipo que no es texto), `not_absolute`, `too_long` (el ZIP superaría `MAX_PATH`), `inside_installation` (dentro de la instalación solo `backups\`; se comparan también las rutas resueltas, así que una junction no cuela los backups en `worlds\`), `contains_installation`, `not_a_directory`, `not_writable`. `"Cuerpo JSON invalido"` / `"cuerpo debe ser un objeto"`.
+- 409 `backup_in_progress` (`manager.backup_in_progress`) / `busy` (`op_lock` ocupado: restore, actualización, instalación o backup de la GUI).
+- 200: `{"status": "ok", "location": <igual que GET>, "previous_backup_dir": <str|null>, "left_behind": <int>}` (`left_behind`: backups listables que quedan en la carpeta anterior) + log.
 
 ### `GET /api/connectivity`
 - Solo `_ensure_local` (lectura). No bloquea por `Origin` (es GET de lectura) y corre fuera del event loop (threadpool) para no congelar WS.

@@ -7,6 +7,7 @@ import multiprocessing
 import shutil
 import re
 
+import backup_location
 import windows_process_guard as wpg
 from console_lang import L
 from zip_safety import CORRUPT_MARKERS
@@ -46,11 +47,10 @@ def get_world_name(base_dir=None):
 
 
 def _resolve_backup_dir(base_dir):
-    """Backups por instalacion: Backups_Minecraft/auto_backups/<servidor>."""
-    return os.path.abspath(os.path.join(
-        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
-        os.path.basename(os.path.normpath(base_dir)),
-    ))
+    """Backups por instalacion: <raiz>/<servidor>. La raiz es
+    Backups_Minecraft/auto_backups salvo que la GUI haya guardado otra
+    (backup_location, fuente unica con la CLI)."""
+    return backup_location.resolve_backup_dir(base_dir)
 
 
 WORLD_NAME = get_world_name()
@@ -64,6 +64,9 @@ BACKUP_DIR = _resolve_backup_dir(BASE_DIR)
 # valor pero != lo que dicen hoy las propiedades). Sin esto, get_world_dir()
 # trataba el global stale como un patch y devolvia el mundo EQUIVOCADO.
 _IMPORT_TIME_WORLD_DIR = WORLD_DIR
+# Misma instantanea para la carpeta de backups: la GUI puede cambiarla con el
+# wrapper en marcha y el global del import no debe tomarse por un parche.
+_IMPORT_TIME_BACKUP_DIR = BACKUP_DIR
 
 
 def get_world_dir(base_dir=None):
@@ -93,11 +96,16 @@ def get_world_parent_dir(base_dir=None):
 
 
 def get_backup_dir(base_dir=None):
-    """Resuelve el directorio de backups dinámicamente."""
+    """Resuelve el directorio de backups dinámicamente.
+
+    Misma regla que get_world_dir: un global distinto del valor de import es
+    un monkeypatch de tests; si no, se relee el ajuste de la carpeta, para que
+    el proximo backup vaya a la que se eligio en la GUI sin reiniciar nada.
+    """
     bdir = base_dir or BASE_DIR
     if bdir == BASE_DIR and "BACKUP_DIR" in globals():
         current_global = globals()["BACKUP_DIR"]
-        if current_global != _resolve_backup_dir(BASE_DIR):
+        if current_global != _IMPORT_TIME_BACKUP_DIR:
             return current_global
     return _resolve_backup_dir(bdir)
 

@@ -7,6 +7,16 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 
 ## [Sin publicar]
 
+### Añadido
+
+- La pestaña **Backups** muestra la carpeta donde se guardan y permite
+  cambiarla. Los backups van a `<carpeta elegida>\<nombre del servidor>`, así
+  dos servidores no mezclan su rotación. Dentro de la carpeta del servidor
+  solo se admite `backups\`, que viaja con la instalación si se copia a otro
+  disco o a un USB. Sin cambiarla todo sigue igual
+  (`..\..\Backups_Minecraft\auto_backups\<servidor>`); los backups existentes
+  no se mueven y `configurar_antivirus.bat` excluye la carpeta nueva.
+
 ### Corregido
 
 - Restaurar un backup ya no devuelve los packs que distribuye BDS (vanilla,

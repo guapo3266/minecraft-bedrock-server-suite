@@ -11,6 +11,7 @@ import time
 import zipfile
 
 import auto_backup
+import backup_location
 import windows_process_guard as wpg
 from fastapi import HTTPException
 from zip_safety import CORRUPT_MARKERS
@@ -95,3 +96,39 @@ def verify_zip(full):
     with zipfile.ZipFile(full, "r") as zf:
         bad = zf.testzip()
     return bad
+
+
+def backup_location_info():
+    """Carpeta de backups en uso, la predeterminada y el estado del ajuste."""
+    return backup_location.describe(auto_backup.BASE_DIR)
+
+
+def set_backup_location(manager, root):
+    """Guarda la carpeta raiz de los backups (None/"" = predeterminada).
+
+    Bajo op_lock y sin backup en curso: un backup de la GUI a medias o un
+    restore leyendo la carpeta vieja no deben ver el cambio. El wrapper lo
+    toma en su proximo backup (relee el ajuste). Los backups existentes no se
+    mueven: se informa cuantos quedan en la carpeta anterior.
+    """
+    if manager.backup_in_progress:
+        raise HTTPException(status_code=409, detail="backup_in_progress")
+    if not manager.op_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="busy")
+    try:
+        if manager.backup_in_progress:
+            raise HTTPException(status_code=409, detail="backup_in_progress")
+        previous = backup_location.resolve_backup_dir(auto_backup.BASE_DIR)
+        try:
+            backup_location.save_root(auto_backup.BASE_DIR, root)
+        except backup_location.InvalidBackupRoot as exc:
+            raise HTTPException(status_code=400, detail=exc.code) from exc
+        info = backup_location.describe(auto_backup.BASE_DIR)
+    finally:
+        manager.op_lock.release()
+    moved = os.path.normcase(previous) != os.path.normcase(info["backup_dir"])
+    return {
+        "location": info,
+        "previous_backup_dir": previous if moved else None,
+        "left_behind": len(_list_backup_files(previous)) if moved else 0,
+    }

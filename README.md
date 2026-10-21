@@ -108,7 +108,7 @@ Hasta 2.1.0, los backups con miles de archivos de packs tardaban minutos por la 
 Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arrancar por primera vez, tras clonar el repo o tras actualizar addons con miles de archivos):
 
 - **Causa probable**: Windows Defender con protección en la nube (MAPS) puede revisar la primera lectura de cada archivo recién descargado (~15 ms por archivo). En la segunda lectura ya son confiables.
-- **Solución**: Doble clic en `configurar_antivirus.bat` (añade las carpetas `worlds`, `resource_packs`, `behavior_packs` y `Backups_Minecraft` a las exclusiones de Defender).
+- **Solución**: Doble clic en `configurar_antivirus.bat` (añade las carpetas `worlds`, `resource_packs`, `behavior_packs` y la de backups (`Backups_Minecraft` o la elegida en la GUI) a las exclusiones de Defender).
 - **O desde PowerShell** (como administrador):
   ```powershell
   powershell -ExecutionPolicy Bypass -File tools\setup_defender_exclusions.ps1
@@ -125,7 +125,7 @@ Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arr
 - **La GUI no muestra jugadores**: las detecciones leen el log de BDS en inglés (`Player connected: ...`). No cambies el idioma del servidor; si Mojang cambia el formato, se pierden jugadores pero los backups en caliente siguen funcionando.
 - **No aparece un backup para restaurar**: los marcados `_CORRUPTO`, `_EXCEDIDO` o `_CRASH` se ocultan a propósito (misma lista en la GUI y en la CLI).
 - **La GUI responde `403 Acceso denegado: host no permitido`**: accediste por un nombre de host que la GUI no reconoce (protección anti DNS-rebinding). Usá `127.0.0.1`/`localhost`, o definí `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
-- **¿Dónde quedan los backups?**: fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`. Se conservan 15 recientes + 1 por día durante 7 días (los marcados, 7 días como evidencia).
+- **¿Dónde quedan los backups?**: por defecto fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`; la pestaña Backups muestra la carpeta en uso y permite cambiarla. Se conservan 15 recientes + 1 por día durante 7 días (los marcados, 7 días como evidencia).
 - **`Debes apagar el servidor antes de reestablecer un backup`**: la restauración exige BDS apagado; usá la GUI o `python restore_backup.py`.
 - **`level-name invalido` / `Ruta de mundo insegura`**: `level-name` debe ser un nombre de carpeta dentro de `worlds/` (por ejemplo, `Mi Mundo`), sin rutas, `..`, nombres de dispositivo ni alias de Windows. Los backups y restores rechazan mundos o carpetas `worlds/` redirigidos por enlaces/junctions.
 - **Descarga BDS rechazada por host o redirección**: solo se aceptan ZIPs por HTTPS desde `www.minecraft.net` o `minecraft.net`, también en cada redirección. Si Mojang cambia de dominio, será necesario actualizar la suite.
@@ -134,7 +134,8 @@ Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arr
 
 ### Backups y restauración (guía rápida)
 
-- **Dónde quedan**: fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`. Se conservan 15 recientes + 1 por día durante 7 días; los marcados (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`), 7 días como evidencia y nunca se ofrecen para restaurar.
+- **Dónde quedan**: por defecto fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`. Se conservan 15 recientes + 1 por día durante 7 días; los marcados (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`), 7 días como evidencia y nunca se ofrecen para restaurar.
+- **Cambiar la carpeta**: pestaña Backups → icono de carpeta junto a la ruta. Se elige una carpeta raíz con ruta completa (por ejemplo `D:\Backups Minecraft`) y los backups van a `<raíz>\<nombre-del-servidor>\`, así dos servidores no mezclan su rotación. Dentro de la carpeta del servidor solo se admite `backups\`, que se guarda relativa y viaja con la instalación si la copias a otro disco o a un USB. El ajuste vive en `data/backup_location.json`; el wrapper lo toma en su próximo backup, sin reiniciar. Los backups que ya existen no se mueven: la GUI dice cuántos quedan en la carpeta anterior. Si la carpeta está en un disco externo o de red desconectado, los backups fallan hasta que vuelva. Tras cambiarla, vuelve a ejecutar `configurar_antivirus.bat` si usas las exclusiones.
 - **Forzar un backup ahora**: botón "Backup" de la GUI o `backup` en la consola del wrapper.
 - **Restaurar (GUI)**: pestaña Backups → elegir el punto → [Restaurar]. Exige el servidor apagado; si algo falla a mitad del intercambio, se intenta recuperar el mundo anterior (rollback). Si Windows impide renombrar la carpeta, la recuperación por copia conserva el `.bak` para una recuperación exacta manual: no lo borres hasta revisar el mundo y los packs.
 - **Qué se restaura**: el mundo y los addons de `resource_packs/` y `behavior_packs/`. Los packs que trae BDS (vanilla, chemistry, editor, experimental…) se quedan en la versión instalada: un backup de otra versión de BDS los mezclaría con el ejecutable actual. La suite anota cuáles son al instalar o actualizar BDS (`data/bds_shipped_packs.json`); sin ese registro, los reconoce por el nombre. Si `resource_packs/`, `behavior_packs/` o la carpeta de un pack es un enlace o junction, esos packs no se respaldan ni se restauran (quedarían fuera de la instalación); el mundo sí.
@@ -280,7 +281,7 @@ Up to 2.1.0, backups with thousands of pack files took minutes because of the wa
 If the initial startup backup still takes several minutes on 2.1.1 or later (on a fresh install, after cloning the repo or after syncing thousands of addon files):
 
 - **Likely cause**: Windows Defender Cloud-delivered Protection (MAPS) may scan the first read of every newly downloaded file (~15 ms per file). On the second read the files are trusted.
-- **Fix**: Double-click `configurar_antivirus.bat` (adds `worlds`, `resource_packs`, `behavior_packs`, and `Backups_Minecraft` to Defender exclusions).
+- **Fix**: Double-click `configurar_antivirus.bat` (adds `worlds`, `resource_packs`, `behavior_packs`, and the backup folder (`Backups_Minecraft` or the one chosen in the GUI) to Defender exclusions).
 - **Or from PowerShell** (as administrator):
   ```powershell
   powershell -ExecutionPolicy Bypass -File tools\setup_defender_exclusions.ps1
@@ -297,7 +298,7 @@ If the initial startup backup still takes several minutes on 2.1.1 or later (on 
 - **The GUI shows no players**: detections read the BDS log in English (`Player connected: ...`). Do not change the server language; if Mojang changes the format, players are lost but hot backups keep working.
 - **A backup does not show up for restore**: entries marked `_CORRUPTO`, `_EXCEDIDO` or `_CRASH` are hidden on purpose (same list in the GUI and the CLI).
 - **The GUI answers `403 Acceso denegado: host no permitido`**: you browsed by a hostname the GUI does not know (anti DNS-rebinding protection). Use `127.0.0.1`/`localhost`, or set `GUI_ALLOWED_HOSTS=your-hostname` before starting.
-- **Where are the backups?**: outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`. The last 15 plus 1 daily for 7 days are kept (marked ones, 7 days as evidence).
+- **Where are the backups?**: by default outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`; the Backups tab shows the folder in use and lets you change it. The last 15 plus 1 daily for 7 days are kept (marked ones, 7 days as evidence).
 - **`Debes apagar el servidor antes de reestablecer un backup`**: restore requires BDS to be stopped; use the GUI or `python restore_backup.py`.
 - **`Invalid level-name` / `Unsafe world path`**: `level-name` must be a folder name inside `worlds/` (for example, `My World`), without paths, `..`, device names or Windows aliases. Backups and restores reject worlds or `worlds/` folders redirected by links/junctions.
 - **BDS download rejected due to a host or redirect**: ZIPs are accepted only over HTTPS from `www.minecraft.net` or `minecraft.net`, including every redirect. If Mojang changes domains, the suite will need an update.
@@ -306,7 +307,8 @@ If the initial startup backup still takes several minutes on 2.1.1 or later (on 
 
 ### Backups and restore (quick guide)
 
-- **Where they live**: outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`. The last 15 plus 1 daily for 7 days are kept; marked ones (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`) stay 7 days as evidence and are never offered for restore.
+- **Where they live**: by default outside the repo, in `..\..\Backups_Minecraft\auto_backups\<server-name>\`. The last 15 plus 1 daily for 7 days are kept; marked ones (`_CORRUPTO`/`_EXCEDIDO`/`_CRASH`) stay 7 days as evidence and are never offered for restore.
+- **Change the folder**: Backups tab → folder icon next to the path. Pick a root folder with a full path (for example `D:\Minecraft Backups`) and backups go to `<root>\<server-name>\`, so two servers never share their rotation. Inside the server folder only `backups\` is allowed; it is stored as a relative path and moves with the installation if you copy it to another drive or a USB stick. The setting lives in `data/backup_location.json`; the wrapper picks it up on its next backup, without a restart. Existing backups are not moved: the GUI tells you how many stay in the previous folder. If the folder is on an external or network drive that is disconnected, backups fail until it is back. After changing it, run `configurar_antivirus.bat` again if you use the exclusions.
 - **Force a backup now**: the GUI "Backup" button or `backup` in the wrapper console.
 - **Restore (GUI)**: Backups tab → pick the point → [Restore]. Requires the server to be off; if the swap fails midway, recovery of the previous world is attempted (rollback). If Windows prevents renaming the folder, recovery by copy keeps the `.bak` for exact manual recovery: keep it until you have checked the world and packs.
 - **What gets restored**: the world and the addons in `resource_packs/` and `behavior_packs/`. The packs that ship with BDS (vanilla, chemistry, editor, experimental…) stay at the installed version: a backup from another BDS version would mix them with the current executable. The suite records them when it installs or updates BDS (`data/bds_shipped_packs.json`); without that record, it recognizes them by name. If `resource_packs/`, `behavior_packs/` or a pack folder is a link or junction, those packs are neither backed up nor restored (they would land outside the installation); the world still is.

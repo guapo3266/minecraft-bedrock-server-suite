@@ -7,6 +7,7 @@ try:
 except ImportError:
     psutil = None  # H3: sin psutil no se puede probar BDS parado -> fail-closed
 
+import backup_location
 import restore_core
 import console_lang
 import server_properties
@@ -32,10 +33,8 @@ def _world_name(base_dir=None):
 
 
 def _resolve_backup_dir(base_dir):
-    return os.path.abspath(os.path.join(
-        base_dir, "..", "..", "Backups_Minecraft", "auto_backups",
-        os.path.basename(os.path.normpath(base_dir)),
-    ))
+    # Misma carpeta que la GUI y el wrapper (backup_location, fuente unica).
+    return backup_location.resolve_backup_dir(base_dir)
 
 
 WORLD_DIR = os.path.join(BASE_DIR, "worlds", _world_name())
@@ -45,6 +44,7 @@ BACKUP_DIR = _resolve_backup_dir(BASE_DIR)
 # tests (WORLD_DIR != este valor) de un WORLD_DIR stale si server.properties
 # cambio durante la sesion (misma heuristica H3 que auto_backup).
 _IMPORT_TIME_WORLD_DIR = WORLD_DIR
+_IMPORT_TIME_BACKUP_DIR = BACKUP_DIR
 # Marcadores canonicos centralizados en zip_safety (GUI y CLI coinciden)
 _CORRUPT_MARKERS = CORRUPT_MARKERS
 
@@ -69,7 +69,7 @@ def get_backup_dir(base_dir=None):
     bdir = base_dir or BASE_DIR
     if bdir == BASE_DIR and "BACKUP_DIR" in globals():
         current_global = globals()["BACKUP_DIR"]
-        if current_global != _resolve_backup_dir(BASE_DIR):
+        if current_global != _IMPORT_TIME_BACKUP_DIR:
             return current_global
     return _resolve_backup_dir(bdir)
 
@@ -156,12 +156,13 @@ def list_and_restore():
         input("\nPresiona Enter para salir...")
         return
 
-    if not os.path.exists(BACKUP_DIR):
-        print(f"[ERROR] No se encontro la carpeta de backups: {BACKUP_DIR}")
+    backup_dir = get_backup_dir()
+    if not os.path.exists(backup_dir):
+        print(f"[ERROR] No se encontro la carpeta de backups: {backup_dir}")
         input("\nPresiona Enter para salir...")
         return
 
-    backups = _list_backup_files(BACKUP_DIR)
+    backups = _list_backup_files(backup_dir)
     backups.sort(key=os.path.getmtime, reverse=True)  # Mas reciente primero
 
     if not backups:
