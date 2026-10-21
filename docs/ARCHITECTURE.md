@@ -99,7 +99,7 @@ del directorio de trabajo. El backend lanza `server_wrapper.py` y el wrapper
 lanza `backup_worker.py` con el mismo intérprete Python y los canales de
 entrada/salida correspondientes. Los backups se guardan por instalación en
 `<raíz>/<carpeta>`: la raíz es `../../Backups_Minecraft/auto_backups` salvo que
-la GUI guarde otra en `data/backup_location.json`. `backup_location.py` es la
+la GUI guarde otra en `data/backup_location.json`. `gui_backend/backup_location.py` es la
 fuente única que consumen `auto_backup.get_backup_dir` (wrapper y GUI, relee
 el ajuste en cada llamada) y la CLI `restore_backup`; dentro de la instalación
 solo admite una raíz bajo `backups/`, guardada relativa. Cada ZIP lleva el mundo y

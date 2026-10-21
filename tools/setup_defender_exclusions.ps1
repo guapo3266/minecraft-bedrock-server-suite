@@ -51,7 +51,7 @@ $BehaviorPacksDir  = Join-Path $BaseDir "behavior_packs"
 $BackupsDir        = [System.IO.Path]::GetFullPath((Join-Path $BaseDir "..\..\Backups_Minecraft"))
 
 # Carpeta de backups elegida en la GUI (data\backup_location.json, misma regla
-# que backup_location.py): los backups van a <raiz>\<servidor> y se excluye
+# que gui_backend\backup_location.py): los backups van a <raiz>\<servidor> y se excluye
 # solo esa subcarpeta, nunca la raiz (podria ser una unidad entera). Una raiz
 # relativa cuelga de la instalacion.
 $LocationFile = Join-Path $BaseDir "data\backup_location.json"

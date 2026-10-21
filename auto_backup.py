@@ -7,7 +7,7 @@ import multiprocessing
 import shutil
 import re
 
-import backup_location
+from gui_backend import backup_location
 import windows_process_guard as wpg
 from console_lang import L
 from zip_safety import CORRUPT_MARKERS

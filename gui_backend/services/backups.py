@@ -11,7 +11,7 @@ import time
 import zipfile
 
 import auto_backup
-import backup_location
+from gui_backend import backup_location
 import windows_process_guard as wpg
 from fastapi import HTTPException
 from zip_safety import CORRUPT_MARKERS

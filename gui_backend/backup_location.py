@@ -15,6 +15,11 @@ backup empaqueta. Esa raiz se guarda RELATIVA para que viaje con la carpeta
 
 Un ajuste ilegible o que ya no valida se ignora: se usa la carpeta
 predeterminada y describe() lo informa en setting_error.
+
+Vive en gui_backend/ aunque lo usen el wrapper y la CLI: las instalaciones
+2.1.x validan cada actualizacion con su propia lista de archivos raiz
+(suite_release.ROOT_FILES) y rechazan el ZIP entero si trae uno nuevo. Ver
+tests/test_paquete_release.py.
 """
 
 import json

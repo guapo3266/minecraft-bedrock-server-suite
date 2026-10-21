@@ -7,7 +7,7 @@ try:
 except ImportError:
     psutil = None  # H3: sin psutil no se puede probar BDS parado -> fail-closed
 
-import backup_location
+from gui_backend import backup_location
 import restore_core
 import console_lang
 import server_properties

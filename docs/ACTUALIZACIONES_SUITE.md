@@ -111,6 +111,14 @@ mundos, packs, backups, data, config y binarios BDS, incluso dentro de un manifi
 `server.properties.example` sí es una plantilla distribuible. Es independiente
 de `.gitignore`. En checkouts Git permite consultar/descargar, pero no instalar.
 
+La instalación valida el ZIP nuevo con **su** lista, no con la del paquete. Si
+una versión trae un archivo raíz o de `tools/` que la instalada no conoce, la
+actualización se rechaza entera. Por eso las listas siguen siendo las de 2.1.0
+y el código nuevo va en `gui_backend/` (como `gui_backend/backup_location.py`).
+`tests/test_paquete_release.py` lo comprueba y exige que el ZIP lleve todo
+módulo que importe el programa: el empaquetador descarta en silencio lo que la
+lista no acepta.
+
 Rechaza enlaces/junctions, rutas que escapen, ADS, dispositivos NTFS y nombres
 duplicados por mayúsculas. Límites: 512 MiB descargados; 1 GiB / 15 000 archivos
 sin comprimir. Comprueba espacio para staging, auxiliar y resguardo.

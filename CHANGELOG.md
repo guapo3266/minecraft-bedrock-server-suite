@@ -75,6 +75,8 @@ Mundos, propiedades, packs, backups y configuración quedan fuera del reemplazo.
 ### Documentación y mantenimiento
 
 - El README empieza con capturas de la GUI y un resumen de lo que hace la suite.
+- Un test comprueba que el ZIP lleve todos los módulos que importa el programa
+  y que una instalación 2.1.x pueda instalarlo.
 - Registro de la publicación de 2.1.1 (hash, procedencia y evidencia) en la
   guía de versionado.
 - Guía de actualizaciones: alcance real de la QA de 2.1.1 (no ejercitó el

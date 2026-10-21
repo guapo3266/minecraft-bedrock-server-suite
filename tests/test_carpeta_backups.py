@@ -14,7 +14,7 @@ import zipfile
 import pytest
 
 import auto_backup
-import backup_location as bl
+from gui_backend import backup_location as bl
 import restore_backup
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -357,7 +357,7 @@ def test_api_post_rechaza_con_otra_operacion_en_curso(api, tmp_path):
 
 # ── Anti-drift ────────────────────────────────────────────────────────────
 def _codigos_de_la_api():
-    with open(os.path.join(RAIZ, "backup_location.py"), encoding="utf-8") as fh:
+    with open(os.path.join(RAIZ, "gui_backend", "backup_location.py"), encoding="utf-8") as fh:
         propios = set(re.findall(r'InvalidBackupRoot\("([a-z_]+)"\)', fh.read()))
     with open(os.path.join(RAIZ, "gui_backend", "services", "backups.py"), encoding="utf-8") as fh:
         servicio = set(re.findall(r'detail="([a-z_]+)"', fh.read()))
