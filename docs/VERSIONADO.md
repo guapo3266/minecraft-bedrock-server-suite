@@ -27,6 +27,7 @@ El número se cambia al preparar una entrega, no por cada commit. La primera
 versión común fue 2.0.0 y conservó el número previamente declarado por el backend.
 La entrega 2.1.0 añadió el ZIP con Python incluido y el actualizador de la suite; la 2.1.1 es su primera corrección.
 La 2.2.0 añade la carpeta de backups configurable, por eso sube el número MENOR.
+La 2.2.1 corrige los 31 hallazgos de la revisión del 21 de octubre de 2026.
 Ver [descarga, seguridad y recuperación](ACTUALIZACIONES_SUITE.md).
 
 La [Release pública v2.1.0](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.0)
@@ -40,18 +41,18 @@ se publicó el 21 de octubre de 2026: su etiqueta pública identifica `0905c4b`
 y la local de TESTTEST `b83d172`. No mover ninguna etiqueta publicada para
 incluir commits posteriores de documentación o CI. Estos commits pueden
 conservar la versión 2.2.0 mientras no se prepare otro paquete; la siguiente
-corrección distribuible partiría de 2.2.1.
+entrega es 2.2.1.
 
 ## Preparar una entrega local
 
 En la raíz de **cada** repositorio, con el mismo número elegido:
 
 ```powershell
-python tools/set_version.py 2.2.0
+python tools/set_version.py 2.2.1
 ```
 
 Mover los cambios de `[Sin publicar]` a una sección como
-`## [2.2.0] - AAAA-MM-DD` en `CHANGELOG.md`, con la fecha real de preparación.
+`## [2.2.1] - AAAA-MM-DD` en `CHANGELOG.md`, con la fecha real de preparación.
 Documentar solo los cambios incluidos en ese árbol. Comprobar los manifiestos:
 
 ```powershell
@@ -69,8 +70,8 @@ commit aprobado de cada repositorio, con el árbol limpio:
 ```powershell
 git diff --check
 git status --short
-git commit -m "chore: preparar versión 2.2.0"
-git tag -a v2.2.0 -m "Versión 2.2.0 de Minecraft Bedrock Server Suite"
+git commit -m "chore: preparar versión 2.2.1"
+git tag -a v2.2.1 -m "Versión 2.2.1 de Minecraft Bedrock Server Suite"
 ```
 
 Seleccionar explícitamente los archivos que se incluirán antes del commit.

@@ -234,11 +234,10 @@ conserva su ubicación y sus reglas de retención habituales.
 
 El auxiliar se copia de la instalación actual al empezar cada actualización.
 Sus correcciones del 21 de octubre de 2026 (proxy, reanudar Minecraft y la
-ubicación de `gui.log`) rigen en las actualizaciones que parten de una versión
-que las incluye; la que instala esa versión todavía la hace el auxiliar
-anterior. Lo que vive en la GUI (archivar `recovery/` con `gui.log` abierto) y
-en `Recuperar_suite.bat` (diario terminado) rige en cuanto esa versión está
-instalada.
+ubicación de `gui.log`), incluidas en 2.2.1, rigen en las actualizaciones que
+parten de 2.2.1: la de 2.2.0 a 2.2.1 todavía la hace el auxiliar de 2.2.0. Lo
+que vive en la GUI (archivar `recovery/` con `gui.log` abierto) y en
+`Recuperar_suite.bat` (diario terminado) rige en cuanto 2.2.1 está instalada.
 
 Desde 2.2.0 quedan dos casos que la propia 2.2.0 no resuelve:
 
@@ -332,7 +331,7 @@ arranque. Usar una carpeta de salida **nueva y corta** en cada intento, fuera de
 una instalación real (rechaza una carpeta que ya tenga escenarios):
 
 ```powershell
-python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.2.0
+python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.2.1
 ```
 
 Genera `VERIFICACION.json` y logs por escenario. Descarga un Python anterior

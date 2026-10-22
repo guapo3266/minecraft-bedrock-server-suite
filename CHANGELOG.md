@@ -5,10 +5,21 @@ es independiente de la versión de Minecraft Bedrock Dedicated Server (BDS).
 Este historial empieza en 2.0.0; el desarrollo anterior se conserva en Git y en
 los informes de `docs/`, sin asignarle versiones retrospectivas.
 
-## [Sin publicar]
+## [2.2.1] - 2026-10-21
 
-Correcciones de la revisión del 21 de octubre de 2026 (31 hallazgos; detalle
-en [INFORME_FIXES_2026-10-21.md](docs/INFORME_FIXES_2026-10-21.md)).
+Correcciones sobre 2.2.0: los 31 hallazgos de la revisión del 21 de octubre de
+2026 (detalle en [INFORME_FIXES_2026-10-21.md](docs/INFORME_FIXES_2026-10-21.md)).
+Se instala desde **Más acciones → Actualizar la suite** (siempre con
+confirmación) o con el ZIP de la Release. Mundos, propiedades, packs, backups y
+configuración quedan fuera del reemplazo.
+
+**Si actualizas desde 2.2.0**: si la GUI se abrió sola al terminar la
+actualización anterior, ciérrala y ábrela con `iniciar_gui.bat` antes de
+actualizar; si no, la actualización se detiene al prepararse (sin tocar
+Minecraft). La actualización a 2.2.1 la hace todavía el auxiliar de 2.2.0: las
+correcciones del actualizador (proxy, reanudar Minecraft, `gui.log`) rigen a
+partir de la siguiente. Ver
+[qué corrección rige en cada actualización](docs/ACTUALIZACIONES_SUITE.md#qué-corrección-rige-en-cada-actualización).
 
 ### Corregido
 
@@ -91,6 +102,11 @@ en [INFORME_FIXES_2026-10-21.md](docs/INFORME_FIXES_2026-10-21.md)).
 
 - Registro de la publicación de 2.2.0 (hash, procedencia y evidencia), con la
   prueba de actualización real desde el ZIP publicado de 2.1.1.
+- Guía de actualizaciones: qué corrección rige en cada actualización y la salida
+  de los dos casos que la propia 2.2.0 no resuelve.
+- Tests: dos tests escribían en los datos de la instalación en la que se
+  ejecutaban (registro de jugadores y versión anterior de BDS);
+  `tests/conftest.py` los aísla.
 
 ## [2.2.0] - 2026-10-21
 
