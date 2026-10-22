@@ -1114,13 +1114,17 @@ def test_restart_fase2_espera_backup_final_y_arranca(monkeypatch):
     from fastapi.testclient import TestClient
 
     _reset_manager_state()
-    spawned = {"n": 0}
+    spawned = {"n": 0, "wrapper_ya_termino": None}
     monkeypatch.setattr(config, "SERVER_STOP_TIMEOUT_SEC", 2)
     monkeypatch.setattr(config, "WRAPPER_EXIT_TIMEOUT_SEC", 2)
     proc, fake_stdin = _fake_wrapper_proc()
 
     def fake_spawn():
         spawned["n"] += 1
+        # El wrapper nuevo solo puede lanzarse con el anterior ya terminado
+        # (el set() de wrapper_exit_event se limpia despues, en _launch_wrapper).
+        spawned["wrapper_ya_termino"] = (
+            gui.manager.wrapper_exit_event.is_set() and not gui.manager.is_running)
         return proc
 
     monkeypatch.setattr(supervisor, "_spawn_wrapper_process", fake_spawn)
@@ -1131,7 +1135,12 @@ def test_restart_fase2_espera_backup_final_y_arranca(monkeypatch):
     gui.manager.wrapper_exit_event.clear()
     gui.manager.server_stopped_event.clear()
 
-    # BDS muere a los 0.1s; el wrapper sigue vivo hasta los 0.35s (backup final).
+    # BDS muere a los 0.1s del `stop`; el wrapper sigue vivo hasta los 0.35s
+    # (backup final). Los plazos se cuentan desde que el `stop` llega al
+    # wrapper, no desde el inicio del test: con temporizadores armados antes de
+    # abrir el TestClient, un cliente lento (>0.3s) los dejaba vencidos y
+    # restart_wrapper veia el wrapper ya terminado, no escribia `stop` y
+    # relanzaba directo (fallo intermitente de la suite completa).
     def bds_muere():
         time.sleep(0.1)
         gui.manager.server_stopped_event.set()
@@ -1142,8 +1151,15 @@ def test_restart_fase2_espera_backup_final_y_arranca(monkeypatch):
         gui.manager.is_running = False
         gui.manager.wrapper_exit_event.set()
 
-    threading.Thread(target=bds_muere, daemon=True).start()
-    threading.Thread(target=wrapper_termina, daemon=True).start()
+    escribir = fake_stdin.write
+
+    def escribir_y_apagar(s):
+        escribir(s)
+        if s == "stop\n":
+            threading.Thread(target=bds_muere, daemon=True).start()
+            threading.Thread(target=wrapper_termina, daemon=True).start()
+
+    fake_stdin.write = escribir_y_apagar
     try:
         with TestClient(gui.app, client=("127.0.0.1", 50000)) as c:
             r = c.post("/api/action/restart")
@@ -1153,6 +1169,7 @@ def test_restart_fase2_espera_backup_final_y_arranca(monkeypatch):
                 time.sleep(0.05)
         assert spawned["n"] == 1, "el restart no lanzo el wrapper tras el backup final"
         assert "stop\n" in fake_stdin.lines
+        assert spawned["wrapper_ya_termino"], "se lanzo el wrapper nuevo antes de que terminara el anterior"
     finally:
         _reset_manager_state()
 

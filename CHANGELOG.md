@@ -5,6 +5,17 @@ es independiente de la versión de Minecraft Bedrock Dedicated Server (BDS).
 Este historial empieza en 2.0.0; el desarrollo anterior se conserva en Git y en
 los informes de `docs/`, sin asignarle versiones retrospectivas.
 
+## [Sin publicar]
+
+### Documentación y mantenimiento
+
+- Tests: `test_restart_fase2_espera_backup_final_y_arranca` fallaba de forma
+  intermitente en la suite completa. Armaba sus temporizadores de reloj antes
+  de abrir el cliente: un parón de más de 0,3 s los dejaba vencidos y el
+  reinicio veía el wrapper ya terminado, no enviaba `stop` y relanzaba directo.
+  Ahora los plazos se cuentan desde que el `stop` llega al wrapper. El código
+  de producción no cambia.
+
 ## [2.2.1] - 2026-10-21
 
 Correcciones sobre 2.2.0: los 31 hallazgos de la revisión del 21 de octubre de
