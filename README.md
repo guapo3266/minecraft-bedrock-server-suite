@@ -69,7 +69,7 @@ La consola aprovecha la altura disponible y permite **Expandir/Reducir** sin per
 - **No necesita Node.js**: el frontend viaja compilado en `gui_frontend/dist/`.
 - **Desde código fuente:** requiere **Python 3.10+**. El `.bat` crea un entorno virtual `.venv` aislado del Python de tu máquina e instala `requirements.txt` ahí la primera vez (nada se instala en el Python global). Si no se puede crear el `.venv`, usa el Python global.
 - Solo Windows: esta suite solo soporta Windows (el BDS oficial de Mojang existe para Windows y Linux, pero aquí solo se prueba/soporta Windows).
-- El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008). Modo LAN opt-in solo con `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, sin autenticación: solo para red doméstica de confianza). Además de la IP de origen, se valida el header `Host` (anti DNS-rebinding) y el `Origin` debe coincidir con el host de la propia GUI (anti CSRF entre dispositivos de la LAN). Si accedés por nombre de host (no por IP), definí `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
+- El servidor web escucha solo en `127.0.0.1` y rechaza conexiones no locales (HTTP 403 / WebSocket 1008). Modo LAN opt-in solo con `iniciar_gui_lan.bat` (`GUI_ALLOW_LAN=1`, sin autenticación: solo para red doméstica de confianza). Además de la IP de origen, se valida el header `Host` (anti DNS-rebinding) y el `Origin` debe coincidir con el host de la propia GUI (anti CSRF entre dispositivos de la LAN). Si accedes por nombre de host (no por IP), define `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
 
 **2. Sin GUI (solo consola)** — el wrapper clásico:
 
@@ -77,20 +77,20 @@ La consola aprovecha la altura disponible y permite **Expandir/Reducir** sin per
 iniciar_servidor.bat     ← doble clic y el servidor arranca con la consola
 ```
 
-Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, hace backups automáticos cada 30 minutos por defecto (configurable desde la GUI; más uno al arrancar y otro al apagar) y mantiene los últimos 15 backups. Para forzar un backup caliente al instante, escribí `backup` en la consola del wrapper. Si falta `bedrock_server.exe`, el `.bat` pregunta y lo descarga solo desde Mojang.
+Es el modo original: el wrapper lee la consola del servidor, detecta jugadores, hace backups automáticos cada 30 minutos por defecto (configurable desde la GUI; más uno al arrancar y otro al apagar) y mantiene los últimos 15 backups. Para forzar un backup caliente al instante, escribe `backup` en la consola del wrapper. Si falta `bedrock_server.exe`, el `.bat` pregunta y lo descarga solo desde Mojang.
 
-Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI y seguir usando los scripts de respaldo de siempre.
+Ambos modos usan el mismo wrapper y la misma carpeta: puedes arrancar con la GUI y seguir usando los scripts de respaldo de siempre.
 
 ### ¿Qué hace?
 
 - Backups automáticos en caliente sin molestar a los jugadores (por defecto cada 30 minutos).
 - Programación desde la GUI: cada cuánto, solo cuando hay alguien jugando, o a una hora fija todos los días (aunque el servidor esté apagado).
-- Watchdog opcional: si el servidor se cae solo, se re-levanta; también puede reiniciarse a una hora fija cada día (si ese día arrancó después de esa hora, no se reinicia).
+- Watchdog opcional: si el servidor se cae solo, se vuelve a iniciar; también puede reiniciarse a una hora fija cada día (si ese día arrancó después de esa hora, no se reinicia).
 - Gestión de jugadores: permisos (operator/member/visitor), allowlist y kick/ban desde la GUI, con registro de quién jugó y cuánto.
 - Historial persistente: gráficas de RAM/CPU/disco de las últimas 24 h, logs que sobreviven al reinicio de la GUI (marcados con un separador de sesión) y tiempo de juego por jugador.
 - Borra automáticamente los backups viejos (guarda los últimos 15 y 1 diario por una semana).
 - Backup al arrancar el servidor y otro al apagarlo.
-- Actualizador de BDS con marcha atrás: guardo la versión anterior en cada update y si la nueva rompe algo, volvés con un clic.
+- Actualizador de BDS con marcha atrás: guardo la versión anterior en cada actualización y, si la nueva rompe algo, vuelves con un clic.
 - Restauración fácil: desde la GUI (restaurar/verificar/borrar) o con la CLI interactiva `python restore_backup.py`. Los accesos directos `.bat` de esta instalación viven en la carpeta local `backups/` y no se distribuyen con el repo.
 - Script para abrir los puertos del firewall (`configurar_firewall.bat`; ejecútalo como administrador: sin permisos avisa y aborta en vez de fingir éxito).
 - Desde la GUI: consola de comandos en vivo, métricas, forzar backup, restaurar/verificar/borrar backups y una tarjeta con tu IP local/pública para invitar amigos.
@@ -124,7 +124,7 @@ Ambos modos usan el mismo wrapper y la misma carpeta: podés arrancar con la GUI
 
 ### Arranque inicial lento y Windows Defender
 
-Hasta 2.1.0, los backups con miles de archivos de packs tardaban minutos por la forma en que se leía cada archivo. Desde 2.1.1 está corregido: con ~12.000 archivos de packs, el empaquetado bajó de ~114 s a ~11 s en el equipo de pruebas (i3-1315U con NVMe). Actualizá la suite antes de buscar otra causa.
+Hasta 2.1.0, los backups con miles de archivos de packs tardaban minutos por la forma en que se leía cada archivo. Desde 2.1.1 está corregido: con ~12.000 archivos de packs, el empaquetado bajó de ~114 s a ~11 s en el equipo de pruebas (i3-1315U con NVMe). Actualiza la suite antes de buscar otra causa.
 
 Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arrancar por primera vez, tras clonar el repo o tras actualizar addons con miles de archivos):
 
@@ -139,15 +139,15 @@ Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arr
 
 ### Solución de problemas
 
-- **El backup inicial tarda varios minutos**: comprobá en **Más acciones → Acerca de** que la suite sea 2.1.1 o posterior; si ya lo es, aplicá las exclusiones de Windows Defender (sección anterior) o poné `backup-inicio=false` en `server.properties`.
+- **El backup inicial tarda varios minutos**: comprueba en **Más acciones → Acerca de** que la suite sea 2.1.1 o posterior; si ya lo es, aplica las exclusiones de Windows Defender (sección anterior) o pon `backup-inicio=false` en `server.properties`.
 - **Actualizar desde 2.1.0 termina en «Acceso denegado» o se queda en «Comprobando…»**: es un problema conocido del auxiliar de 2.1.0; no toca mundos ni configuración. La salida para cada caso está en [la guía de actualizaciones](docs/ACTUALIZACIONES_SUITE.md#problema-conocido-al-actualizar-desde-210).
-- **`409 Hay una instancia externa del servidor en ejecución`**: hay un wrapper o BDS de ESTA instalación corriendo por fuera de la GUI. Cerralo y reintentá; la sonda compara la ruta del ejecutable, así que un BDS de otra carpeta no bloquea.
-- **El puerto 8000 está ocupado**: la GUI salta sola al siguiente libre y abre el navegador ahí; para fijarlo, ejecutá `set GUI_PORT=8001` antes de arrancar. En modo LAN (`iniciar_gui_lan.bat`) no salta: la regla del firewall y la URL del móvil son de ese puerto, así que avisa y no arranca hasta que lo liberes o elijas otro con `set GUI_PORT`.
+- **`409 Hay una instancia externa del servidor en ejecución`**: hay un wrapper o BDS de ESTA instalación corriendo por fuera de la GUI. Ciérralo y reintenta; la sonda compara la ruta del ejecutable, así que un BDS de otra carpeta no bloquea.
+- **El puerto 8000 está ocupado**: la GUI salta sola al siguiente libre y abre el navegador ahí; para fijarlo, ejecuta `set GUI_PORT=8001` antes de arrancar. En modo LAN (`iniciar_gui_lan.bat`) no salta: la regla del firewall y la URL del móvil son de ese puerto, así que avisa y no arranca hasta que lo liberes o elijas otro con `set GUI_PORT`.
 - **La GUI no muestra jugadores**: las detecciones leen el log de BDS en inglés (`Player connected: ...`). No cambies el idioma del servidor; si Mojang cambia el formato, se pierden jugadores pero los backups en caliente siguen funcionando.
 - **No aparece un backup para restaurar**: los marcados `_CORRUPTO`, `_EXCEDIDO` o `_CRASH` se ocultan a propósito (misma lista en la GUI y en la CLI).
-- **La GUI responde `403 Acceso denegado: host no permitido`**: accediste por un nombre de host que la GUI no reconoce (protección anti DNS-rebinding). Usá `127.0.0.1`/`localhost`, o definí `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
+- **La GUI responde `403 Acceso denegado: host no permitido`**: accediste por un nombre de host que la GUI no reconoce (protección anti DNS-rebinding). Usa `127.0.0.1`/`localhost`, o define `GUI_ALLOWED_HOSTS=tu-nombre` antes de arrancar.
 - **¿Dónde quedan los backups?**: por defecto fuera del repo, en `..\..\Backups_Minecraft\auto_backups\<nombre-del-servidor>\`; la pestaña Backups muestra la carpeta en uso y permite cambiarla. Se conservan 15 recientes + 1 por día durante 7 días (los marcados, 7 días como evidencia).
-- **`Debes apagar el servidor antes de reestablecer un backup`**: la restauración exige BDS apagado; usá la GUI o `python restore_backup.py`.
+- **`Debes apagar el servidor antes de reestablecer un backup`**: la restauración exige BDS apagado; usa la GUI o `python restore_backup.py`.
 - **`level-name invalido` / `Ruta de mundo insegura`**: `level-name` debe ser un nombre de carpeta dentro de `worlds/` (por ejemplo, `Mi Mundo`), sin rutas, `..`, nombres de dispositivo ni alias de Windows. Los backups y restores rechazan mundos o carpetas `worlds/` redirigidos por enlaces/junctions.
 - **Descarga BDS rechazada por host o redirección**: solo se aceptan ZIPs por HTTPS desde `www.minecraft.net` o `minecraft.net`, también en cada redirección. Si Mojang cambia de dominio, será necesario actualizar la suite.
 - **Linux**: no soportado (el BDS de Mojang existe para Linux, pero esta suite solo se prueba en Windows).
@@ -162,15 +162,15 @@ Si con 2.1.1 o posterior el backup inicial sigue tardando varios minutos (al arr
 - **Qué se restaura**: el mundo y los addons de `resource_packs/` y `behavior_packs/`. Los packs que trae BDS (vanilla, chemistry, editor, experimental…) se quedan en la versión instalada: un backup de otra versión de BDS los mezclaría con el ejecutable actual. La suite anota cuáles son al instalar o actualizar BDS (`data/bds_shipped_packs.json`); sin ese registro, los reconoce por el nombre. Si `resource_packs/`, `behavior_packs/` o la carpeta de un pack es un enlace o junction, esos packs no se respaldan ni se restauran (quedarían fuera de la instalación); el mundo sí.
 - **Restaurar (CLI)**: `python restore_backup.py` → elegir número → escribir `SI`. Se niega mientras el servidor o su wrapper sigan en marcha, también durante el backup de cierre. Vuelve a comprobarlo después de que escribas `SI` y, mientras restaura, ni la GUI ni `iniciar_servidor.bat` pueden arrancar el servidor ni recuperar sus archivos como si fueran de una interrupción. Antes de tocar nada recupera restos de restauraciones interrumpidas.
 - **Verificar integridad**: `python tools\verify_backups.py` lee y descomprime cada ZIP entero (CRC y datos comprimidos), comprueba que tenga `level.dat` (sin él no es restaurable) y marca los malos automáticamente. Un ZIP que no puede leer (abierto por otro programa) lo avisa sin marcarlo y termina con código 2. Recomendado correrlo de vez en cuando; es lento con backups grandes porque los lee enteros.
-- **Ante un apagón a mitad de restauración**: en el próximo arranque (GUI o wrapper) los restos se limpian solos; si ves carpetas `.bak_huerfano_*`, son resguardos conservados a propósito (no se borran solos: revísalos y bórralos cuando confirmes que no los necesitás).
+- **Ante un apagón a mitad de restauración**: en el próximo arranque (GUI o wrapper) los restos se limpian solos; si ves carpetas `.bak_huerfano_*`, son resguardos conservados a propósito (no se borran solos: revísalos y bórralos cuando confirmes que no los necesitas).
 - **Ante una actualización BDS interrumpida**: la GUI intenta recuperar los binarios al arrancar. Si sigue habiendo errores, conserva las carpetas `bds_update_prev_*`: contienen el manifiesto y los originales pendientes de recuperar. Una `bds_update_prev_*` **sin** manifiesto es otra cosa: la actualización terminó, pero su versión anterior no pudo pasar a `data/bds_previous` (el log lo avisa); guarda esa versión para revisión manual y no se aplica sola.
 
 ### Para usarlo desde código fuente
 
 1. Necesitas Python 3.10+ instalado.
-2. Clonás el repo o descargás el zip.
-3. Copiás `server.properties.example` → `server.properties`.
-4. Tirás el `bedrock_server.exe` original (y sus DLLs) adentro (no se incluye por licencia de Mojang; también podés bajarlo con la opción "Actualización BDS" del menú de la GUI).
+2. Clona el repo o descarga el zip.
+3. Copia `server.properties.example` → `server.properties`.
+4. Copia el `bedrock_server.exe` original (y sus DLLs) a la carpeta (no se incluye por licencia de Mojang; también puedes descargarlo con la opción "Actualización BDS" del menú de la GUI).
 5. **Con GUI**: doble clic en `iniciar_gui.bat`. **Sin GUI**: doble clic en `iniciar_servidor.bat`. Cualquiera de los dos crea `.venv` e instala las dependencias solo la primera vez (y las actualiza si `requirements.txt` cambia).
 
 En una instalación nueva la GUI muestra un **asistente de 3 pasos** (descarga de BDS, creación del mundo y configuración inicial) en vez del dashboard; cuando termina, aparece el panel normal.
@@ -193,7 +193,7 @@ cd gui_frontend
 npm ci && npm run lint && npm test && npm run build   # frontend: lint (oxlint), tests (vitest) y rebuild del dist/
 ```
 
-La suite Python cubre property-based tests (Hypothesis) del `save query`, versiones, guard anti zip-slip y control de acceso local; inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback, disco lleno); programación + watchdog, jugadores, historial SQLite, rollback de BDS, inventario de addons, canal NDJSON, guards HTTP/WebSocket. Usá siempre el filtro `not e2e` si hay una instalación BDS en la carpeta. El detalle histórico vive en `docs/INFORME_*`; las instrucciones locales `AGENTS.md` no se distribuyen en el repo público.
+La suite Python cubre property-based tests (Hypothesis) del `save query`, versiones, guard anti zip-slip y control de acceso local; inyección de fallos de backups (cancelación, doble backup, snapshot incompleto, ZIP corrupto, rollback, disco lleno); programación + watchdog, jugadores, historial SQLite, rollback de BDS, inventario de addons, canal NDJSON, guards HTTP/WebSocket. Usa siempre el filtro `not e2e` si hay una instalación BDS en la carpeta. El detalle histórico vive en `docs/INFORME_*`; las instrucciones locales `AGENTS.md` no se distribuyen en el repo público.
 
 El QA opcional de navegador se ejecuta con `python gui_frontend/tests/appearance-browser-check.py` y requiere Playwright Python y Chrome. Sirve el `dist/` real con API/WS simulados: comprueba fondos, temas, teclado, navegación y reconexión, sin ejecutar BDS. La guía del frontend está en [gui_frontend/README.md](gui_frontend/README.md).
 
