@@ -80,7 +80,7 @@ sus correcciones se probaron con copias y sustitutos en carpetas temporales.
 Tras la primera corrida completa aparecieron archivos nuevos en el `data/` de
 TESTTEST. Un vigilante ad hoc (plugin de pytest, fuera del repo, que compara
 los archivos de datos de la instalación real antes y después de cada test)
-encontró dos tests responsables:
+encontró tres tests responsables:
 
 1. `test_backup_fixes.py::test_worker_lectura_snapshot_fallida_programa_reintento`
    ejecuta el worker real en otro proceso, con el mundo real, y los guards de
@@ -95,11 +95,19 @@ encontró dos tests responsables:
    test a `data/bds_previous` de TESTTEST y apartaba la versión anterior que
    hubiera. El test parchea ahora la constante, y un guard de sesión de
    `conftest.py` hace fallar a cualquier test que intente guardar ahí.
+3. `test_ronda_2026-09-25.py` (anti-spoofing del marcador «BDS stopped») conecta
+   un jugador falso `BDS stopped:12345` sin aislar `supervisor.KNOWN_PLAYERS_PATH`:
+   desde el 25 de septiembre ese jugador estaba en el `data/known_players.json`
+   de TESTTEST (y desde el 15 de octubre en el del checkout público). L8 añadió
+   una escritura más (la salida al cerrar la sesión). Hallado al validar el
+   repositorio público, con el vigilante ampliado a todo `data/`. Un fixture de
+   `conftest.py` aísla ahora el registro en todos los tests.
 
 Los archivos creados se retiraron de TESTTEST y quedaron en un resguardo fuera
 del repo. `data/bds_previous` solo contenía la metadata del test: si hubo una
-versión anterior real, ya se había perdido en corridas anteriores. Producción
-no ejecuta tests y no se vio afectada.
+versión anterior real, ya se había perdido en corridas anteriores, y
+`known_players.json` solo tenía el jugador falso. Producción no ejecuta tests y
+no se vio afectada.
 
 ## Validación
 
@@ -114,8 +122,10 @@ no ejecuta tests y no se vio afectada.
   fijan lo que debía conservarse (salida limpia sin pausa, `[OK]` con código 0,
   el proceso sin protección que muere, el diario pendiente que se sigue
   validando y el fixture fiel al analizador).
-- Suite completa sin e2e: 1259 aprobadas (2 e2e excluidas), con el vigilante de
-  escrituras en la instalación real sin registros. `ruff check .`: sin avisos.
+- Suite completa sin e2e: 1259 aprobadas (2 e2e excluidas). El vigilante (todo
+  `data/`, `worlds/` y `config/`, los archivos de la raíz y la carpeta de
+  backups real) no registró ninguna escritura de los tests. `ruff check .`:
+  sin avisos.
 - Frontend: `npm run lint` sin avisos y `npm test` con 125 tests (17 nuevos:
   `bds-update`, `players-command`, `setup-wizard` y el caso de tipo cruzado en
   `addons`). `npm run build` regeneró `dist/`. El aviso de Vite por el bundle de

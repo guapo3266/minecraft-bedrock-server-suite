@@ -62,6 +62,25 @@ def _eventos_wrapper_en_tmp(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _jugadores_conocidos_en_tmp(tmp_path, monkeypatch):
+    """data/known_players.json (registro de jugadores conocidos) es dato real.
+
+    `supervisor.record_player_event` lo escribe en cada conexion y, desde el
+    2026-10-21, tambien al cerrar una sesion del wrapper con jugadores dentro.
+    Sin aislarlo, el test anti-spoofing de la ronda 2026-09-25 dejaba un
+    jugador "BDS stopped:12345" en el registro de la instalacion. Los tests que
+    fijan su propia ruta (test_players_management) la parchean despues y ganan.
+    """
+    from gui_backend import supervisor
+
+    monkeypatch.setattr(
+        supervisor, "KNOWN_PLAYERS_PATH",
+        os.path.join(str(tmp_path), "known_players.json"),
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _estado_diario_del_wrapper_en_tmp(tmp_path, monkeypatch):
     """El backup diario del wrapper se anota en data/schedule_state_wrapper.json.
 
