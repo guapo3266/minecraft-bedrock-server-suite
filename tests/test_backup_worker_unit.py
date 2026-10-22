@@ -11,11 +11,19 @@ import sys
 import backup_worker as bw
 
 
+def _salida_restaurable(monkeypatch):
+    # _main() envuelve sys.stdout/stderr (proteger_salida_consola, 2026-10-21):
+    # el monkeypatch devuelve los de pytest al terminar el test.
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "stderr", sys.stderr)
+
+
 def _correr_main(monkeypatch, tmp_path, fake_create):
     snap = tmp_path / "snap.json"
     snap.write_text("[]", encoding="utf-8")
     marker = tmp_path / "cancel.mark"
     result = tmp_path / "result.json"
+    _salida_restaurable(monkeypatch)
     monkeypatch.setattr(sys, "argv",
                         ["backup_worker.py", str(snap), str(marker), str(result)])
     import auto_backup
@@ -80,6 +88,7 @@ def test_main_snapshot_ilegible_escribe_error_retryable(tmp_path, monkeypatch):
     traceback: el wrapper reintenta y el usuario ve el motivo."""
     marker = tmp_path / "m.mark"
     result = tmp_path / "r.json"
+    _salida_restaurable(monkeypatch)
     monkeypatch.setattr(sys, "argv", [
         "backup_worker.py", str(tmp_path / "no_existe.json"), str(marker), str(result),
     ])

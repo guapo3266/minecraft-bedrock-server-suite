@@ -16,12 +16,23 @@ backup empaqueta. Esa raiz se guarda RELATIVA para que viaje con la carpeta
 Un ajuste ilegible o que ya no valida se ignora: se usa la carpeta
 predeterminada y describe() lo informa en setting_error.
 
+La subcarpeta se nombra por la carpeta de la instalacion, asi que dos
+instalaciones con el mismo nombre bajo la misma raiz (C:\\Servers\\Survival\\
+Suite y C:\\Servers\\Creative\\Suite) caian en la misma carpeta: la rotacion
+mezclaba sus backups y la GUI de una ofrecia restaurar el mundo de la otra
+(2026-10-21). Ahora la carpeta tiene dueno (OWNER_FILE, lo escribe
+claim_backup_dir con el primer backup) y una instalacion que no es su duena usa
+<raiz>\\<servidor>-<id8>. La identidad de la instalacion vive en
+data/installation_id.json: sobrevive a mover la carpeta y una COPIA recibe una
+propia (ver _identity).
+
 Vive en gui_backend/ aunque lo usen el wrapper y la CLI: las instalaciones
 2.1.x validan cada actualizacion con su propia lista de archivos raiz
 (suite_release.ROOT_FILES) y rechazan el ZIP entero si trae uno nuevo. Ver
 tests/test_paquete_release.py.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -31,6 +42,10 @@ from zip_safety import _is_safe_zip_entry
 
 SETTING_KEY = "backup_root"
 INSIDE_ALLOWED_DIR = "backups"
+# Dueno de una carpeta de backups ({"id", "path"} de la instalacion). Sin el
+# sufijo .tmp ni .zip: la limpieza de huerfanos y la rotacion no lo tocan.
+OWNER_FILE = ".bedrock_suite_owner.json"
+_ID_RE = re.compile(r"[0-9a-f]{32}")
 
 # MAX_PATH de Windows sin rutas largas. Lo que el nombre de un backup (y su
 # .tmp) suma a la carpeta, sin contar el nombre del servidor:
@@ -155,9 +170,114 @@ def resolve_root(base_dir):
     return root or default_root(base_dir)
 
 
+def identity_path(base_dir):
+    return os.path.join(base_dir, "data", "installation_id.json")
+
+
+def _read_dict(path):
+    """JSON de objeto o None (ausente, ilegible o de otro tipo). Nunca lanza."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_dict(path, data):
+    """Escritura atomica best-effort: devuelve False si no se pudo."""
+    try:
+        suite_release.write_json(path, data)
+    except OSError:
+        return False
+    return True
+
+
+def _identity(base_dir, create):
+    """Id estable de la instalacion o None (sin identidad y create=False).
+
+    data/installation_id.json guarda {"id", "path"}. Si "path" no es la carpeta
+    actual y la carpeta original sigue llevando el MISMO id, esta es una copia
+    de una instalacion viva y necesita un id propio: si no, una copia del
+    servidor compartiria la carpeta de backups con su original, que es el caso
+    mas comun de dos instalaciones con el mismo nombre. Si la original ya no
+    lleva ese id, la instalacion se movio y lo conserva.
+    """
+    base = os.path.abspath(base_dir)
+    path = identity_path(base)
+    data = _read_dict(path) or {}
+    ident, saved = data.get("id"), data.get("path")
+    if isinstance(ident, str) and _ID_RE.fullmatch(ident) and isinstance(saved, str) and saved:
+        if _norm(saved) == _norm(base):
+            return ident
+        original = _read_dict(identity_path(saved))
+        if not (original and original.get("id") == ident):
+            if create:
+                _write_dict(path, {"id": ident, "path": base})
+            return ident
+    if not create:
+        return None
+    ident = os.urandom(16).hex()
+    return ident if _write_dict(path, {"id": ident, "path": base}) else None
+
+
+def _owned_by(base_dir, owner):
+    """True si el dueno anotado en una carpeta de backups es esta instalacion.
+
+    Coincide la ruta (tambien tras borrar data/) o el id (tambien tras mover la
+    carpeta de la instalacion).
+    """
+    base = os.path.abspath(base_dir)
+    path = owner.get("path")
+    if isinstance(path, str) and path and _norm(path) == _norm(base):
+        return True
+    ident = _identity(base, create=False)
+    return ident is not None and owner.get("id") == ident
+
+
+def _folder_for(base_dir, root):
+    """<raiz>\\<servidor>, o <raiz>\\<servidor>-<id8> si esa tiene otro dueno."""
+    name = server_name(base_dir)
+    primary = os.path.join(root, name)
+    owner = _read_dict(os.path.join(primary, OWNER_FILE))
+    if owner is None or _owned_by(base_dir, owner):
+        return primary
+    ident = _identity(base_dir, create=True)
+    # Sin poder escribir la identidad (data/ de solo lectura) queda el hash de
+    # la ruta: estable mientras la carpeta no se mueva.
+    suffix = ident[:8] if ident else hashlib.sha256(_norm(os.path.abspath(base_dir)).encode("utf-8")).hexdigest()[:8]
+    return os.path.join(root, f"{name}-{suffix}")
+
+
 def resolve_backup_dir(base_dir):
-    """Carpeta donde esta instalacion escribe, lista y rota sus backups."""
-    return os.path.join(resolve_root(base_dir), server_name(base_dir))
+    """Carpeta donde esta instalacion escribe, lista y rota sus backups.
+
+    <raiz>\\<servidor>, salvo que esa carpeta tenga otro dueno: entonces
+    <raiz>\\<servidor>-<id8> (ver el docstring del modulo).
+    """
+    return _folder_for(base_dir, resolve_root(base_dir))
+
+
+def claim_backup_dir(base_dir, backup_dir):
+    """Anota esta instalacion como duena de backup_dir (best-effort, nunca lanza).
+
+    Solo si backup_dir es la carpeta que resolve_backup_dir le asigna (un
+    BACKUP_DIR parcheado por tests no se reclama) y nadie mas la reclamo. Si
+    el dueno es esta misma instalacion con otra ruta o con otro id (se movio o
+    se borro data/), se actualiza.
+    """
+    if _norm(backup_dir) != _norm(resolve_backup_dir(base_dir)):
+        return
+    marker = os.path.join(backup_dir, OWNER_FILE)
+    owner = _read_dict(marker)
+    if owner is not None and not _owned_by(base_dir, owner):
+        return
+    ident = _identity(base_dir, create=True)
+    if ident is None:
+        return
+    wanted = {"id": ident, "path": os.path.abspath(base_dir)}
+    if owner != wanted:
+        _write_dict(marker, wanted)
 
 
 def describe(base_dir):
@@ -165,7 +285,7 @@ def describe(base_dir):
     root, error = _stored_root(base_dir)
     name = server_name(base_dir)
     fallback = default_root(base_dir)
-    backup_dir = os.path.join(root or fallback, name)
+    backup_dir = resolve_backup_dir(base_dir)
     return {
         "backup_dir": backup_dir,
         "root": root or fallback,
@@ -174,6 +294,8 @@ def describe(base_dir):
         "default_root": fallback,
         "default_backup_dir": os.path.join(fallback, name),
         "server_name": name,
+        # True si <raiz>\<servidor> es de otra instalacion con el mismo nombre
+        "shared_name": _norm(backup_dir) != _norm(os.path.join(root or fallback, name)),
         "exists": os.path.isdir(backup_dir),
         "setting_error": error,
     }
@@ -208,8 +330,13 @@ def save_root(base_dir, raw):
             root = None
     if root is None:
         suite_release.write_json(path, {SETTING_KEY: None})
-        return os.path.join(default_root(base_dir), server_name(base_dir))
-    target = _check_location(base_dir, root)
+        return resolve_backup_dir(base_dir)
+    _check_location(base_dir, root)
+    # La carpeta real puede llevar el sufijo -<id8> (otra instalacion con el
+    # mismo nombre ya es duena de <raiz>\<servidor>): se valida y prepara esa.
+    target = _folder_for(base_dir, root)
+    if len(target) + len(server_name(base_dir)) + _NAME_OVERHEAD > _PATH_MAX:
+        raise InvalidBackupRoot("too_long")
     _prepare(target)
     base = os.path.abspath(base_dir)
     stored = os.path.relpath(root, base) if _inside(root, base) else root

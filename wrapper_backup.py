@@ -137,7 +137,7 @@ def _force_kill_compress_process(proc):
                 return
             try:
                 import glob as _glob
-                for orphan in _glob.glob(os.path.join(auto_backup.get_backup_dir(), "*.tmp")):
+                for orphan in _glob.glob(os.path.join(_glob.escape(auto_backup.get_backup_dir()), "*.tmp")):
                     try:
                         os.remove(orphan)
                         print(L(f"[Wrapper] Limpieza: eliminado {os.path.basename(orphan)} tras kill.", f"[Wrapper] Cleanup: removed {os.path.basename(orphan)} after kill."))

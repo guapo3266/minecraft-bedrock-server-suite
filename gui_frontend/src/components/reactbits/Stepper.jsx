@@ -18,6 +18,9 @@ export default function Stepper({
   nextButtonText = 'Continue',
   completeButtonText = 'Complete',
   disableStepIndicators = false,
+  // Pasos a los que se puede saltar con los indicadores (el asistente inicial
+  // no deja saltar a un paso con condiciones previas sin cumplir).
+  canSelectStep = () => true,
   renderStepIndicator,
   ...rest
 }) {
@@ -77,7 +80,7 @@ export default function Stepper({
                 ) : (
                   <StepIndicator
                     step={stepNumber}
-                    disableStepIndicators={disableStepIndicators}
+                    disableStepIndicators={disableStepIndicators || !canSelectStep(stepNumber)}
                     currentStep={currentStep}
                     onClickStep={clicked => {
                       setDirection(clicked > currentStep ? 1 : -1);

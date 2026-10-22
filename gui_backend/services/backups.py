@@ -8,13 +8,12 @@ los emiten los endpoints/routers.
 import glob
 import os
 import time
-import zipfile
 
 import auto_backup
 from gui_backend import backup_location
 import windows_process_guard as wpg
 from fastapi import HTTPException
-from zip_safety import CORRUPT_MARKERS
+from zip_safety import CORRUPT_MARKERS, check_zip_integrity
 
 # Lista canonica compartida con la rotacion y la CLI (zip_safety, fuente
 # unica): lo que la GUI oculta para restaurar, la CLI tambien.
@@ -26,9 +25,10 @@ def _list_backup_files(backup_dir):
 
     Excluye los marcados como corruptos/excedidos (mismos criterios que
     auto_backup.rotate_backups): restaurar un backup corrupto siempre falla.
+    glob.escape: con "[...]" en la ruta de la carpeta la lista salia vacia.
     """
     return [
-        z for z in glob.glob(os.path.join(backup_dir, "*.zip"))
+        z for z in glob.glob(os.path.join(glob.escape(backup_dir), "*.zip"))
         if not any(marker in os.path.basename(z) for marker in _CORRUPT_MARKERS)
     ]
 
@@ -92,9 +92,13 @@ def restore_backup_under_lock(manager, filename):
 
 
 def verify_zip(full):
-    """testzip del backup: devuelve la entrada corrupta o None."""
-    with zipfile.ZipFile(full, "r") as zf:
-        bad = zf.testzip()
+    """Lee el backup entero: devuelve la entrada danada (con su causa) o None.
+
+    Fuente unica con tools/verify_backups.py (zip_safety.check_zip_integrity):
+    un deflate danado ya no escapa como 500. Un OSError (archivo bloqueado o
+    error de disco) se propaga: no prueba que el backup este roto.
+    """
+    bad, _names = check_zip_integrity(full)
     return bad
 
 

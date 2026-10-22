@@ -12,7 +12,7 @@ import { FIELDS } from '../propsFields';
 
 const inputClass = 'settings-input';
 
-export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
+export default function PropsModal({ isOpen, onClose, fields, serverRunning, onSaved = () => {} }) {
   const { t } = useI18n();
   const [values, setValues] = useState({});
   const [saving, setSaving] = useState(false);
@@ -41,6 +41,8 @@ export default function PropsModal({ isOpen, onClose, fields, serverRunning }) {
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setResult({ ok: true, message: t('propsSaved') });
+        // El puerto de "Cómo invitar" sale de server.properties (2026-10-21).
+        onSaved();
       } else {
         setResult({ ok: false, message: data.detail || res.statusText });
       }

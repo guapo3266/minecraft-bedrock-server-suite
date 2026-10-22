@@ -221,8 +221,12 @@ python addon_inventory_cli.py [--root DIR] [--json] [--compact]
   de sistema, que son los que pueden resolver sus referencias) y `--kind` al
   tipo. Ambos se aplican con `addon_inventory.filter_payload`.
   El resumen legible y el JSON cuentan la misma vista; las referencias, sus
-  archivos y los diagnósticos también respetan el tipo. El código de salida
-  sigue calculándose sobre la instalación completa.
+  archivos y los diagnósticos también respetan el tipo. Un diagnóstico de
+  referencia es del tipo de su archivo de referencias (`world_*_packs.json`):
+  `WORLD_REF_KIND_MISMATCH` aparece con el filtro de ese archivo aunque su
+  `pack` sea del otro tipo, junto a la referencia `kind_mismatch` (2026-10-21:
+  antes desaparecía mientras la referencia seguía a la vista). El código de
+  salida sigue calculándose sobre la instalación completa.
 * `--codes` imprime el catálogo de códigos (código, gravedad, fuente, parcial y
   mensaje en el idioma activo).
 * Cada pack se imprime con su **nombre y su descripción** (`header.description`

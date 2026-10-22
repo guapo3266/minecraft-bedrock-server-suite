@@ -175,9 +175,17 @@ sin comprimir. Comprueba espacio para staging, auxiliar y resguardo.
    reemplazar atómicamente por archivo y comprobar el árbol instalado.
 7. Arrancar la GUI con un token de relevo y comprobar API, versión, token, HTML
    y hashes de los assets JS/CSS servidos frente al manifiesto.
-   Solo después confirmar la entrega y volver a habilitar operaciones.
-8. Reiniciar Minecraft si antes estaba encendido. Un fallo de este reinicio se
-   informa por separado; no se presenta como éxito completo.
+   Solo después confirmar la entrega y volver a habilitar operaciones. Las
+   llamadas del auxiliar a la GUI (`127.0.0.1`) no usan el proxy del sistema ni
+   del entorno: con un proxy configurado, cada comprobación fallaba y la
+   actualización terminaba en rollback.
+8. Reiniciar Minecraft si antes estaba encendido. El plazo de arranque (180 s)
+   no corre mientras el wrapper hace su backup inicial
+   (`initial_backup_in_progress` en `/api/status`); se toleran hasta 10 fallos
+   seguidos de la API y el reinicio se da por fallido en cuanto el wrapper
+   termina. Tope total: 3780 s (el máximo de un backup, 3600 s, más el
+   arranque). Un fallo de este reinicio se informa por separado; no se presenta
+   como éxito completo.
 
 El SHA-256 vincula los bytes con los publicados por el repositorio mediante
 HTTPS y el digest de GitHub. No es una firma independiente del autor ni protege
@@ -194,6 +202,21 @@ también puede abrirse directamente. Usa el Python auxiliar, fuera del runtime
 reemplazado. Si el actualizador sigue activo, no abre otra GUI. Tras recuperar
 un apagón, revisar la GUI y arrancar Minecraft manualmente.
 
+Un diario terminado (`complete` o `rolled_back`) no deja nada que recuperar.
+`Recuperar_suite.bat` lo comprueba con el Python auxiliar antes de ejecutar el
+auxiliar: el de 2.2.0 o anterior validaba primero las rutas guardadas en el
+diario y fallaba si la carpeta de la suite se había movido o copiado, y los
+lanzadores se cerraban sin abrir nada. Si una recuperación falla de verdad,
+`iniciar_gui.bat` e `iniciar_servidor.bat` dejan el mensaje a la vista con una
+sola pausa (llaman a `Recuperar_suite.bat --sin-pausa`).
+
+La GUI que relanza el auxiliar escribe su salida en `data/suite_updates/gui.log`
+(se rota a `gui.log.1` al pasar de 5 MiB). Hasta 2.2.0 iba a
+`recovery/gui.log`, que la GUI mantiene abierto toda su vida: la siguiente
+actualización no podía archivar `recovery/` (WinError 32) y dejaba una copia
+`previous_*` a medias en cada intento. La GUI archiva ahora `recovery/` entrada
+por entrada y copia el log que siga abierto.
+
 `progress.json` solo es el aviso que muestra la ventana; `journal.json` decide la
 recuperación. Si el aviso queda en una fase en curso que ya nadie avanza (GUI
 cerrada a mitad, auxiliar que no arrancó o un último aviso que no se pudo
@@ -206,6 +229,30 @@ esos casos como en curso; ver
 Los resguardos anteriores quedan en `data/suite_updates/previous_*`. No se borran
 automáticamente. Guardan código/runtime; no duplican los mundos. El backup final
 conserva su ubicación y sus reglas de retención habituales.
+
+### Qué corrección rige en cada actualización
+
+El auxiliar se copia de la instalación actual al empezar cada actualización.
+Sus correcciones del 21 de octubre de 2026 (proxy, reanudar Minecraft y la
+ubicación de `gui.log`) rigen en las actualizaciones que parten de una versión
+que las incluye; la que instala esa versión todavía la hace el auxiliar
+anterior. Lo que vive en la GUI (archivar `recovery/` con `gui.log` abierto) y
+en `Recuperar_suite.bat` (diario terminado) rige en cuanto esa versión está
+instalada.
+
+Desde 2.2.0 quedan dos casos que la propia 2.2.0 no resuelve:
+
+- **La actualización falla al prepararse con un error de acceso a
+  `gui.log`**: la GUI de 2.2.0 se abrió sola al terminar la actualización
+  anterior y retiene `recovery/gui.log`. Cerrar la GUI, abrirla con
+  `iniciar_gui.bat` y volver a intentarlo. Minecraft no se detiene antes de ese
+  paso.
+- **Tras mover o copiar la carpeta de la suite, los lanzadores se cierran sin
+  abrir nada**: si `data/suite_updates/recovery/journal.json` dice
+  `"phase": "complete"` o `"rolled_back"`, renombrar la carpeta
+  `data/suite_updates/recovery` (por ejemplo a `recovery_terminada`) y volver a
+  abrir. Con cualquier otra fase, abrir `Recuperar_suite.bat` en la carpeta
+  original.
 
 ## Preparar una Release
 

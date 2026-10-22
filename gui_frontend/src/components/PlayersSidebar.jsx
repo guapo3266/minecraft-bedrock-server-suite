@@ -6,6 +6,7 @@ import ConfirmButton from './hover/ConfirmButton';
 import Modal from './Modal';
 import { Gamepad2, UserX, Ban, UserCog, ListPlus, ListX, TriangleAlert, XCircle, CircleCheck as FilledCheckedIcon } from 'lucide-react';
 import { useI18n } from '../i18n.jsx';
+import { resultadoComando } from '../commandLogic';
 
 const ONLINE_ACTIONS = [
   { id: 'kick', command: 'kick', icon: UserX, color: 'rose', titleKey: 'kick' }
@@ -68,13 +69,15 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
     };
   }, [result]);
 
+  // Un 4xx/5xx vuelve como {status: 'error'}: no se anuncia como enviado.
   const sendCommand = async (command) => {
     const res = await fetch('/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command })
     });
-    return res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({}));
+    return resultadoComando(res.ok, res.status, data);
   };
 
   // BDS aplica op/deop/allowlist escribiendo sus archivos al procesar el
@@ -90,15 +93,14 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
     setResult(null);
     try {
       const data = await sendCommand(`${action.command} "${player}"`);
-      if (data.status === 'offline') {
-        setResult({ ok: false, message: t('serverOff') });
-      } else if (data.status === 'error') {
-        // El backend no pudo escribir al stdin del wrapper: reportarlo como
-        // fallo (antes se mostraba "enviado" con check de exito).
-        setResult({ ok: false, message: t('playerActionFailed', { err: data.message || 'stdin' }) });
-      } else {
+      if (data.status === 'ok') {
         setResult({ ok: true, message: t('playerActionSent', { action: action.command, player }) });
         refreshSoon();
+      } else if (data.status === 'offline') {
+        setResult({ ok: false, message: t('serverOff') });
+      } else {
+        // stdin del wrapper roto o rechazo HTTP: es un fallo, nunca "enviado".
+        setResult({ ok: false, message: t('playerActionFailed', { err: data.message || data.status }) });
       }
     } catch (e) {
       setResult({ ok: false, message: t('playerActionFailed', { err: String(e) }) });
@@ -118,13 +120,13 @@ export default function PlayersSidebar({ players = [], playersData = null, isRun
         setResult({ ok: false, message: t('serverOff') });
         return;
       }
-      if (data.status === 'error') {
-        setResult({ ok: false, message: t('playerActionFailed', { err: data.message || 'stdin' }) });
+      if (data.status !== 'ok') {
+        setResult({ ok: false, message: t('playerActionFailed', { err: data.message || data.status }) });
         return;
       }
       const kickData = await sendCommand(`kick "${player}"`);
-      if (kickData.status === 'error') {
-        setResult({ ok: false, message: t('playerActionFailed', { err: kickData.message || 'stdin' }) });
+      if (kickData.status !== 'ok') {
+        setResult({ ok: false, message: t('playerActionFailed', { err: kickData.message || kickData.status }) });
         return;
       }
       setResult({ ok: true, message: t('playerBanned', { player }) });

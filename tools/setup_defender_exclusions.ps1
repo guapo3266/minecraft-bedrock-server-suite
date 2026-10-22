@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Configura exclusiones quirúrgicas en Windows Defender para el servidor de Minecraft Bedrock.
 
@@ -55,16 +55,41 @@ $BackupsDir        = [System.IO.Path]::GetFullPath((Join-Path $BaseDir "..\..\Ba
 # solo esa subcarpeta, nunca la raiz (podria ser una unidad entera). Una raiz
 # relativa cuelga de la instalacion.
 $LocationFile = Join-Path $BaseDir "data\backup_location.json"
+$BackupRoot = [System.IO.Path]::GetFullPath((Join-Path $BaseDir "..\..\Backups_Minecraft\auto_backups"))
 if (Test-Path -LiteralPath $LocationFile) {
     try {
         $location = Get-Content -LiteralPath $LocationFile -Raw -Encoding UTF8 | ConvertFrom-Json
         $root = $location.backup_root
         if ($root -is [string] -and $root.Trim()) {
             if (-not [System.IO.Path]::IsPathRooted($root)) { $root = Join-Path $BaseDir $root }
+            $BackupRoot = [System.IO.Path]::GetFullPath($root)
             $BackupsDir = [System.IO.Path]::GetFullPath((Join-Path $root $ServerName))
         }
     } catch {
         Write-Host "[AVISO] No se pudo leer $LocationFile; se usa la carpeta de backups predeterminada." -ForegroundColor Yellow
+    }
+}
+
+# Misma regla que backup_location.resolve_backup_dir (2026-10-21): si
+# <raiz>\<servidor> tiene otro dueno (otra instalacion con el mismo nombre de
+# carpeta), los backups de esta van a <raiz>\<servidor>-<id8>.
+$OwnerFile = Join-Path (Join-Path $BackupRoot $ServerName) ".bedrock_suite_owner.json"
+$IdentityFile = Join-Path $BaseDir "data\installation_id.json"
+if (Test-Path -LiteralPath $OwnerFile) {
+    try {
+        $owner = Get-Content -LiteralPath $OwnerFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $identity = $null
+        if (Test-Path -LiteralPath $IdentityFile) {
+            $identity = Get-Content -LiteralPath $IdentityFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        $ownPath = $owner.path -is [string] -and $owner.path -and
+            ([System.IO.Path]::GetFullPath($owner.path).TrimEnd('\') -ieq $BaseDir.TrimEnd('\'))
+        $ownId = $identity -and $identity.id -is [string] -and $identity.id -eq $owner.id
+        if (-not ($ownPath -or $ownId) -and $identity -and $identity.id -is [string] -and $identity.id.Length -ge 8) {
+            $BackupsDir = Join-Path $BackupRoot ("{0}-{1}" -f $ServerName, $identity.id.Substring(0, 8))
+        }
+    } catch {
+        Write-Host "[AVISO] No se pudo leer $OwnerFile; se excluye la carpeta $BackupsDir." -ForegroundColor Yellow
     }
 }
 
@@ -111,7 +136,8 @@ if (-not $defenderAvailable) {
     Write-Host "  Exclusiones > Agregar o quitar exclusiones > Carpeta." -ForegroundColor Gray
     Write-Host ""
     Read-Host "Presiona Enter para salir..."
-    exit
+    # 2 = no se configuro nada: configurar_antivirus.bat no debe anunciar [OK].
+    exit 2
 }
 
 # ═══════════════════════════════════════════════════════════════

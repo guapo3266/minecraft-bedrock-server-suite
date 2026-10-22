@@ -1,0 +1,349 @@
+{
+  "schema_version": 1,
+  "base_dir": "<instalacion>",
+  "complete": true,
+  "partial_reasons": [],
+  "active_world": "Alfa",
+  "supported": {
+    "manifest_format_versions": [
+      2
+    ],
+    "manifest_format_versions_not_analyzed": {
+      "1": "format_version 1 corresponde a skin packs (F1/A1); fuera del alcance de addons de mundo.",
+      "3": "format_version 3 esta en preview (F1/A3, N12); sus versiones son cadenas semver y el esquema puede cambiar."
+    },
+    "locations": [
+      "behavior_packs",
+      "resource_packs",
+      "system_behavior_packs",
+      "system_resource_packs",
+      "worlds/<mundo>/behavior_packs",
+      "worlds/<mundo>/resource_packs"
+    ],
+    "excluded_locations": [
+      "development_behavior_packs",
+      "development_resource_packs",
+      "world_templates"
+    ],
+    "documented_module_types": [
+      "resources",
+      "data",
+      "world_template",
+      "script"
+    ],
+    "world_reference_files": [
+      "world_behavior_packs.json",
+      "world_resource_packs.json"
+    ]
+  },
+  "scopes": [
+    {
+      "id": "compartido:behavior",
+      "origin": "compartido",
+      "kind": "behavior",
+      "root": "behavior_packs",
+      "exists": true
+    },
+    {
+      "id": "compartido:resource",
+      "origin": "compartido",
+      "kind": "resource",
+      "root": "resource_packs",
+      "exists": true
+    },
+    {
+      "id": "sistema:behavior",
+      "origin": "sistema",
+      "kind": "behavior",
+      "root": "system_behavior_packs",
+      "exists": false
+    },
+    {
+      "id": "sistema:resource",
+      "origin": "sistema",
+      "kind": "resource",
+      "root": "system_resource_packs",
+      "exists": false
+    },
+    {
+      "id": "mundo:Alfa:behavior",
+      "origin": "mundo",
+      "kind": "behavior",
+      "root": "worlds/Alfa/behavior_packs",
+      "exists": true
+    },
+    {
+      "id": "mundo:Alfa:resource",
+      "origin": "mundo",
+      "kind": "resource",
+      "root": "worlds/Alfa/resource_packs",
+      "exists": true
+    },
+    {
+      "id": "worlds",
+      "origin": "mundos",
+      "kind": null,
+      "root": "worlds",
+      "exists": true
+    }
+  ],
+  "packs": [
+    {
+      "id": "behavior_packs/BP",
+      "folder": "behavior_packs/BP",
+      "manifest": "behavior_packs/BP/manifest.json",
+      "kind": "behavior",
+      "origin": "compartido",
+      "world": null,
+      "scope": "compartido:behavior",
+      "status": "ok",
+      "unsupported_reason": null,
+      "name": "BP",
+      "description": "BP",
+      "format_version": 2,
+      "header_uuid": "aaaaaaaa-1111-4111-8111-111111111111",
+      "version": [
+        1,
+        0,
+        0
+      ],
+      "min_engine_version": [
+        1,
+        20,
+        0
+      ],
+      "pack_scope": null,
+      "json_tolerant": false,
+      "modules": [
+        {
+          "index": 0,
+          "type": "data",
+          "uuid": "aaaaaaaa-1111-4111-8111-111111111119",
+          "version": [
+            1,
+            0,
+            0
+          ],
+          "language": null,
+          "entry": null,
+          "description": null
+        }
+      ],
+      "pack_dependencies": [],
+      "script_dependencies": [],
+      "referenced_by_worlds": [
+        "Alfa"
+      ],
+      "dependency_resolution": [],
+      "scripting_compatibility": "no_determinada",
+      "diagnostic_codes": []
+    },
+    {
+      "id": "resource_packs/RP",
+      "folder": "resource_packs/RP",
+      "manifest": "resource_packs/RP/manifest.json",
+      "kind": "resource",
+      "origin": "compartido",
+      "world": null,
+      "scope": "compartido:resource",
+      "status": "ok",
+      "unsupported_reason": null,
+      "name": "RP",
+      "description": "RP",
+      "format_version": 2,
+      "header_uuid": "bbbbbbbb-2222-4222-8222-222222222222",
+      "version": [
+        1,
+        0,
+        0
+      ],
+      "min_engine_version": [
+        1,
+        20,
+        0
+      ],
+      "pack_scope": null,
+      "json_tolerant": false,
+      "modules": [
+        {
+          "index": 0,
+          "type": "resources",
+          "uuid": "bbbbbbbb-2222-4222-8222-222222222229",
+          "version": [
+            1,
+            0,
+            0
+          ],
+          "language": null,
+          "entry": null,
+          "description": null
+        }
+      ],
+      "pack_dependencies": [],
+      "script_dependencies": [],
+      "referenced_by_worlds": [
+        "Alfa"
+      ],
+      "dependency_resolution": [],
+      "scripting_compatibility": "no_determinada",
+      "diagnostic_codes": []
+    }
+  ],
+  "worlds": [
+    {
+      "name": "Alfa",
+      "path": "worlds/Alfa",
+      "active": true,
+      "has_level_dat": true,
+      "ref_files": [
+        {
+          "kind": "behavior",
+          "file": "worlds/Alfa/world_behavior_packs.json",
+          "status": "ok",
+          "references": 0
+        },
+        {
+          "kind": "resource",
+          "file": "worlds/Alfa/world_resource_packs.json",
+          "status": "ok",
+          "references": 2
+        }
+      ],
+      "references": [
+        {
+          "kind": "resource",
+          "file": "worlds/Alfa/world_resource_packs.json",
+          "index": 0,
+          "pack_id": "aaaaaaaa-1111-4111-8111-111111111111",
+          "version": [
+            1,
+            0,
+            0
+          ],
+          "status": "kind_mismatch",
+          "resolved_pack": null,
+          "candidates": [
+            {
+              "pack": "behavior_packs/BP",
+              "name": "BP",
+              "version": [
+                1,
+                0,
+                0
+              ],
+              "kind": "behavior",
+              "scope": "compartido:behavior"
+            }
+          ]
+        },
+        {
+          "kind": "resource",
+          "file": "worlds/Alfa/world_resource_packs.json",
+          "index": 1,
+          "pack_id": "bbbbbbbb-2222-4222-8222-222222222222",
+          "version": [
+            1,
+            0,
+            0
+          ],
+          "status": "resolved",
+          "resolved_pack": "resource_packs/RP",
+          "candidates": [
+            {
+              "pack": "resource_packs/RP",
+              "name": "RP",
+              "version": [
+                1,
+                0,
+                0
+              ],
+              "kind": "resource",
+              "scope": "compartido:resource"
+            }
+          ]
+        }
+      ],
+      "pack_dirs": {
+        "behavior": true,
+        "resource": true
+      },
+      "diagnostic_codes": []
+    }
+  ],
+  "not_analyzed": [],
+  "diagnostics": [
+    {
+      "code": "WORLD_REF_KIND_MISMATCH",
+      "severity": "aviso",
+      "source": "F3",
+      "determined": true,
+      "source_file": "worlds/Alfa/world_resource_packs.json",
+      "scope": "resource",
+      "pack": "behavior_packs/BP",
+      "world": "Alfa",
+      "field": "[0].pack_id",
+      "ref": {
+        "pack_id": "aaaaaaaa-1111-4111-8111-111111111111",
+        "version": [
+          1,
+          0,
+          0
+        ]
+      },
+      "message_es": "El mundo Alfa referencia aaaaaaaa-1111-4111-8111-111111111111 en world_resource_packs.json, pero el pack resuelto (behavior_packs/BP) es de tipo behavior: cada archivo deberia listar solo packs de su tipo (F-4).",
+      "message_en": "World Alfa references aaaaaaaa-1111-4111-8111-111111111111 in world_resource_packs.json, but the resolved pack (behavior_packs/BP) is of type behavior: each file should list only packs of its own type (F-4)."
+    },
+    {
+      "code": "SCOPE_ROOT_MISSING",
+      "severity": "info",
+      "source": "F2",
+      "determined": true,
+      "source_file": "system_behavior_packs",
+      "scope": "sistema:behavior",
+      "pack": null,
+      "world": null,
+      "field": null,
+      "ref": null,
+      "message_es": "La ubicacion documentada system_behavior_packs no existe en esta instalacion.",
+      "message_en": "The documented location system_behavior_packs does not exist in this installation."
+    },
+    {
+      "code": "SCOPE_ROOT_MISSING",
+      "severity": "info",
+      "source": "F2",
+      "determined": true,
+      "source_file": "system_resource_packs",
+      "scope": "sistema:resource",
+      "pack": null,
+      "world": null,
+      "field": null,
+      "ref": null,
+      "message_es": "La ubicacion documentada system_resource_packs no existe en esta instalacion.",
+      "message_en": "The documented location system_resource_packs does not exist in this installation."
+    }
+  ],
+  "summary": {
+    "packs_total": 2,
+    "packs_analizados": 2,
+    "packs_behavior": 1,
+    "packs_resource": 1,
+    "packs_compartidos": 2,
+    "packs_de_sistema": 0,
+    "packs_de_mundo": 0,
+    "packs_sin_analizar": 0,
+    "packs_ilegibles": 0,
+    "packs_invalidos": 0,
+    "mundos_total": 1,
+    "referencias_total": 2,
+    "referencias_resueltas": 1,
+    "referencias_sin_resolver": 0,
+    "referencias_ambiguas": 0,
+    "referencias_tipo_cruzado": 1,
+    "referencias_sin_version": 0,
+    "diagnosticos_total": 3,
+    "errores": 0,
+    "avisos": 1,
+    "informativos": 2,
+    "complete": true
+  }
+}

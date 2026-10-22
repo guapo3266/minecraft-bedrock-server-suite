@@ -44,7 +44,8 @@ def validate(cfg):
 
     try:
         interval = int(out["backup_interval_min"])
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: json.loads acepta Infinity y int(inf) daba un 500.
         return None, "backup_interval_min debe ser entero"
     if not (MIN_INTERVAL_MIN <= interval <= MAX_INTERVAL_MIN):
         return None, f"backup_interval_min debe estar entre {MIN_INTERVAL_MIN} y {MAX_INTERVAL_MIN}"

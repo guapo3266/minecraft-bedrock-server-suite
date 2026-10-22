@@ -77,6 +77,16 @@ async def handle_action(action_name: str, request: Request):
             # segundo podian pisarse por compartir nombre).
             if manager.backup_in_progress:
                 return {"status": "busy", "message": L("Ya hay un backup en curso", "A backup is already in progress")}
+            # Mismo guard que start/update/restore (2026-10-21): con un wrapper
+            # o BDS de esta instalacion vivos fuera de la GUI, el backup en frio
+            # copiaba con os.walk un LevelDB que se estaba escribiendo.
+            from gui_backend.services import external_probe
+            is_ext, _ = external_probe.detect_external_bds()
+            if is_ext:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Hay una instancia externa del servidor en ejecución",
+                )
             threading.Thread(target=lifecycle_service.cold_backup, args=("gui_manual",), daemon=True).start()
             return {"status": "backup_dispatched"}
         else:
@@ -129,6 +139,8 @@ async def handle_action(action_name: str, request: Request):
                         manager.add_log(L("[Actualizador BDS] Error en backup preventivo: no se pudo crear el archivo.", "[Actualizador BDS] Error in preventive backup: could not create the file."), "error")
                 except Exception as e:
                     manager.add_log(L(f"[Actualizador BDS] Error en backup preventivo: {e}", f"[Actualizador BDS] Error in preventive backup: {e}"), "error")
+                # El backup preventivo (y su rotacion) cambia la lista.
+                manager.note_backups_changed()
 
                 if not backup_ok:
                     manager.add_log(L("[Actualizador BDS] Actualización cancelada por fallo en el backup preventivo.", "[Actualizador BDS] Update cancelled due to preventive backup failure."), "error")

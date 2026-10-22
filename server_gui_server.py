@@ -179,25 +179,31 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def _puerto_libre(puerto: int, host: str = "127.0.0.1") -> bool:
-    """Comprueba si un puerto local está disponible para enlazar.
+def _enlazar(puerto: int, host: str = "127.0.0.1"):
+    """Socket ENLAZADO a host:puerto, o None si el puerto está ocupado.
 
-    Sin SO_REUSEADDR a propósito: uvicorn no lo usa, y en Windows ese flag
-    permite a un socket "hijackear" un puerto ya ocupado (falso positivo).
-    Si host es 0.0.0.0 comprueba en todas las interfaces. Un host con ":"
-    (IPv6 literal, p. ej. "::1") enlaza por AF_INET6: con AF_INET el bind
-    falla SIEMPRE (familia sin soporte) y la búsqueda de puerto no
-    encontraría jamás uno libre.
+    El socket se entrega abierto a uvicorn (server.run(sockets=[...])): entre
+    comprobar el puerto y escucharlo ya no hay una ventana en la que otra app
+    lo tome. Antes se comprobaba con un bind de prueba y uvicorn volvía a
+    enlazar; si perdía la carrera terminaba con SystemExit (no OSError) y el
+    reintento del __main__ nunca corría (2026-10-21).
+
+    Sin SO_REUSEADDR a propósito: en Windows ese flag permite a un socket
+    "hijackear" un puerto ya ocupado (falso positivo). Si host es 0.0.0.0
+    enlaza en todas las interfaces. Un host con ":" (IPv6 literal, p. ej.
+    "::1") enlaza por AF_INET6: con AF_INET el bind falla SIEMPRE (familia
+    sin soporte) y la búsqueda de puerto no encontraría jamás uno libre.
     """
     import socket
     bind_host = host if host not in ("", "localhost") else "127.0.0.1"
     family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
-    with socket.socket(family, socket.SOCK_STREAM) as s:
-        try:
-            s.bind((bind_host, puerto))
-            return True
-        except OSError:
-            return False
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        sock.bind((bind_host, puerto))
+    except OSError:
+        sock.close()
+        return None
+    return sock
 
 
 def _resolver_host_gui(allow_lan: bool, gui_host_env) -> str:
@@ -233,23 +239,42 @@ def _url_para_navegador(host: str, puerto: int) -> str:
 PUERTO_MAX = 65535
 
 
-def _resolver_puerto(puerto_inicial: int, host: str = "127.0.0.1") -> int:
-    """Primer puerto >= puerto_inicial libre para `host`, ACOTADO a 65535.
+def _resolver_puerto(puerto_inicial: int, host: str = "127.0.0.1", estricto: bool = False):
+    """(socket enlazado, puerto) en el primer puerto >= puerto_inicial libre
+    para `host`, ACOTADO a 65535.
 
     Antes el salto de puerto era un `while` sin tope: si nada llegaba a
     enlazar (host que el socket nunca acepta, rango agotado...), el bucle
     giraba infinito imprimiendo avisos — y superado 65535 el bind falla
     siempre. Ahora lanza RuntimeError con un mensaje claro al agotarse.
+
+    Con `estricto` (GUI_PORT_STRICT, lo fija iniciar_gui_lan.bat) solo vale
+    puerto_inicial: la regla de firewall y la URL que muestra el .bat son de
+    ese puerto, y saltar a otro dejaba la GUI inaccesible desde el móvil sin
+    ningún aviso (2026-10-21).
     """
     puerto = puerto_inicial
-    while puerto <= PUERTO_MAX:
-        if _puerto_libre(puerto, host):
-            return puerto
+    ultimo = puerto_inicial if estricto else PUERTO_MAX
+    while puerto <= ultimo:
+        sock = _enlazar(puerto, host)
+        if sock is not None:
+            return sock, puerto
+        if estricto:
+            break
         print(L(
             f"[AVISO] El puerto {puerto} ya está en uso. Probando el siguiente libre...",
             f"[WARNING] Port {puerto} is already in use. Trying the next free one...",
         ))
         puerto += 1
+    if estricto:
+        raise RuntimeError(L(
+            f"El puerto {puerto_inicial} está ocupado. En modo LAN la GUI no cambia de puerto: "
+            "la regla de firewall y la URL que muestra iniciar_gui_lan.bat son de ese puerto. "
+            "Cierra la aplicación que lo usa o elige otro con: set GUI_PORT=8001 antes de iniciar_gui_lan.bat.",
+            f"Port {puerto_inicial} is busy. In LAN mode the GUI does not switch ports: "
+            "the firewall rule and the URL shown by iniciar_gui_lan.bat are for that port. "
+            "Close the application using it or pick another one with: set GUI_PORT=8001 before iniciar_gui_lan.bat.",
+        ))
     raise RuntimeError(L(
         f"No hay puertos libres entre {puerto_inicial} y {PUERTO_MAX} para el host {host}.",
         f"No free ports between {puerto_inicial} and {PUERTO_MAX} for host {host}.",
@@ -275,10 +300,12 @@ if __name__ == "__main__":
     allow_lan = _allow_lan()
     gui_host = _resolver_host_gui(allow_lan, os.environ.get("GUI_HOST"))
 
-    # Si el puerto pedido está ocupado (p. ej. SillyTavern en 8000),
-    # saltar al siguiente puerto libre para no chocar con la otra app.
+    # Si el puerto pedido está ocupado (p. ej. SillyTavern en 8000), saltar al
+    # siguiente libre para no chocar con la otra app (en modo LAN estricto,
+    # no: ver _resolver_puerto). El socket queda enlazado y uvicorn lo usa.
+    estricto = os.environ.get("GUI_PORT_STRICT", "").strip().lower() in ("1", "true", "yes", "on")
     try:
-        puerto = _resolver_puerto(puerto, gui_host)
+        sock, puerto = _resolver_puerto(puerto, gui_host, estricto=estricto)
     except RuntimeError as exc:
         print(f"[ERROR] {exc}")
         raise SystemExit(1)
@@ -314,20 +341,6 @@ if __name__ == "__main__":
             webbrowser.open(open_url)
     except Exception:
         pass  # sin navegador disponible no es crítico
-    try:
-        server = uvicorn.Server(uvicorn.Config(app, host=gui_host, port=puerto, log_level="info"))
-        suite_update_service.configure_runtime(lambda: setattr(server, "should_exit", True), puerto)
-        server.run()
-    except OSError:
-        print(f"\n[AVISO] El puerto {puerto} se ocupó justo al abrir. Reintentando en el siguiente libre...")
-        time.sleep(2)
-        # Mismo criterio acotado que el salto inicial: sin esto, un puerto+1
-        # también ocupado moriría con traceback en vez de buscar el siguiente.
-        try:
-            puerto = _resolver_puerto(puerto + 1, gui_host)
-        except RuntimeError as exc:
-            print(f"[ERROR] {exc}")
-            raise SystemExit(1)
-        server = uvicorn.Server(uvicorn.Config(app, host=gui_host, port=puerto, log_level="info"))
-        suite_update_service.configure_runtime(lambda: setattr(server, "should_exit", True), puerto)
-        server.run()
+    server = uvicorn.Server(uvicorn.Config(app, host=gui_host, port=puerto, log_level="info"))
+    suite_update_service.configure_runtime(lambda: setattr(server, "should_exit", True), puerto)
+    server.run(sockets=[sock])

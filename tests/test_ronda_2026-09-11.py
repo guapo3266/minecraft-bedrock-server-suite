@@ -637,7 +637,9 @@ def test_command_stdin_sano_marca_flag_tras_entregar(monkeypatch, tmp_path):
 # ═══════════════════════════════════════════════════════════════════════
 def test_enable_beta_apis_resguardo_previo():
     src = Path(os.path.join(BASE_DIR, "tools", "enable_beta_apis_v2.py")).read_text(encoding="utf-8")
-    assert "shutil.copy2" in src
+    # Copia (no move); copyfile desde 2026-10-21 para que el resguardo lleve la
+    # fecha de su creacion, la que ordena la poda por archivo.
+    assert "shutil.copyfile(file_path, backup_path)" in src
     assert ".respaldo_" in src
     # el sufijo NO puede ser .bak_: recover_interrupted_restores renombra
     # todo *.bak_* de worlds/ como huerfano en el arranque del wrapper

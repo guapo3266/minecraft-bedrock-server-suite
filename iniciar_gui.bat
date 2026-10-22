@@ -1,16 +1,22 @@
 @echo off
+:: Variables locales: sin setlocal quedaban vivas en la ventana de cmd que
+:: lanzo este .bat (2026-10-21).
+setlocal
 chcp 65001 >nul
 title Minecraft Bedrock Server Suite
 color 0A
 :: Trabajar SIEMPRE sobre la carpeta de este .bat (rutas relativas a el)
 cd /d "%~dp0"
 if exist "data\suite_updates\recovery\journal.json" (
-    call "%~dp0Recuperar_suite.bat"
-    if errorlevel 1 exit /b 1
+    call "%~dp0Recuperar_suite.bat" --sin-pausa
+    if errorlevel 1 goto :recuperacion_fallida
 )
+:: ZIP de la Release: Python incluido. Una salida limpia (0) cierra la ventana
+:: sola, como en el relevo de una actualizacion; un error se queda a la vista.
 if exist "%~dp0runtime\python.exe" (
     "%~dp0runtime\python.exe" -B "%~dp0server_gui_server.py"
-    exit /b
+    if errorlevel 1 goto :gui_fallida
+    exit /b 0
 )
 cls
 echo ================================================================
@@ -146,6 +152,19 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 pause
 exit /b 0
+
+:gui_fallida
+echo.
+echo [ERROR] La GUI se cerro con un error. Revisa los mensajes de arriba.
+pause
+exit /b 1
+
+:recuperacion_fallida
+echo.
+echo [ERROR] No se pudo completar la recuperacion de una actualizacion de la suite.
+echo         Lee el mensaje de arriba; puedes reintentarla con Recuperar_suite.bat.
+pause
+exit /b 1
 
 :bootstrap_lock
 2>nul md "%LOCK_DIR%" && goto :eof

@@ -298,18 +298,48 @@ def _resolve_snapshot_path(rel_path):
 # (centralizadas para anti-drift; re-exportadas arriba).
 
 
+def _walk_error(err):
+    """onerror de los os.walk del backup: una carpeta ilegible aborta el backup.
+
+    Sin onerror, os.walk omite en silencio la carpeta que no puede listar
+    (permisos, ruta larga, OneDrive sin conexion) y el ZIP se publicaba como
+    valido sin ese contenido: con db/ ilegible quedaba un backup con level.dat
+    y sin chunks que el restore aceptaba (2026-10-21).
+    """
+    raise err
+
+
+def _zipinfo_for(full_path, arcname):
+    """ZipInfo con la fecha del archivo, acotada al rango que admite el ZIP.
+
+    from_file(strict_timestamps=True) lanzaba ValueError con una fecha anterior
+    a 1980 (addons con fechas puestas a 0) y abortaba TODOS los backups. Con
+    strict_timestamps=False la fecha se lleva a 1980-01-01; si localtime ni
+    siquiera la admite (antes de 1970 en Windows), se usa esa misma fecha.
+    """
+    try:
+        return zipfile.ZipInfo.from_file(full_path, arcname, strict_timestamps=False)
+    except (OSError, OverflowError, ValueError):
+        st = os.stat(full_path)  # un archivo que ya no existe sigue lanzando
+        zinfo = zipfile.ZipInfo(arcname, (1980, 1, 1, 0, 0, 0))
+        zinfo.file_size = st.st_size
+        zinfo.external_attr = (st.st_mode & 0xFFFF) << 16
+        return zinfo
+
+
 def _write_file_chunked(zipf, full_path, arcname, cancel_event, cancel_msg=None):
     """Escribe un archivo en el ZIP por chunks chequeando la cancelacion.
 
     zipf.write() comprime el archivo entero de una sola vez: con archivos
     grandes (db/*.ldb de GBs) la cancelacion cooperativa tardaba todo lo que
     durara la compresion de ese archivo (H8-2026-09-25). Por chunks el aborto
-    es casi inmediato. Preserva la fecha original del archivo. Cada lectura se
-    acota al tamano del archivo (_read_size), no al chunk maximo, y los
-    formatos ya comprimidos se guardan sin recomprimir (_compress_type_for).
+    es casi inmediato. Preserva la fecha original del archivo (ver
+    _zipinfo_for). Cada lectura se acota al tamano del archivo (_read_size),
+    no al chunk maximo, y los formatos ya comprimidos se guardan sin
+    recomprimir (_compress_type_for).
     """
     msg = cancel_msg or L("Backup cancelado durante compresion.", "Backup cancelled during compression.")
-    zinfo = zipfile.ZipInfo.from_file(full_path, arcname)
+    zinfo = _zipinfo_for(full_path, arcname)
     zinfo.compress_type = _compress_type_for(full_path)
     read_size = _read_size(zinfo.file_size)
     with open(full_path, "rb") as src, zipf.open(zinfo, "w") as out:
@@ -339,7 +369,7 @@ def _write_server_packs(zipf, total_bytes, cancel_event):
                     f"[!] {pack_dir} is a link or junction: it is not included in the backup."))
             continue
         prefix = _PACK_ZIP_PREFIX + pack_dir + "/"
-        for root, dirs, files in os.walk(src_dir):
+        for root, dirs, files in os.walk(src_dir, onerror=_walk_error):
             _poda_reparse_points(root, dirs)
             # Prefijo del directorio calculado UNA vez: un relpath por archivo
             # costaba ~1 s con ~12.000 archivos de packs. Mismo arcname que
@@ -411,9 +441,11 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         # parches de tests y releen lo demas (fix H3-2026-08-28).
         world_dir = get_world_dir()
         backup_dir = get_backup_dir()
-        # Limpiar .tmp huerfanos (solo con el lock adquirido)
+        # Limpiar .tmp huerfanos (solo con el lock adquirido). glob.escape: un
+        # "[...]" en la ruta de la carpeta es una clase de caracteres para glob
+        # y el patron no encontraba nada (2026-10-21).
         if os.path.exists(backup_dir):
-            for orphan_tmp in glob.glob(os.path.join(backup_dir, "*.tmp")):
+            for orphan_tmp in glob.glob(os.path.join(glob.escape(backup_dir), "*.tmp")):
                 try:
                     os.remove(orphan_tmp)
                     print(L(f"[*] Limpieza: Eliminado archivo huérfano {os.path.basename(orphan_tmp)}", f"[*] Cleanup: removed orphan file {os.path.basename(orphan_tmp)}"))
@@ -423,6 +455,12 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
             print(L(f"[ERROR] No se encontro la carpeta del mundo: {world_dir}", f"[ERROR] World folder not found: {world_dir}"))
             return False
 
+        # Primera vez en la carpeta desviada <servidor>-<id8> (ver backup_location).
+        nombre = backup_location.server_name(BASE_DIR)
+        if not os.path.isdir(backup_dir) and os.path.basename(backup_dir).startswith(nombre + "-"):
+            primary_dir = os.path.join(os.path.dirname(backup_dir), nombre)
+            print(L(f"[*] {primary_dir} es de otra instalacion con el mismo nombre de carpeta: los backups de esta van a {backup_dir}.",
+                    f"[*] {primary_dir} belongs to another installation with the same folder name: this one's backups go to {backup_dir}."))
         os.makedirs(backup_dir, exist_ok=True)
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -584,7 +622,15 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                     static_path = os.path.join(world_dir, static_name)
                     if os.path.exists(static_path):
                         if os.path.isdir(static_path):
-                            for root, dirs, files in os.walk(static_path):
+                            if _es_punto_reparse(static_path):
+                                # Igual que _write_server_packs y el modo
+                                # tradicional: os.walk no poda su propia raiz y
+                                # una junction metia contenido externo solo en
+                                # los backups en caliente (2026-10-21).
+                                print(L(f"[!] {static_name} del mundo es un enlace o junction: no se incluye en el backup.",
+                                        f"[!] The world's {static_name} is a link or junction: it is not included in the backup."))
+                                continue
+                            for root, dirs, files in os.walk(static_path, onerror=_walk_error):
                                 _poda_reparse_points(root, dirs)
                                 for static_file in files:
                                     full_f = os.path.join(root, static_file)
@@ -608,7 +654,7 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
                 total_bytes = _write_server_packs(zipf, total_bytes, cancel_event)
             else:
                 # Backup completo tradicional (usado al inicio, apagar o caída por snapshot incompleto)
-                for root, dirs, files in os.walk(world_dir):
+                for root, dirs, files in os.walk(world_dir, onerror=_walk_error):
                     _poda_reparse_points(root, dirs)
                     if _cancelled(cancel_event):
                         raise RuntimeError(L("Backup cancelado durante escaneo tradicional.", "Backup cancelled during traditional scan."))
@@ -669,6 +715,15 @@ def create_backup(trigger_name="auto", file_snapshot=None, cancel_event=None, wa
         # lanzaba (p.ej. antivirus bloqueando el archivo recien escrito), el
         # finally borraba un backup integro recien publicado (perdida de datos).
         success = True
+        # Con el primer backup publicado la carpeta queda a nombre de esta
+        # instalacion: dos instalaciones con el mismo nombre de carpeta ya no
+        # comparten backups (2026-10-21). Despues del exito, no antes: un
+        # backup que falla no debe reclamar nada. Sin propagar: el backup ya
+        # esta publicado y un error aqui lo daria por fallido.
+        try:
+            backup_location.claim_backup_dir(BASE_DIR, backup_dir)
+        except Exception:
+            pass
         size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
         print(L(f"[OK] Backup creado exitosamente: {zip_filename} ({size_mb:.2f} MB)", f"[OK] Backup created successfully: {zip_filename} ({size_mb:.2f} MB)"))
         # Rotacion ejecutada dentro del lock para evitar concurrencia
@@ -734,7 +789,9 @@ def rotate_backups(now=None):
         now = datetime.datetime.now()
     active_backup_dir = get_backup_dir()
     excluded_markers = CORRUPT_MARKERS
-    backups = glob.glob(os.path.join(active_backup_dir, "auto_backup_*.zip"))
+    # Sin glob.escape, una carpeta como "D:\Respaldos [HDD]" no devolvia
+    # ningun ZIP y la rotacion no borraba nunca: el disco se llenaba (2026-10-21).
+    backups = glob.glob(os.path.join(glob.escape(active_backup_dir), "auto_backup_*.zip"))
     if not backups:
         return
 

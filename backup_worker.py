@@ -22,7 +22,7 @@ import sys
 import time
 import json
 
-from console_lang import L
+from console_lang import L, proteger_salida_consola
 
 
 class _FileCancel:
@@ -63,6 +63,9 @@ def write_result(result_path, result):
 
 
 def _main():
+    # Hereda la tuberia del wrapper hacia la GUI: si la GUI muere, un print no
+    # debe abortar la compresion ni impedir escribir el resultado.
+    proteger_salida_consola()
     if len(sys.argv) < 4:
         print(
             L("Uso: python backup_worker.py <snapshot.json> <cancel_marker> <result.json>",

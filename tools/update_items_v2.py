@@ -240,15 +240,34 @@ system.runInterval(() => {
 """
 
 # 2. Update item JSONs to declare the custom components
+MAX_RESPALDOS = 3
+
+
 def _respaldo(path):
-    """Respaldo previo (copy2) del archivo que se va a reescribir.
+    """Respaldo previo del archivo que se va a reescribir.
 
     Si falla se aborta sin tocar el original (mismo criterio que
     enable_beta_apis_v2). El sufijo no es .bak_: el recuperador de
     restauraciones interrumpidas renombra *.bak_* de worlds/ como huerfano.
+    Se conservan los MAX_RESPALDOS mas recientes de ESE archivo (los de
+    worlds/ entran en cada backup del mundo) y nunca el recien creado.
     """
-    respaldo = path + ".respaldo_" + datetime.now().strftime("%Y%m%d_%H%M%S")
-    shutil.copy2(path, respaldo)
+    respaldo = path + ".respaldo_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + os.urandom(2).hex()
+    shutil.copyfile(path, respaldo)
+    carpeta, prefijo = os.path.dirname(path), os.path.basename(path) + ".respaldo_"
+    viejos = []
+    for nombre in os.listdir(carpeta):
+        ruta = os.path.join(carpeta, nombre)
+        if nombre.startswith(prefijo) and ruta != respaldo:
+            try:
+                viejos.append((os.path.getmtime(ruta), ruta))
+            except OSError:
+                continue
+    for _mtime, ruta in sorted(viejos, reverse=True)[MAX_RESPALDOS - 1:]:
+        try:
+            os.remove(ruta)
+        except OSError:
+            pass
     return respaldo
 
 
@@ -286,12 +305,21 @@ def update_json_file(file_path, modify_func):
             f"Updated {file_path} (backup: {os.path.basename(respaldo)})"))
     return True
 
+def _quitar_animacion_de_uso(components):
+    """Paso de la 1.0.5 (antes en update_items.py, ahora un alias de este
+    script): sin esto, ir de 1.0.4 a 1.0.6 con la v2 dejaba esos componentes."""
+    components.pop("minecraft:use_animation", None)
+    components.pop("minecraft:use_modifiers", None)
+
+
 def modify_activator(data):
     components = data["minecraft:item"]["components"]
+    _quitar_animacion_de_uso(components)
     components["minecraft:custom_components"] = ["custom:guardian_activator_behavior"]
 
 def modify_controller(data):
     components = data["minecraft:item"]["components"]
+    _quitar_animacion_de_uso(components)
     components["minecraft:custom_components"] = ["custom:guardian_controller_behavior"]
 
 # 3. Modify BP Manifest
@@ -332,14 +360,46 @@ def _ruta_mundo():
     return os.path.join(BASE_DIR, "worlds", nombre)
 
 
+def _actualizar_main_js(ruta):
+    """Reescribe scripts/main.js con respaldo previo; False si no se pudo.
+
+    Antes se sobrescribia sin respaldo (se perdian cambios hechos a mano) y,
+    sin la carpeta scripts/, moria con FileNotFoundError (2026-10-21).
+    """
+    if not os.path.isdir(os.path.dirname(ruta)):
+        print(L(f"[ERROR] No existe {os.path.dirname(ruta)}; main.js queda sin modificar.",
+                f"[ERROR] {os.path.dirname(ruta)} does not exist; main.js left unchanged."))
+        return False
+    if os.path.exists(ruta):
+        try:
+            with open(ruta, encoding="utf-8") as f:
+                if f.read() == main_js_content:
+                    print(L("main.js ya estaba actualizado", "main.js was already up to date"))
+                    return True
+            respaldo = _respaldo(ruta)
+        except (OSError, UnicodeDecodeError) as e:
+            print(L(f"[ERROR] No se pudo respaldar {ruta} ({e}); queda sin modificar.",
+                    f"[ERROR] Could not back up {ruta} ({e}); left unchanged."))
+            return False
+        print(L(f"Respaldo de main.js: {os.path.basename(respaldo)}", f"main.js backup: {os.path.basename(respaldo)}"))
+    write_text_atomic(ruta, main_js_content)
+    print(L("Actualizado main.js", "Updated main.js"))
+    return True
+
+
 def main():
     """Aplica las modificaciones (solo al ejecutar como script).
 
     Antes este modulo escribia packs/mundo al importarlo; ahora importar
     es inocuo y el trabajo vive aqui. Devuelve 0 si todo se aplico.
     """
-    write_text_atomic(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/scripts/main.js"), main_js_content)
-    print(L("Actualizado main.js", "Updated main.js"))
+    pack = os.path.join(BASE_DIR, "behavior_packs", "guardian_robot_BP")
+    if not os.path.isdir(pack):
+        print(L(f"[ERROR] No se encontró el addon guardian_robot_BP en {os.path.dirname(pack)}; no se modificó nada.",
+                f"[ERROR] The guardian_robot_BP add-on was not found in {os.path.dirname(pack)}; nothing was changed."))
+        return 1
+    if not _actualizar_main_js(os.path.join(pack, "scripts", "main.js")):
+        return 1
     mundo = _ruta_mundo()
     trabajos = [
         (os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_activator.json"), modify_activator),

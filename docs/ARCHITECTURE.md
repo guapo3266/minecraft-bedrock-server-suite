@@ -440,7 +440,13 @@ vía `manager.add_log`.
 - Puerto `GUI_PORT` (default 8000), salto al siguiente libre ACOTADO a 65535
   (`_resolver_puerto`: avisa una vez por puerto saltado y lanza `RuntimeError`
   al agotarse el rango — el `while` histórico era infinito si nada llegaba a
-  enlazar). `_puerto_libre` soporta hosts IPv6 literales (`AF_INET6`).
+  enlazar). `_enlazar` devuelve el socket YA enlazado (sin `SO_REUSEADDR`;
+  `AF_INET6` para hosts IPv6 literales) y uvicorn lo sirve tal cual
+  (`server.run(sockets=[sock])`, 2026-10-21): antes se probaba el puerto y
+  uvicorn volvía a enlazarlo, y si otra app lo tomaba en medio terminaba con
+  `SystemExit(3)` sin reintento. Con `GUI_PORT_STRICT=1` (lo fija
+  `iniciar_gui_lan.bat`) no hay salto: el puerto ocupado es un error que nombra
+  `GUI_PORT`, porque la regla de firewall y la URL del móvil son de ese puerto.
 - `create_app()` monta `/assets` (build de Vite si existe) y `/static` (web/),
   e instala el **middleware de guarda temprana `/api/*`**: `_ensure_local` +
   `_check_origin` antes del routing y de pydantic (un body inválido de cliente

@@ -20,6 +20,7 @@ import AboutModal from './components/AboutModal';
 import SuiteUpdateModal from './components/SuiteUpdateModal';
 import useSuiteUpdate from './hooks/useSuiteUpdate';
 import { useI18n } from './i18n.jsx';
+import { crearSeguimientoBds } from './bdsUpdateLogic';
 
 export default function App() {
   const { t, lang } = useI18n();
@@ -65,11 +66,11 @@ export default function App() {
   const [scheduleConfig, setScheduleConfig] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [updateStarted, setUpdateStarted] = useState(false);
   const [latency, setLatency] = useState(null);
   const [connectionState, setConnectionState] = useState('connecting');
   const wsRef = useRef(null);
-  const updateStartedRef = useRef(false);
+  // Fin de una actualización/reversión de BDS: cierra su modal (bdsUpdateLogic).
+  const [bdsSeguimiento] = useState(crearSeguimientoBds);
   const logSeqRef = useRef(0);
   const [setupInfo, setSetupInfo] = useState(null);
   const [setupFetchError, setSetupFetchError] = useState(false);
@@ -87,7 +88,9 @@ export default function App() {
     }
   };
 
-  // IP local/publica una sola vez al montar (el endpoint tiene su propia cache)
+  // IP local/publica al montar (el endpoint tiene su propia cache) y otra vez
+  // al arrancar el servidor: BDS lee server-port al iniciar, y la tarjeta
+  // seguia mostrando el puerto viejo tras cambiarlo (2026-10-21).
   useEffect(() => {
     fetchConnectivity();
   }, []);
@@ -223,15 +226,30 @@ export default function App() {
     };
   }, []);
 
-  // Cierra el modal de actualización cuando el backend termina el proceso (flag update_in_progress)
+  const finishBdsOperation = () => {
+    setIsUpdating(false);
+    setIsUpdateModalOpen(false);
+  };
+
+  // Cierra el modal de actualización cuando el backend TERMINA, la haya
+  // iniciado esta pestaña u otra. Corre con CADA estado recibido, no solo
+  // cuando cambia el flag: tras reconectar el WebSocket, el primer estado ya
+  // puede traer el final (2026-10-21).
   useEffect(() => {
-    if (status.update_in_progress) updateStartedRef.current = true;
-    if (updateStarted && isUpdating && updateStartedRef.current && status.update_in_progress === false) {
-      setIsUpdating(false);
-      setUpdateStarted(false);
-      setIsUpdateModalOpen(false);
-    }
-  }, [status.update_in_progress, updateStarted, isUpdating]);
+    if (bdsSeguimiento.estado(status.update_in_progress)) finishBdsOperation();
+  }, [status, bdsSeguimiento]);
+
+  // La lista de backups se vuelve a pedir cuando el backend avisa de que pudo
+  // cambiar (backup terminado, rotación, borrado...). Antes solo se pedía al
+  // conectar y tras pulsar un botón: los backups nuevos no aparecían y los
+  // ya rotados daban 404 (2026-10-21).
+  useEffect(() => {
+    if (status.backups_revision !== undefined) fetchBackups();
+  }, [status.backups_revision]);
+
+  useEffect(() => {
+    if (status.running) fetchConnectivity();
+  }, [status.running]);
 
   // Reenvía el idioma al backend cuando el usuario cambia ES/EN en el navbar
   useEffect(() => {
@@ -275,7 +293,6 @@ export default function App() {
 
   const handleOpenUpdate = async () => {
     setIsUpdateModalOpen(true);
-    updateStartedRef.current = false;
     try {
       const res = await fetch('/api/check_update');
       if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
@@ -310,51 +327,33 @@ export default function App() {
     }
   };
 
-  const handleConfirmUpdate = async () => {
+  // Actualizar o revertir BDS (los dos usan update_in_progress).
+  const runBdsOperation = async (action) => {
     setIsUpdating(true);
-    setUpdateStarted(true);
+    bdsSeguimiento.iniciar();
     try {
-      const res = await fetch('/api/action/update_bds', { method: 'POST' });
+      const res = await fetch(`/api/action/${action}`, { method: 'POST' });
       // Un rechazo HTTP (409 instancia externa, 400...) resuelve sin lanzar:
-      // sin este chequeo el modal quedaba en "Actualizando..." para siempre
-      // (el efecto de cierre exige haber visto update_in_progress === true,
-      // que el backend nunca setea al rechazar) y el motivo no se mostraba.
+      // sin este chequeo el modal quedaba en "Actualizando..." y el motivo no
+      // se mostraba.
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        pushLog(makeLog(tRef.current('actionError', { action: 'update_bds', err: data.detail || res.statusText }), 'error'));
-        setIsUpdating(false);
-        setUpdateStarted(false);
-        setIsUpdateModalOpen(false);
+        pushLog(makeLog(tRef.current('actionError', { action, err: data.detail || res.statusText }), 'error'));
+        bdsSeguimiento.abandonar();
+        finishBdsOperation();
+        return;
       }
+      const now = await fetch('/api/status').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (bdsSeguimiento.confirmar(now ? now.update_in_progress : null)) finishBdsOperation();
     } catch (e) {
       console.error(e);
-      setIsUpdating(false);
-      setUpdateStarted(false);
-      setIsUpdateModalOpen(false);
+      bdsSeguimiento.abandonar();
+      finishBdsOperation();
     }
   };
 
-  // La reversión reusa el flag update_in_progress: el cierre del modal al
-  // terminar ya lo maneja el efecto existente.
-  const handleRollback = async () => {
-    setIsUpdating(true);
-    setUpdateStarted(true);
-    try {
-      const res = await fetch('/api/action/rollback_bds', { method: 'POST' });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        pushLog(makeLog(tRef.current('actionError', { action: 'rollback_bds', err: data.detail || res.statusText }), 'error'));
-        setIsUpdating(false);
-        setUpdateStarted(false);
-        setIsUpdateModalOpen(false);
-      }
-    } catch (e) {
-      console.error(e);
-      setIsUpdating(false);
-      setUpdateStarted(false);
-      setIsUpdateModalOpen(false);
-    }
-  };
+  const handleConfirmUpdate = () => runBdsOperation('update_bds');
+  const handleRollback = () => runBdsOperation('rollback_bds');
 
   const handleAction = async (actionName) => {
     try {
@@ -365,6 +364,9 @@ export default function App() {
         // instancia externa): mostrarlo como error en vez de un
         // "ejecutada (undefined)" con aspecto de éxito.
         pushLog(makeLog(tRef.current('actionError', { action: actionName, err: data.detail || res.statusText }), 'error'));
+      } else if (data.status === 'busy' || data.status === 'error') {
+        // 200 con un rechazo ("Operación en curso"): tambien es un error.
+        pushLog(makeLog(tRef.current('actionError', { action: actionName, err: data.message || data.status }), 'error'));
       } else {
         pushLog(makeLog(tRef.current('actionExecuted', { action: actionName, status: data.status }), 'system'));
       }
@@ -441,7 +443,13 @@ export default function App() {
             backups={backups} onRefreshBackups={fetchBackups} onRefreshPlayers={fetchPlayers} isRunning={status.running} />
         </>}
       </main>
-      <Dock dockRef={dockRef} hidden={!ready} active={activeView} onChange={view => { setActiveView(view); setConsoleExpanded(false); }} players={status.player_count} backups={backups.length} />
+      <Dock dockRef={dockRef} hidden={!ready} active={activeView} onChange={view => {
+        setActiveView(view);
+        setConsoleExpanded(false);
+        // Al abrir Backups la lista se pide de nuevo (una CLI u otra instalación
+        // también pudo cambiar la carpeta).
+        if (view === 'backups') fetchBackups();
+      }} players={status.player_count} backups={backups.length} />
     </div>
     <Appearance open={appearanceOpen} onClose={() => setAppearanceOpen(false)} appearance={appearance} glassStatus={glassStatus} />
     {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
@@ -451,8 +459,9 @@ export default function App() {
       <button type="button" aria-label={t('closeMessage')} onClick={() => setToast(null)}><X size={16} /></button>
     </div>}
     <UpdateModal isOpen={isUpdateModalOpen} onClose={() => setIsUpdateModalOpen(false)} updateInfo={updateInfo}
-      onConfirmUpdate={handleConfirmUpdate} onRollback={handleRollback} isUpdating={isUpdating} />
-    <PropsModal isOpen={isPropsModalOpen} onClose={() => setIsPropsModalOpen(false)} fields={propsFields} serverRunning={propsServerRunning} />
+      onConfirmUpdate={handleConfirmUpdate} onRollback={handleRollback} isUpdating={isUpdating || !!status.update_in_progress} />
+    <PropsModal isOpen={isPropsModalOpen} onClose={() => setIsPropsModalOpen(false)} fields={propsFields} serverRunning={propsServerRunning}
+      onSaved={() => fetchConnectivity()} />
     <ScheduleModal isOpen={isScheduleModalOpen} onClose={() => setIsScheduleModalOpen(false)} config={scheduleConfig} />
   </MotionConfig>;
 }

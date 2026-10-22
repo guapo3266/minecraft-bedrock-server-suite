@@ -1972,6 +1972,10 @@ def filter_payload(payload, world=None, kind=None):
         if world is None or w["name"] == world
     ]
     nombres_mundo = {w["name"] for w in worlds}
+    # Un diagnostico de REFERENCIA (scope = tipo del archivo de referencias) es
+    # de ese tipo aunque su `pack` sea del otro: WORLD_REF_KIND_MISMATCH apunta
+    # al pack del tipo cruzado y, con el filtro por tipo, desaparecia mientras
+    # la referencia "kind_mismatch" seguia a la vista (2026-10-21).
     diagnostics = [
         d for d in payload["diagnostics"]
         if (world is None or d["world"] is None or d["world"] == world)
@@ -1979,7 +1983,7 @@ def filter_payload(payload, world=None, kind=None):
         and (d["scope"] in scopes
             or (d["world"] is not None and d["world"] in nombres_mundo)
             or d["scope"] is None)
-        and (d["pack"] is None or d["pack"] in ids)
+        and (d["pack"] is None or d["pack"] in ids or d["scope"] in KINDS)
     ]
     if world is not None:
         packs = [dict(p, dependency_resolution=[

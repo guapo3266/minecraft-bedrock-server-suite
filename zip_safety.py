@@ -21,6 +21,8 @@ import json
 import os
 import re
 import shutil
+import zipfile
+import zlib
 
 from console_lang import L
 
@@ -117,6 +119,37 @@ def record_bds_shipped_packs(base_dir, packs):
 # GUI oculta un marcador, la CLI tambien.
 CORRUPT_MARKERS = ("_CORRUPTO", "_EXCEDIDO", "_CRASH", "_crash")
 _CORRUPT_MARKERS = CORRUPT_MARKERS
+
+# Errores de LECTURA de un ZIP que prueban que no se puede restaurar: CRC o
+# cabecera (BadZipFile), flujo deflate danado (zlib.error), datos truncados
+# (EOFError), metodo de compresion o cifrado no soportados.
+_ZIP_DAMAGE_ERRORS = (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, RuntimeError)
+
+
+def check_zip_integrity(path):
+    """Lee todas las entradas del ZIP. Devuelve (motivo, nombres).
+
+    motivo es None si esta sano; si no, la entrada danada y la causa. Antes se
+    usaba ZipFile.testzip(), que solo convierte en resultado un CRC distinto: un
+    deflate danado lanzaba zlib.error y tools/verify_backups.py moria con
+    traceback sin marcar el ZIP ni revisar los siguientes; la GUI respondia 500
+    (2026-10-21). Un OSError al abrir o leer el archivo (bloqueado, disco) se
+    propaga: no prueba que el backup este roto.
+    """
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            for info in zf.infolist():
+                try:
+                    with zf.open(info) as entry:
+                        while entry.read(1024 * 1024):
+                            pass
+                except _ZIP_DAMAGE_ERRORS as exc:
+                    return f"{info.filename} ({type(exc).__name__}: {exc})", names
+    except zipfile.BadZipFile as exc:
+        return L(f"<cabecera invalida: {exc}>", f"<invalid header: {exc}>"), []
+    return None, names
+
 
 def is_redirected_path(base_dir, path):
     """True si `path` (dentro de base_dir) resuelve a otro sitio por un enlace o junction.

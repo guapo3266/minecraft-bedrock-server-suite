@@ -263,6 +263,31 @@ def start_update():
         raise
 
 
+def _archive_job(candidate, history):
+    """Mueve el trabajo anterior (recovery/) a history (previous_*).
+
+    Normalmente es un rename. Pero una GUI relanzada por el auxiliar de 2.2.0
+    o anterior tiene abierto recovery/gui.log como stdout toda su vida: el
+    rename fallaba (WinError 32) y shutil.move dejaba una copia previous_* a
+    medias en cada reintento, sin salida (2026-10-21). Se mueve entrada por
+    entrada; un archivo abierto se copia y queda en su sitio. Una carpeta que
+    no se puede mover sigue siendo un error.
+    """
+    try:
+        os.replace(candidate, history)
+        return
+    except OSError:
+        pass
+    history.mkdir()
+    for entry in list(candidate.iterdir()):
+        try:
+            os.replace(entry, history / entry.name)
+        except OSError:
+            if not entry.is_file():
+                raise
+            shutil.copy2(entry, history / entry.name)
+
+
 def _update_worker():
     global _early_progress
     root = Path(config.BASE_DIR)
@@ -287,9 +312,9 @@ def _update_worker():
                     raise ValueError("Primero recupera la actualización pendiente con Recuperar_suite.bat")
             history = area / ("previous_" + os.urandom(8).hex())
             assert candidate.absolute().is_relative_to(area.absolute()) and history.absolute().is_relative_to(area.absolute())
-            shutil.move(str(candidate), str(history))
+            _archive_job(candidate, history)
         job = candidate
-        job.mkdir(parents=True)
+        job.mkdir(parents=True, exist_ok=True)
         write_json(job / "progress.json", {"phase": "downloading"})
         _early_progress = None
         info = _fetch_release()  # POST vuelve a consultar; nunca confía en el navegador.

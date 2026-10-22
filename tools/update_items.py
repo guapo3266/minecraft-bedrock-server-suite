@@ -1,90 +1,18 @@
-import json
+"""update_items.py — alias deprecado de update_items_v2.py.
+
+ESTA version (1.0.5) quitaba use_animation/use_modifiers de los items y fijaba
+la version 1.0.5 de los packs sin respaldo y con la ruta del mundo fija
+(worlds/Bedrock level): ejecutarla despues de la v2 bajaba los packs de 1.0.6 a
+1.0.5 (2026-10-21). La v2 incluye ese paso (de 1.0.4 va directo a 1.0.6) y
+respalda lo que reescribe; este archivo se conserva solo como alias del CLI
+(viaja en el ZIP de la Release: suite_release.TOOL_FILES).
+"""
 import os
+import sys
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-
-def write_text_atomic(path, text):
-    """Escritura atomica (tmp + os.replace): un corte a mitad no trunca el
-    archivo original (mismo patron que update_items_v2/enable_beta_apis_v2)."""
-    tmp_path = path + ".tmp_" + os.urandom(4).hex()
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-
-def update_json_file(file_path, modify_func):
-    if not os.path.exists(file_path):
-        print(f"File not found: {file_path}")
-        return
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    modify_func(data)
-    write_text_atomic(file_path, json.dumps(data, indent=2, ensure_ascii=False))
-    print(f"Updated {file_path}")
-
-# 1. Modify item JSONs
-def modify_item(data):
-    components = data["minecraft:item"]["components"]
-    # Remove use animation and modifiers
-    components.pop("minecraft:use_animation", None)
-    components.pop("minecraft:use_modifiers", None)
-
-
-# 2. Modify BP Manifest
-def modify_bp_manifest(data):
-    data["header"]["version"] = [1, 0, 5]
-    for module in data.get("modules", []):
-        if module["type"] == "script":
-            module["version"] = [1, 0, 5]
-    for dep in data.get("dependencies", []):
-        if dep.get("uuid") == "9f075d4a-bc12-4c2c-8d14-6fa6b12a2b74":
-            dep["version"] = [1, 0, 5]
-
-
-# 3. Modify RP Manifest
-def modify_rp_manifest(data):
-    data["header"]["version"] = [1, 0, 5]
-    for module in data.get("modules", []):
-        if module["type"] == "resources":
-            module["version"] = [1, 0, 5]
-
-
-# 4. Modify World JSONs
-def modify_world_bp(data):
-    for pack in data:
-        if pack["pack_id"] == "8f075d4a-bc12-4c2c-8d14-6fa6b12a2b72":
-            pack["version"] = [1, 0, 5]
-
-
-def modify_world_rp(data):
-    for pack in data:
-        if pack["pack_id"] == "9f075d4a-bc12-4c2c-8d14-6fa6b12a2b74":
-            pack["version"] = [1, 0, 5]
-
-
-def main():
-    """Aplica las modificaciones (solo al ejecutar como script).
-
-    Antes este modulo escribia 6 ficheros de produccion al importarlo;
-    ahora importar es inocuo y el trabajo vive aqui.
-    """
-    update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_activator.json"), modify_item)
-    update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/items/guardian_controller.json"), modify_item)
-    update_json_file(os.path.join(BASE_DIR, "behavior_packs/guardian_robot_BP/manifest.json"), modify_bp_manifest)
-    update_json_file(os.path.join(BASE_DIR, "resource_packs/guardian_robot_RP/manifest.json"), modify_rp_manifest)
-    update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_behavior_packs.json"), modify_world_bp)
-    update_json_file(os.path.join(BASE_DIR, "worlds/Bedrock level/world_resource_packs.json"), modify_world_rp)
-
+import update_items_v2 as _v2
 
 if __name__ == "__main__":
-    main()
+    sys.exit(_v2.main())

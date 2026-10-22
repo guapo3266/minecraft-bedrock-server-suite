@@ -32,7 +32,10 @@ async def set_server_properties(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Cuerpo JSON invalido")
-    values = (body or {}).get("values")
+    # Un cuerpo valido que no es objeto ([1], "x", 5) daba 500 (AttributeError).
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="cuerpo debe ser un objeto")
+    values = body.get("values")
     if not isinstance(values, dict) or not values:
         raise HTTPException(status_code=400, detail="No hay campos para guardar")
     for v in values.values():

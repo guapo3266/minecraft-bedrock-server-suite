@@ -16,6 +16,9 @@ def test_detect_external_bds_no_detecta_cuando_no_hay_procesos(monkeypatch):
     sgs.manager.is_running = False
     monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    # Mutex libre = acquire() lo consigue. Antes bastaba handle=None porque
+    # NamedMutex fallaba en abierto (2026-10-21: ahora es "ocupado").
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: True)
     monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
 
     is_ext, reason = external_probe.detect_external_bds()
@@ -32,6 +35,9 @@ def test_detect_external_bds_detecta_mutex_retenido_por_wrapper(monkeypatch):
     sgs.manager.is_running = False
     monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    # Mutex libre = acquire() lo consigue. Antes bastaba handle=None porque
+    # NamedMutex fallaba en abierto (2026-10-21: ahora es "ocupado").
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: True)
     monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: False)
     monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
 
@@ -53,6 +59,9 @@ def test_detect_external_bds_no_confunde_probe_ajeno_con_wrapper(monkeypatch):
     sgs.manager.is_running = False
     monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    # Mutex libre = acquire() lo consigue. Antes bastaba handle=None porque
+    # NamedMutex fallaba en abierto (2026-10-21: ahora es "ocupado").
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: True)
     calls = {"n": 0}
 
     def flaky_acquire(self, timeout_ms=0):
@@ -73,6 +82,9 @@ def test_detect_external_bds_detecta_proceso_psutil_no_hijo(monkeypatch):
     sgs.manager.is_running = False
     monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    # Mutex libre = acquire() lo consigue. Antes bastaba handle=None porque
+    # NamedMutex fallaba en abierto (2026-10-21: ahora es "ocupado").
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: True)
 
     class FakeProc:
         def __init__(self, pid, name):
@@ -100,6 +112,9 @@ def test_detect_external_bds_ignora_bds_de_otra_instalacion(monkeypatch):
     sgs.manager.is_running = False
     monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    # Mutex libre = acquire() lo consigue. Antes bastaba handle=None porque
+    # NamedMutex fallaba en abierto (2026-10-21: ahora es "ocupado").
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: True)
 
     class FakeProc:
         def __init__(self, pid, name):
@@ -125,6 +140,9 @@ def test_detect_external_bds_ignora_hijos_de_la_gui(monkeypatch):
     gui_pid = os.getpid()
     monkeypatch.setattr(wpg.NamedMutex, "__init__", lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    # Mutex libre = acquire() lo consigue. Antes bastaba handle=None porque
+    # NamedMutex fallaba en abierto (2026-10-21: ahora es "ocupado").
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: True)
 
     class FakeParent:
         def __init__(self, pid):
@@ -195,6 +213,9 @@ def _mutex_libre(monkeypatch):
     monkeypatch.setattr(wpg.NamedMutex, "__init__",
                         lambda self, name: setattr(self, "already_exists", False) or setattr(self, "handle", None))
     monkeypatch.setattr(wpg.NamedMutex, "close", lambda self: None)
+    # Mutex libre = acquire() lo consigue. Antes bastaba handle=None porque
+    # NamedMutex fallaba en abierto (2026-10-21: ahora es "ocupado").
+    monkeypatch.setattr(wpg.NamedMutex, "acquire", lambda self, timeout_ms=0: True)
 
 
 class _FakeProcExeRota:

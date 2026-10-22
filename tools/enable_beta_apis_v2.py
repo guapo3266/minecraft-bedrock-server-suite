@@ -20,23 +20,33 @@ sys.path.insert(0, BASE_DIR)
 
 from console_lang import L
 
-def _podar_respaldos(max_respaldos=3):
-    """Deja solo los .respaldo_* mas recientes de worlds/.
+def _podar_respaldos(original, conservar, max_respaldos=3):
+    """Deja los max_respaldos .respaldo_* mas recientes de `original`.
 
-    Sin esto se acumulan y cada respaldo nuevo vuelve a copiar las copias
-    viejas del level.dat dentro del mundo (los backups crecen sin limite).
+    Sin poda se acumulan y cada backup del mundo los empaqueta como copias del
+    level.dat. La poda es POR archivo y nunca toca `conservar` (el respaldo
+    recien creado): antes recorria todo worlds/ por fecha y el respaldo nuevo
+    heredaba con copy2 la fecha vieja del level.dat; con tres respaldos
+    recientes de otro mundo, se borraba el que protegia el archivo que se iba
+    a reescribir (2026-10-21).
     """
+    carpeta = os.path.dirname(original)
+    prefijo = os.path.basename(original) + ".respaldo_"
     respaldos = []
-    for carpeta, _dirs, archivos in os.walk(os.path.join(BASE_DIR, "worlds")):
-        for nombre in archivos:
-            if ".respaldo_" in nombre:
-                ruta = os.path.join(carpeta, nombre)
-                try:
-                    respaldos.append((os.path.getmtime(ruta), ruta))
-                except OSError:
-                    continue
+    try:
+        nombres = os.listdir(carpeta)
+    except OSError:
+        return
+    for nombre in nombres:
+        ruta = os.path.join(carpeta, nombre)
+        if not nombre.startswith(prefijo) or os.path.normcase(ruta) == os.path.normcase(conservar):
+            continue
+        try:
+            respaldos.append((os.path.getmtime(ruta), ruta))
+        except OSError:
+            continue
     respaldos.sort(reverse=True)
-    for _mtime, viejo in respaldos[max_respaldos:]:
+    for _mtime, viejo in respaldos[max_respaldos - 1:]:
         try:
             os.remove(viejo)
         except OSError:
@@ -110,14 +120,15 @@ def enable_experiments(file_path):
                 f"Appended trailing data of size: {len(data) - trailing_offset}"))
 
     # Resguardo previo: la v1 destruyo un level.dat real y el round-trip de
-    # amulet_nbt puede alterar datos que no sabemos regenerar. copy2 (no
+    # amulet_nbt puede alterar datos que no sabemos regenerar. Copia (no
     # move): el original sigue en su sitio y el resguardo es solo evidencia.
-    # El sufijo evita deliberadamente el patron bak del recuperador: el
-    # recuperador de restauraciones interrumpidas renombra cualquier
-    # *.bak_* de worlds/ como huerfano en el arranque del wrapper.
+    # copyfile y no copy2: el resguardo lleva la fecha de su creacion, la que
+    # ordena la poda. El sufijo evita deliberadamente el patron bak del
+    # recuperador: el recuperador de restauraciones interrumpidas renombra
+    # cualquier *.bak_* de worlds/ como huerfano en el arranque del wrapper.
     backup_path = file_path + ".respaldo_" + os.urandom(4).hex()
     try:
-        shutil.copy2(file_path, backup_path)
+        shutil.copyfile(file_path, backup_path)
         print(L(f"Resguardo previo guardado como: {backup_path}",
                 f"Previous backup saved as: {backup_path}"))
     except OSError as e:
@@ -127,7 +138,7 @@ def enable_experiments(file_path):
 
     # Los resguardos no se pueden dejar crecer: los siguientes backups del
     # mundo los empaquetarian como copias del level.dat.
-    _podar_respaldos()
+    _podar_respaldos(file_path, backup_path)
 
     # Escritura atomica: open('wb') in-place trunca el original y recien
     # despues escribe; un corte de luz/Ctrl+C/antivirus a mitad dejaba un

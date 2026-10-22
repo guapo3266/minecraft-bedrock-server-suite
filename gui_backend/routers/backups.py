@@ -1,8 +1,6 @@
 """Router de backups: listado, restauración, descarga, borrado y verificación."""
 
 import os
-import time
-import zipfile
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -50,6 +48,7 @@ async def set_backup_location(request: Request):
     result = await run_in_threadpool(backups_service.set_backup_location, manager, body.get("root"))
     nueva = result["location"]["backup_dir"]
     manager.add_log(L(f"[GUI] Carpeta de backups: {nueva}", f"[GUI] Backup folder: {nueva}"), "backup")
+    manager.note_backups_changed()  # la lista pasa a ser la de la carpeta nueva
     return {"status": "ok", **result}
 
 
@@ -67,7 +66,10 @@ async def restore_backup(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Cuerpo JSON invalido")
-    filename = (body or {}).get("filename", "")
+    # Un cuerpo valido que no es objeto ([1], "x", 5) daba 500 (AttributeError).
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="cuerpo debe ser un objeto")
+    filename = body.get("filename", "")
 
     if not is_safe_backup_name(filename):
         raise HTTPException(status_code=400, detail="Nombre de backup invalido")
@@ -93,8 +95,9 @@ async def restore_backup(request: Request):
         manager.add_log(L(f"[GUI] Error al restaurar {filename}: {e}", f"[GUI] Error restoring {filename}: {e}"), "error")
         raise HTTPException(status_code=500, detail=str(e))
 
+    # Restaurar no crea ningun backup: "ultimo backup" no cambia (antes pasaba
+    # a la hora actual y aparentaba un backup reciente del mundo restaurado).
     manager.add_log(L(f"[GUI] Backup restaurado: {os.path.basename(restored_path)}", f"[GUI] Backup restored: {os.path.basename(restored_path)}"), "backup")
-    manager.last_backup_time = time.strftime("%H:%M:%S")
     return {"status": "ok", "backup": filename}
 
 
@@ -143,14 +146,15 @@ async def delete_backup(filename: str, request: Request):
         manager.add_log(L(f"[GUI] Error al eliminar backup {filename}: {e}", f"[GUI] Error deleting backup {filename}: {e}"), "error")
         raise HTTPException(status_code=500, detail=str(e))
     manager.add_log(L(f"[GUI] Backup eliminado: {filename}", f"[GUI] Backup deleted: {filename}"), "backup")
+    manager.note_backups_changed()  # otras pestanas abiertas tambien lo ven
     return {"status": "ok", "backup": filename}
 
 
 @router.post("/api/backups/{filename}/verify")
 async def verify_backup(filename: str, request: Request):
-    """Verifica la integridad de un backup ZIP (testzip: CRC de todas las
-    entradas). Lento en zips grandes: corre en el threadpool para no bloquear
-    el event loop de los WebSockets.
+    """Verifica la integridad de un backup ZIP (lee y descomprime todas las
+    entradas: CRC, deflate y truncado). Lento en zips grandes: corre en el
+    threadpool para no bloquear el event loop de los WebSockets.
     """
     _ensure_local(request.client.host if request.client else "")
     _check_origin(request)
@@ -164,11 +168,9 @@ async def verify_backup(filename: str, request: Request):
         return backups_service.verify_zip(full)
 
     try:
+        # Cabecera rota, CRC, deflate danado o truncado vuelven como "corrupto"
+        # (zip_safety.check_zip_integrity); solo la E/S fallida es un error.
         bad = await run_in_threadpool(_verify)
-    except zipfile.BadZipFile as e:
-        # Archivo truncado/cabecera rota: es el resultado "corrupto", no un error
-        manager.add_log(L(f"[GUI] Backup corrupto: {filename} ({e})", f"[GUI] Corrupt backup: {filename} ({e})"), "error")
-        return {"status": "corrupt", "filename": filename, "entry": str(e)}
     except Exception as e:
         manager.add_log(L(f"[GUI] Error al verificar {filename}: {e}", f"[GUI] Error verifying {filename}: {e}"), "error")
         raise HTTPException(status_code=500, detail=str(e))

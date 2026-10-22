@@ -176,6 +176,72 @@ def _recuperaciones_no_tocan_la_instalacion_real():
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _identidad_y_config_bds_no_tocan_la_instalacion_real():
+    """data/installation_id.json, el dueño de la carpeta de backups y el
+    registro de configuración de fábrica de BDS (2026-10-21) son datos reales.
+
+    Los tests con `tmp_path` siguen ejercitando las escrituras; las que irían a
+    la instalación real o a su carpeta de backups predeterminada se descartan.
+    """
+    from gui_backend import backup_location, config
+    from gui_backend.services import bds_update
+
+    real = os.path.normcase(os.path.abspath(config.BASE_DIR))
+    raiz_real = os.path.normcase(backup_location.default_root(config.BASE_DIR))
+
+    def _es_real(path):
+        p = os.path.normcase(os.path.abspath(path))
+        return p == real or p.startswith(real + os.sep) or p.startswith(raiz_real + os.sep)
+
+    orig_write = backup_location._write_dict
+
+    def guarded_write(path, data):
+        if _es_real(path):
+            return False
+        return orig_write(path, data)
+
+    def _guard(fn):
+        def wrapper(base_dir, *args, **kwargs):
+            if _es_real(base_dir):
+                return None
+            return fn(base_dir, *args, **kwargs)
+        return wrapper
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(backup_location, "_write_dict", guarded_write)
+        for name in ("record_shipped_config", "forget_shipped_config", "save_config_defaults"):
+            mp.setattr(bds_update, name, _guard(getattr(bds_update, name)))
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _version_anterior_de_bds_no_toca_la_instalacion_real():
+    """data/bds_previous (la version de BDS a la que se revierte) es dato real.
+
+    `bds_update.PREVIOUS_VERSION_DIR` se calcula al importar desde la instalacion
+    real: un test que parchea `config.BASE_DIR` pero no esa constante movia su
+    resguardo a la carpeta real y apartaba la version anterior verdadera
+    (test_setup_initial, hallado el 2026-10-21). Aqui falla en voz alta en vez
+    de escribir: el test debe parchear PREVIOUS_VERSION_DIR.
+    """
+    from gui_backend import config
+    from gui_backend.services import bds_update
+
+    real = os.path.normcase(os.path.abspath(config.BASE_DIR))
+    orig_save = bds_update._save_prev_dir
+
+    def guarded_save(prev_dir, keep_prev_dir, prev_version):
+        destino = os.path.normcase(os.path.abspath(keep_prev_dir))
+        if destino == real or destino.startswith(real + os.sep):
+            pytest.fail(f"un test iba a escribir la version anterior de BDS en la instalacion real: {keep_prev_dir}")
+        return orig_save(prev_dir, keep_prev_dir, prev_version)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(bds_update, "_save_prev_dir", guarded_save)
+        yield
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _registro_de_packs_bds_no_toca_la_instalacion_real():
     """El registro de packs de BDS (data/bds_shipped_packs.json) es dato real.
 

@@ -7,6 +7,7 @@ sigan vivos.
 """
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -180,6 +181,139 @@ _SKIP_IN_STAGING = {_UPDATE_MANIFEST_NAME, _PREVIOUS_META_NAME}
 PRESERVE_FILES = {"server.properties", "permissions.json", "allowlist.json", "whitelist.json"}
 PRESERVE_DIRS = {"worlds", "backups", "web", "gui_frontend"}
 
+# Configuracion editable que trae el ZIP oficial (2026-10-21). Antes una
+# actualizacion o reversion la reemplazaba por la de fabrica y el admin perdia
+# sus cambios (modulos de scripting permitidos, limites de paquetes, filtro de
+# palabras). Se tratan como los "conffiles" de dpkg: si el archivo instalado
+# sigue siendo el de fabrica, se actualiza; si el admin lo edito, se conserva y
+# la version nueva de fabrica queda en data/bds_config_defaults/ para comparar.
+CONFIG_FILES = ("config/default/permissions.json", "packetlimitconfig.json", "profanity_filter.wlist")
+_SHIPPED_CONFIG_NAME = "bds_shipped_config.json"
+# Sin huella registrada (instalaciones anteriores a este cambio, o tras una
+# reversion) un archivo se da por de fabrica si su fecha esta a menos de esto
+# de la de bedrock_server.exe: el instalador extrae el ZIP entero de una vez y
+# una edicion posterior cambia la fecha.
+_SAME_EXTRACTION_SEC = 600
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _rel_path(root, rel):
+    return os.path.join(root, *rel.split("/"))
+
+
+def shipped_config_path(base_dir):
+    """Registro {archivo: sha256 de fabrica instalado} (dato en data/)."""
+    return os.path.join(base_dir, "data", _SHIPPED_CONFIG_NAME)
+
+
+def config_defaults_dir(base_dir):
+    """Donde queda la version de fabrica de un archivo que se conservo."""
+    return os.path.join(base_dir, "data", "bds_config_defaults")
+
+
+def read_shipped_config(base_dir):
+    try:
+        with open(shipped_config_path(base_dir), encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k in CONFIG_FILES and isinstance(v, str)}
+
+
+def edited_config_files(base_dir, staging_root):
+    """CONFIG_FILES que el admin edito y que el staging cambiaria: se conservan.
+
+    Editado = distinto de la huella de fabrica registrada; sin huella, con una
+    fecha lejos de la de bedrock_server.exe. Un archivo que no se puede leer
+    tambien se conserva (no se sabe si es de fabrica).
+    """
+    shipped = read_shipped_config(base_dir)
+    exe = os.path.join(base_dir, "bedrock_server.exe")
+    keep = set()
+    for rel in CONFIG_FILES:
+        current, incoming = _rel_path(base_dir, rel), _rel_path(staging_root, rel)
+        if not os.path.isfile(current) or not os.path.isfile(incoming):
+            continue
+        try:
+            actual = _sha256_file(current)
+            if actual == _sha256_file(incoming):
+                continue
+        except OSError:
+            keep.add(rel)
+            continue
+        known = shipped.get(rel)
+        if known is not None:
+            edited = actual != known
+        else:
+            try:
+                edited = abs(os.path.getmtime(current) - os.path.getmtime(exe)) > _SAME_EXTRACTION_SEC
+            except OSError:
+                edited = True
+        if edited:
+            keep.add(rel)
+    return keep
+
+
+def _config_hashes(root):
+    """Huellas de los CONFIG_FILES presentes en un arbol de BDS (sin lanzar)."""
+    hashes = {}
+    for rel in CONFIG_FILES:
+        try:
+            hashes[rel] = _sha256_file(_rel_path(root, rel))
+        except OSError:
+            continue
+    return hashes
+
+
+def _write_json_atomic(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + ".tmp_" + os.urandom(4).hex()
+    try:
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+def record_shipped_config(base_dir, hashes):
+    """Une al registro las huellas de fabrica recien instaladas."""
+    data = read_shipped_config(base_dir)
+    data.update(hashes)
+    _write_json_atomic(shipped_config_path(base_dir), data)
+
+
+def forget_shipped_config(base_dir):
+    """Tras una reversion la huella de fabrica ya no se conoce: se borra."""
+    try:
+        os.remove(shipped_config_path(base_dir))
+    except FileNotFoundError:
+        pass
+
+
+def save_config_defaults(base_dir, staging_root, keep):
+    """Copia a data/bds_config_defaults/ la version de fabrica de lo conservado."""
+    for rel in sorted(keep):
+        target = _rel_path(config_defaults_dir(base_dir), rel)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(_rel_path(staging_root, rel), target)
+
 
 def recover_interrupted_updates(base_dir=None):
     """Recupera una actualización interrumpida antes de aceptar operaciones.
@@ -208,7 +342,9 @@ def recover_interrupted_updates(base_dir=None):
             raise ValueError("ruta fuera de la instalacion")
         return path
 
-    pattern = os.path.join(base_dir, "bds_update_prev_*")
+    # glob.escape: una instalacion en "...\Servidor [Survival]" no veia sus
+    # resguardos y nunca recuperaba una actualizacion interrumpida (2026-10-21).
+    pattern = os.path.join(glob.escape(base_dir), "bds_update_prev_*")
     for prev_dir in glob.glob(pattern):
         if not os.path.isdir(prev_dir):
             continue
@@ -345,6 +481,22 @@ def _record_shipped_packs(packs, tag, log_fn):
     except OSError as exc:
         log_fn(L(f"{tag} No se pudo registrar los packs de BDS instalados ({exc}); el restore usará el registro anterior o el nombre de cada pack.",
                  f"{tag} Could not record the installed BDS packs ({exc}); restore will use the previous record or each pack's name."), "error")
+
+
+def _record_shipped_config(hashes, kept, tag, log_fn):
+    """Registra las huellas de fabrica instaladas y avisa de lo conservado.
+
+    Best-effort como _record_shipped_packs: un fallo no deshace la instalacion
+    (sin registro, la proxima actualizacion decide por la fecha del archivo).
+    """
+    try:
+        record_shipped_config(config.BASE_DIR, hashes)
+    except OSError as exc:
+        log_fn(L(f"{tag} No se pudo registrar la configuración de fábrica instalada ({exc}).",
+                 f"{tag} Could not record the installed factory configuration ({exc})."), "error")
+    for rel in sorted(kept):
+        log_fn(L(f"{tag} Se conservó tu {rel} (lo editaste); la versión de fábrica nueva quedó en data/bds_config_defaults/{rel}.",
+                 f"{tag} Your {rel} was kept (you edited it); the new factory version is in data/bds_config_defaults/{rel}."), "system")
 
 
 def read_previous_version():
@@ -628,13 +780,23 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
         update_root = _resolve_update_root(staging_dir)
         # Antes de aplicar: la fase 2 vacia el staging al mover los archivos.
         shipped_packs = _shipped_pack_dirs(update_root)
+        # La configuracion que el admin edito se conserva (CONFIG_FILES); su
+        # version de fabrica nueva se guarda aparte antes de que el staging
+        # desaparezca.
+        keep_config = edited_config_files(config.BASE_DIR, update_root)
+        incoming_config = _config_hashes(update_root)
+        try:
+            save_config_defaults(config.BASE_DIR, update_root, keep_config)
+        except OSError as exc:
+            log_fn(L(f"{tag} No se pudo guardar la configuración de fábrica nueva ({exc}); tus archivos se conservan igual.",
+                     f"{tag} Could not save the new factory configuration ({exc}); your files are kept anyway."), "error")
 
         # Aplica con rollback: si algo falla a mitad, la instalacion
         # vuelve a los binarios anteriores (sin versiones mezcladas). El
         # resguardo queda en data/bds_previous para volver con un clic.
         # Si falla tambien el rollback, se conserva bds_update_prev_*.
         try:
-            _apply_staged_update(update_root, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
+            _apply_staged_update(update_root, config.BASE_DIR, PRESERVE_FILES | keep_config, PRESERVE_DIRS,
                                  keep_prev_dir=PREVIOUS_VERSION_DIR,
                                  prev_version=manager.installed_version)
         except PreviousVersionNotSaved as exc:
@@ -645,6 +807,7 @@ def _download_and_install_bds(tag="[Actualizador BDS]", log_fn=None):
             log_fn(f"{tag} {exc}", "error")
             return False, None
         _record_shipped_packs(shipped_packs, tag, log_fn)
+        _record_shipped_config(incoming_config, keep_config, tag, log_fn)
         if downloaded_version:
             manager.installed_version = downloaded_version
         return True, downloaded_version
@@ -679,9 +842,11 @@ def rollback_bds(tag="[Rollback BDS]", log_fn=None):
     version_label = restore_version or "?"
     log_fn(L(f"{tag} Restaurando la versión anterior ({version_label})...", f"{tag} Restoring the previous version ({version_label})..."), "system")
     shipped_packs = _shipped_pack_dirs(PREVIOUS_VERSION_DIR)
+    # Lo que el admin edito tras actualizar tampoco se pisa al revertir.
+    keep_config = edited_config_files(config.BASE_DIR, PREVIOUS_VERSION_DIR)
     swap_saved = True
     try:
-        _apply_staged_update(PREVIOUS_VERSION_DIR, config.BASE_DIR, PRESERVE_FILES, PRESERVE_DIRS,
+        _apply_staged_update(PREVIOUS_VERSION_DIR, config.BASE_DIR, PRESERVE_FILES | keep_config, PRESERVE_DIRS,
                              keep_prev_dir=PREVIOUS_VERSION_DIR,
                              prev_version=manager.installed_version,
                              preserve_staging_on_failure=True)
@@ -697,6 +862,15 @@ def rollback_bds(tag="[Rollback BDS]", log_fn=None):
         log_fn(L(f"{tag} Error al restaurar; revisa los resguardos de recuperación: {exc}", f"{tag} Error restoring; check the recovery backups: {exc}"), "error")
         return False, None
     _record_shipped_packs(shipped_packs, tag, log_fn)
+    # La huella de fabrica de la version restaurada no se conoce: desde ahora
+    # decide la fecha de cada archivo (ver edited_config_files).
+    try:
+        forget_shipped_config(config.BASE_DIR)
+    except OSError as exc:
+        log_fn(L(f"{tag} No se pudo borrar el registro de configuración de fábrica ({exc}).",
+                 f"{tag} Could not remove the factory configuration record ({exc})."), "error")
+    for rel in sorted(keep_config):
+        log_fn(L(f"{tag} Se conservó tu {rel} (lo editaste).", f"{tag} Your {rel} was kept (you edited it)."), "system")
     manager.installed_version = restore_version
     if swap_saved:
         log_fn(L(f"{tag} Versión anterior restaurada ({version_label}). La versión que se dejó de usar ahora es la recuperable.", f"{tag} Previous version restored ({version_label}). The version just left behind is now the recoverable one."), "system")

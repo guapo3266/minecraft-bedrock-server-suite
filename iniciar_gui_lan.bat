@@ -1,4 +1,7 @@
 @echo off
+:: Variables locales: sin setlocal, GUI_ALLOW_LAN=1 quedaba vivo en la ventana
+:: de cmd y un iniciar_gui.bat posterior abria la GUI a la LAN (2026-10-21).
+setlocal
 chcp 65001 >nul
 title Minecraft Bedrock Server Suite [MODO LAN]
 color 0A
@@ -24,9 +27,12 @@ if errorlevel 1 (
 set GUI_ALLOW_LAN=1
 :: Opcional: fija puerto (si lo cambias, abre ese puerto en el firewall)
 if "%GUI_PORT%"=="" set GUI_PORT=8000
+:: La regla de firewall y la URL de abajo son de ESTE puerto: si esta ocupado,
+:: la GUI no salta a otro (quedaria inaccesible desde el movil) y lo avisa.
+set GUI_PORT_STRICT=1
 
 echo [LAN] GUI_ALLOW_LAN=1 - la GUI sera accesible desde la red local
-echo       Puerto: %GUI_PORT%
+echo       Puerto: %GUI_PORT% ^(si esta ocupado, la GUI no arranca y lo avisa^)
 echo       URL local: http://127.0.0.1:%GUI_PORT%
 :: IP LAN: se prefiere un rango domestico (192.168., luego 10.) antes que
 :: "la ultima de ipconfig": con una VPN activa el ultimo adaptador suele ser

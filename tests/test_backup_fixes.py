@@ -774,8 +774,12 @@ def test_backup_frio_toma_op_lock(monkeypatch):
         with TestClient(sgs.app, client=("127.0.0.1", 50000)) as client:
             resp = client.post("/api/action/backup")
             assert resp.json()["status"] == "backup_dispatched", resp.text
+            # Esperar a que el hilo LLEGUE a create_backup y despues a que
+            # termine: mirar solo backup_in_progress daba por terminado un hilo
+            # que aun no habia empezado (cold_backup sondea antes la instancia
+            # externa bajo op_lock, 2026-10-21).
             deadline = time.time() + 10
-            while sgs.manager.backup_in_progress and time.time() < deadline:
+            while ("locked" not in lock_state or sgs.manager.backup_in_progress) and time.time() < deadline:
                 time.sleep(0.05)
         assert not sgs.manager.backup_in_progress, "el hilo de backup no termino"
         assert lock_state.get("locked") is True, (

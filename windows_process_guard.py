@@ -83,18 +83,31 @@ class NamedMutex:
         self.name = f"Local\\{name}"
         self.handle = None
         self.already_exists = False
+        self.open_error = 0  # GetLastError si CreateMutexW fallo
         self._owned = False
         if kernel32:
             self.handle = kernel32.CreateMutexW(None, False, self.name)
+            err = ctypes.get_last_error()
             if self.handle:
-                err = ctypes.get_last_error()
                 self.already_exists = (err == ERROR_ALREADY_EXISTS)
+            else:
+                self.open_error = err
 
     def acquire(self, timeout_ms: int = 0) -> bool:
-        """Intenta adquirir el mutex. timeout_ms < 0 espera indefinidamente."""
-        if not self.handle or not kernel32:
+        """Intenta adquirir el mutex. timeout_ms < 0 espera indefinidamente.
+
+        Si CreateMutexW fallo, el objeto existe pero no se puede abrir (lo tiene
+        un proceso elevado: ERROR_ACCESS_DENIED) o el nombre esta tomado por
+        otro tipo de objeto. Antes eso devolvia True y la exclusion fallaba en
+        abierto: una GUI sin elevar no veia el wrapper elevado y dejaba lanzar
+        otro sobre el mismo mundo (2026-10-21). Ahora es "ocupado". Sin
+        kernel32 (fuera de Windows) no hay mutex que respetar.
+        """
+        if not kernel32:
             self._owned = True
             return True
+        if not self.handle:
+            return False
         timeout = INFINITE if timeout_ms < 0 else int(timeout_ms)
         res = kernel32.WaitForSingleObject(self.handle, wintypes.DWORD(timeout))
         if res in (WAIT_OBJECT_0, WAIT_ABANDONED):

@@ -1,8 +1,11 @@
 @echo off
+:: Variables locales (RUN_PY, WRAPPER_LANG...): sin setlocal quedaban vivas en
+:: la ventana de cmd que lanzo este .bat (2026-10-21).
+setlocal
 cd /d "%~dp0"
 if exist "data\suite_updates\recovery\journal.json" (
-    call "%~dp0Recuperar_suite.bat"
-    if errorlevel 1 exit /b 1
+    call "%~dp0Recuperar_suite.bat" --sin-pausa
+    if errorlevel 1 goto :recuperacion_fallida
 )
 title Minecraft Bedrock Server Suite
 color 0a
@@ -162,6 +165,13 @@ echo.
 echo  El servidor se ha detenido.
 pause
 exit /b 0
+
+:recuperacion_fallida
+echo.
+echo [ERROR] No se pudo completar la recuperacion de una actualizacion de la suite.
+echo         Lee el mensaje de arriba; puedes reintentarla con Recuperar_suite.bat.
+pause
+exit /b 1
 
 :bootstrap_lock
 2>nul md "%LOCK_DIR%" && goto :eof

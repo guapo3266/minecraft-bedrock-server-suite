@@ -76,9 +76,13 @@ def get_backup_dir(base_dir=None):
 
 
 def _list_backup_files(backup_dir):
-    """Devuelve solo backups aptos para ofrecerlos en la CLI."""
+    """Devuelve solo backups aptos para ofrecerlos en la CLI.
+
+    glob.escape: un "[...]" en la ruta de la carpeta no debe leerse como
+    patron (la lista salia vacia, 2026-10-21).
+    """
     return [
-        path for path in glob.glob(os.path.join(backup_dir, "auto_backup_*.zip"))
+        path for path in glob.glob(os.path.join(glob.escape(backup_dir), "auto_backup_*.zip"))
         if not any(marker in os.path.basename(path) for marker in _CORRUPT_MARKERS)
     ]
 

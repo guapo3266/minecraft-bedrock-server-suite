@@ -6,8 +6,10 @@ Cubre el pendiente del modo LAN (Ronda 6):
 - Anti-drift: el parsing de GUI_ALLOW_LAN usa la fuente única ``security._allow_lan``.
 - ``_resolver_puerto``: el salto de puerto queda ACOTADO a 65535 (el ``while``
   histórico giraba infinito si nada llegaba a enlazar, p. ej. con un host que
-  el socket nunca acepta) y avisa una vez por puerto saltado.
-- ``_puerto_libre``: un host IPv6 literal (contiene ":") enlaza por AF_INET6;
+  el socket nunca acepta), avisa una vez por puerto saltado y devuelve el
+  socket YA enlazado (uvicorn lo usa tal cual: sin carrera, 2026-10-21). En
+  modo estricto (LAN) no salta de puerto.
+- ``_enlazar``: un host IPv6 literal (contiene ":") enlaza por AF_INET6;
   con AF_INET el bind falla SIEMPRE y la búsqueda no encontraría jamás puerto.
 
 Sin red externa: solo binds efímeros en loopback; nunca se escucha ni se
@@ -62,7 +64,7 @@ def test_allow_lan_es_fuente_unica_compartida_con_security(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────
-# _puerto_libre: normalización e IPv6
+# _enlazar: normalización e IPv6
 # ─────────────────────────────────────────────────────────────────
 
 def _ocupar_puerto_loopback():
@@ -72,22 +74,35 @@ def _ocupar_puerto_loopback():
     return s, s.getsockname()[1]
 
 
-def test_puerto_libre_true_en_libre_false_en_ocupado():
+def _libre(puerto, host):
+    """True si _enlazar consiguio el puerto (y lo suelta)."""
+    sock = sgs._enlazar(puerto, host)
+    if sock is None:
+        return False
+    sock.close()
+    return True
+
+
+def test_enlazar_devuelve_socket_en_libre_y_none_en_ocupado():
     blocker, puerto = _ocupar_puerto_loopback()
     try:
-        assert sgs._puerto_libre(puerto, "127.0.0.1") is False
+        assert sgs._enlazar(puerto, "127.0.0.1") is None
     finally:
         blocker.close()
-    assert sgs._puerto_libre(puerto, "127.0.0.1") is True
+    sock = sgs._enlazar(puerto, "127.0.0.1")
+    try:
+        assert sock is not None and sock.getsockname()[1] == puerto
+    finally:
+        sock.close()
 
 
-def test_puerto_libre_normaliza_host_vacio_y_localhost():
+def test_enlazar_normaliza_host_vacio_y_localhost():
     """"" y "localhost" deben comportarse como 127.0.0.1 (detectar ocupado)."""
     blocker, puerto = _ocupar_puerto_loopback()
     try:
-        assert sgs._puerto_libre(puerto, "") is False
-        assert sgs._puerto_libre(puerto, "localhost") is False
-        assert sgs._puerto_libre(puerto, "127.0.0.1") is False
+        assert _libre(puerto, "") is False
+        assert _libre(puerto, "localhost") is False
+        assert _libre(puerto, "127.0.0.1") is False
     finally:
         blocker.close()
 
@@ -111,12 +126,12 @@ class _RegistradorFamilia:
     ("", socket.AF_INET),
     ("::1", socket.AF_INET6),
 ])
-def test_puerto_libre_elige_familia_segun_host(monkeypatch, host, familia):
+def test_enlazar_elige_familia_segun_host(monkeypatch, host, familia):
     """Un host IPv6 literal debe usar AF_INET6: con AF_INET el bind de '::1'
     falla siempre (WinError 10047) y la búsqueda de puerto sería infinita."""
     reg = _RegistradorFamilia(socket.socket)
     monkeypatch.setattr(socket, "socket", reg)
-    assert sgs._puerto_libre(0, host) is True
+    assert _libre(0, host) is True
     assert reg.familias == [familia]
 
 
@@ -143,28 +158,54 @@ def test_url_para_navegador_normaliza_y_corchetea_ipv6(host, esperado):
 # _resolver_puerto: salto acotado
 # ─────────────────────────────────────────────────────────────────
 
-def test_resolver_puerto_regresa_primero_libre_real():
+def test_resolver_puerto_regresa_primero_libre_real_ya_enlazado():
     blocker, ocupado = _ocupar_puerto_loopback()
     try:
-        elegido = sgs._resolver_puerto(ocupado, "127.0.0.1")
-        # El primero libre puede ser el siguiente inmediato u otro posterior
-        # (carreras con otros procesos): lo garantizado es > ocupado.
-        assert elegido > ocupado
-        assert elegido <= 65535
+        sock, elegido = sgs._resolver_puerto(ocupado, "127.0.0.1")
+        try:
+            # El primero libre puede ser el siguiente inmediato u otro posterior
+            # (carreras con otros procesos): lo garantizado es > ocupado.
+            assert elegido > ocupado
+            assert elegido <= 65535
+            # El socket devuelto ya tiene el puerto: nadie puede quitarselo
+            # antes de que uvicorn escuche.
+            assert sock.getsockname()[1] == elegido
+            assert sgs._enlazar(elegido, "127.0.0.1") is None
+        finally:
+            sock.close()
     finally:
         blocker.close()
+
+
+class _SocketFalso:
+    def __init__(self, puerto):
+        self.puerto = puerto
 
 
 def test_resolver_puerto_salta_ocupados_y_avisa_una_vez_por_puerto(capsys, monkeypatch):
     ocupados = {8000, 8001}
     # L() solo habla español con WRAPPER_LANG=es (default EN): lección Ronda 2.
     monkeypatch.setenv("WRAPPER_LANG", "es")
-    monkeypatch.setattr(sgs, "_puerto_libre",
-                        lambda p, h="127.0.0.1": p not in ocupados)
-    assert sgs._resolver_puerto(8000, "127.0.0.1") == 8002
+    monkeypatch.setattr(sgs, "_enlazar",
+                        lambda p, h="127.0.0.1": None if p in ocupados else _SocketFalso(p))
+    sock, puerto = sgs._resolver_puerto(8000, "127.0.0.1")
+    assert puerto == 8002 and sock.puerto == 8002
     salida = capsys.readouterr().out
     assert salida.count("[AVISO]") == 2
     assert "8000" in salida and "8001" in salida
+
+
+def test_resolver_puerto_estricto_no_salta_de_puerto(capsys, monkeypatch):
+    """Modo LAN (GUI_PORT_STRICT): la regla de firewall y la URL anunciada son
+    del puerto pedido; saltar a otro dejaba la GUI inaccesible sin aviso."""
+    consultados = []
+    monkeypatch.setenv("WRAPPER_LANG", "es")
+    monkeypatch.setattr(sgs, "_enlazar", lambda p, h="127.0.0.1": consultados.append(p))
+    with pytest.raises(RuntimeError) as excinfo:
+        sgs._resolver_puerto(8000, "0.0.0.0", estricto=True)
+    assert consultados == [8000]
+    assert "8000" in str(excinfo.value) and "GUI_PORT" in str(excinfo.value)
+    assert "[AVISO]" not in capsys.readouterr().out
 
 
 def test_resolver_puerto_esta_acotado_a_65535(monkeypatch):
@@ -172,8 +213,8 @@ def test_resolver_puerto_esta_acotado_a_65535(monkeypatch):
     el while del __main__ giraba para siempre superando el rango válido
     (bind >65535 falla siempre). Ahora se agota en 65535 con error claro."""
     consultados = []
-    monkeypatch.setattr(sgs, "_puerto_libre",
-                        lambda p, h="127.0.0.1": consultados.append(p) or False)
+    monkeypatch.setattr(sgs, "_enlazar",
+                        lambda p, h="127.0.0.1": consultados.append(p))
     with pytest.raises(RuntimeError) as excinfo:
         sgs._resolver_puerto(65534, "127.0.0.1")
     assert consultados == [65534, 65535]
@@ -181,7 +222,7 @@ def test_resolver_puerto_esta_acotado_a_65535(monkeypatch):
 
 
 def test_resolver_puerto_mensaje_menciona_rango_y_host(monkeypatch):
-    monkeypatch.setattr(sgs, "_puerto_libre", lambda p, h="127.0.0.1": False)
+    monkeypatch.setattr(sgs, "_enlazar", lambda p, h="127.0.0.1": None)
     with pytest.raises(RuntimeError) as excinfo:
         sgs._resolver_puerto(65535, "0.0.0.0")
     mensaje = str(excinfo.value)
@@ -190,8 +231,8 @@ def test_resolver_puerto_mensaje_menciona_rango_y_host(monkeypatch):
 
 def test_resolver_puerto_no_consulta_mas_alla_del_tope(monkeypatch):
     consultados = []
-    monkeypatch.setattr(sgs, "_puerto_libre",
-                        lambda p, h="127.0.0.1": consultados.append(p) or False)
+    monkeypatch.setattr(sgs, "_enlazar",
+                        lambda p, h="127.0.0.1": consultados.append(p))
     with pytest.raises(RuntimeError):
         sgs._resolver_puerto(65530, "127.0.0.1")
     assert max(consultados) <= 65535

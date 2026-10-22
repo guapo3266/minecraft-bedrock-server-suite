@@ -37,6 +37,9 @@ def _fake_install(monkeypatch, tmp_path, with_world=False):
     monkeypatch.setattr(config, "BASE_DIR", base)
     monkeypatch.setattr(config, "SERVER_EXE", os.path.join(base, "bedrock_server.exe"))
     monkeypatch.setattr(config, "SETUP_MARKER", os.path.join(base, "data", "setup_done.json"))
+    # Constante del import (instalacion real): sin parchearla, instalar BDS
+    # movia el resguardo del test a data/bds_previous REAL (2026-10-21).
+    monkeypatch.setattr(bds_update, "PREVIOUS_VERSION_DIR", os.path.join(base, "data", "bds_previous"))
     worlds = os.path.join(base, "worlds")
     os.makedirs(worlds, exist_ok=True)
     if with_world:

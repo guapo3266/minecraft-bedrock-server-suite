@@ -22,7 +22,7 @@ import os
 import auto_backup
 import windows_process_guard as wpg
 
-from console_lang import L
+from console_lang import L, proteger_salida_consola
 
 # Superficie publica de facto: tests y gui_backend importan desde aqui.
 # No eliminar estos re-exports al reorganizar el wrapper.
@@ -533,6 +533,9 @@ def should_run_initial_backup():
 # PUNTO DE ENTRADA PRINCIPAL
 # ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
+    # Primero: si la GUI (unico lector de esta tuberia) muere, ningun print
+    # puede interrumpir backups, el "save resume" ni el backup de cierre.
+    proteger_salida_consola()
     wrapper_mutex = wpg.NamedMutex(wpg.wrapper_mutex_name(wstate.BASE_DIR))
     # Guard de instancia por ADQUISICION, nunca por existencia. El wrapper
     # retiene el mutex desde aqui hasta morir; una sonda ajena (p. ej. el loop

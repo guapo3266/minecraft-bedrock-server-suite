@@ -7,6 +7,86 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
 
 ## [Sin publicar]
 
+Correcciones de la revisión del 21 de octubre de 2026 (31 hallazgos; detalle
+en [INFORME_FIXES_2026-10-21.md](docs/INFORME_FIXES_2026-10-21.md)).
+
+### Corregido
+
+- Backups
+  - Una carpeta de backups o una instalación con corchetes en la ruta (por
+    ejemplo `D:\Respaldos [HDD]`) ya no deja la lista vacía en la GUI y en la
+    consola ni impide rotar los backups (el disco se llenaba) o recuperar una
+    actualización de BDS interrumpida.
+  - Dos instalaciones con el mismo nombre de carpeta (`...\Survival\Suite` y
+    `...\Creative\Suite`) ya no comparten la carpeta de backups: la primera que
+    hace un backup se la queda y la otra usa `<nombre>-<id>`. Mover la
+    instalación conserva su carpeta; una copia recibe una propia.
+  - El backup en frío se rechaza si un servidor de esta instalación está en
+    marcha fuera de la GUI (copiaba el mundo mientras se escribía).
+  - Si la GUI se cierra a la fuerza con Minecraft encendido, el servidor sigue
+    haciendo sus backups, sale de `save hold` y hace el backup de cierre.
+  - Un archivo con fecha anterior a 1980 ya no hace fallar todos los backups.
+  - Una carpeta del mundo que no se puede leer (permisos, OneDrive sin
+    conexión) hace fallar el backup en vez de publicar uno incompleto que la
+    restauración aceptaba.
+  - El backup en caliente ya no incluye el contenido de una junction en
+    `behavior_packs` o `resource_packs` del mundo.
+  - Verificar un backup con datos comprimidos dañados lo marca como corrupto:
+    la GUI daba error 500 y `tools/verify_backups.py` se detenía sin marcarlo ni
+    revisar los siguientes. Un ZIP que no se puede leer (bloqueado) ya no se
+    marca: la herramienta lo avisa y sale con código 2.
+  - La pestaña **Backups** se actualiza sola cuando termina un backup, se rota,
+    se borra o cambia la carpeta.
+  - Restaurar un backup ya no cambia la hora del «último backup».
+- Actualizaciones
+  - Actualizar o revertir BDS conserva la configuración que editaste
+    (`config/default/permissions.json`, `packetlimitconfig.json`,
+    `profanity_filter.wlist`); la versión de fábrica nueva queda en
+    `data/bds_config_defaults/` para comparar.
+  - La ventana de actualizar BDS ya no queda en «Actualizando BDS…» si se
+    cerraba y se volvía a abrir durante la actualización.
+  - La segunda actualización de la suite ya no falla porque la GUI relanzada
+    tiene abierto su log; ese log pasa a `data/suite_updates/gui.log`.
+  - Mover o copiar la carpeta de la suite después de actualizarla ya no impide
+    abrir la GUI ni el servidor. Si una recuperación falla de verdad, el
+    lanzador deja el mensaje a la vista.
+  - La actualización de la suite funciona con un proxy configurado en Windows
+    (antes se revertía siempre). Al terminar, reanudar Minecraft espera el
+    backup inicial y tolera errores sueltos (antes informaba «Minecraft no se
+    reinició» a los 75 s). Ver en la guía [qué corrección rige en cada
+    actualización](docs/ACTUALIZACIONES_SUITE.md#qué-corrección-rige-en-cada-actualización).
+- GUI y servidor
+  - Una GUI sin permisos de administrador ya no deja lanzar otro servidor
+    mientras el wrapper corre como administrador.
+  - La GUI ya no se cierra sin aviso si otra aplicación toma su puerto justo al
+    arrancar.
+  - En modo LAN la GUI ya no cambia de puerto en silencio: si está ocupado lo
+    avisa (la regla del firewall y la URL del móvil son de ese puerto).
+  - El historial cierra las sesiones de los jugadores que seguían conectados
+    cuando el servidor se detuvo o cayó.
+  - Expulsar, banear y las demás acciones de jugador ya no dicen «enviado»
+    cuando el servidor rechazó el comando.
+  - La tarjeta **Cómo invitar** muestra el puerto nuevo tras cambiarlo y
+    reiniciar.
+  - El asistente inicial no deja saltar al final sin guardar la configuración e
+    instalar BDS, y sus errores se ven.
+  - La pestaña **Addons** filtrada por tipo muestra el aviso de una referencia
+    de tipo cruzado junto a esa referencia.
+  - La API responde 400 (no 500) a un cuerpo JSON que no es un objeto, y
+    `POST /api/schedule` ya no guarda `[]` como un objeto vacío.
+- Lanzadores y herramientas
+  - Los lanzadores ya no dejan variables en la ventana de cmd: un
+    `iniciar_gui.bat` abierto después de `iniciar_gui_lan.bat` en la misma
+    ventana abría la GUI a la red local.
+  - `iniciar_gui.bat` (ZIP con Python incluido) deja a la vista el error si la
+    GUI no arranca.
+  - `configurar_antivirus.bat` ya no muestra caracteres rotos (`aÃ±ade`) ni
+    anuncia «[OK]» si Windows Defender no está activo.
+  - `tools/enable_beta_apis_v2.py` ya no borra el respaldo que acaba de crear.
+  - `tools/update_items.py` pasa a ser un alias de `update_items_v2.py`: bajaba
+    los packs de 1.0.6 a 1.0.5 y sobrescribía sin respaldo. `update_items_v2.py`
+    respalda `main.js` y avisa si falta el addon.
+
 ### Documentación y mantenimiento
 
 - Registro de la publicación de 2.2.0 (hash, procedencia y evidencia), con la

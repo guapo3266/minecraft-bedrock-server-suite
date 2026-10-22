@@ -142,12 +142,14 @@ export function filtrarInventario(payload, { world = '', kind = '' } = {}) {
     pack_dirs: Object.fromEntries(Object.entries(w.pack_dirs || {}).filter(([k]) => kinds.includes(k)))
   }));
   const nombres = new Set(worlds.map((w) => w.name));
+  // Espejo de filter_payload: un diagnostico de referencia (scope = tipo) es de
+  // ese tipo aunque su pack sea del otro (WORLD_REF_KIND_MISMATCH).
   const diagnostics = (payload.diagnostics || []).filter(
     (d) =>
       (!mundo || !d.world || d.world === mundo) &&
       (!tipo || tipoDeScope(d.scope) === null || tipoDeScope(d.scope) === tipo) &&
       (scopes.has(d.scope) || (d.world && nombres.has(d.world)) || d.scope === null) &&
-      (!d.pack || ids.has(d.pack))
+      (!d.pack || ids.has(d.pack) || KINDS.includes(d.scope))
   );
   if (mundo) {
     packs = packs.map((p) => ({

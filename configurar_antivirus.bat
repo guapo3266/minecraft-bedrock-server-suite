@@ -15,9 +15,17 @@ rem El .ps1 espera al proceso elevado y propaga su exit code; aqui se captura
 rem nada mas volver (echo/pause pueden pisar %errorlevel%) para devolverlo.
 set "PS_ERR=%errorlevel%"
 
+rem 2 = Defender no esta activo: no se configuro nada (antes salia 0 y se
+rem anunciaba [OK] sin haber anadido ninguna exclusion, 2026-10-21).
 if "%PS_ERR%"=="0" (
     echo.
     echo [OK] Exclusiones de antivirus configuradas.
+) else if "%PS_ERR%"=="2" (
+    echo.
+    echo [AVISO] Windows Defender no esta activo: no se configuro ninguna exclusion.
+    echo         Anade a tu antivirus las carpetas que se listaron en la otra ventana.
+    echo.
+    pause
 ) else (
     echo.
     echo [AVISO] Ocurrio un problema al configurar las exclusiones. Codigo: %PS_ERR%.

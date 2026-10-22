@@ -26,7 +26,9 @@ async def set_schedule(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Cuerpo JSON invalido")
-    ok, cfg, detalle = schedule_config_service.save(body or {})
+    # Sin "or {}": un [] o un 0 se guardaban como si fueran un objeto vacio.
+    # save() rechaza todo lo que no es un objeto con 400.
+    ok, cfg, detalle = schedule_config_service.save(body)
     if not ok:
         raise HTTPException(status_code=400, detail=detalle)
     partes = [f"intervalo {cfg['backup_interval_min']} min"]

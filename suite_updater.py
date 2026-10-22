@@ -18,6 +18,18 @@ from windows_process_guard import NamedMutex
 import hashlib
 
 
+# Log de la GUI que relanza el auxiliar (relativo a la instalacion).
+GUI_LOG = "data/suite_updates/gui.log"
+GUI_LOG_MAX_BYTES = 5 * 1024 * 1024
+# Reanudar Minecraft: plazo para que BDS arranque una vez terminado el backup
+# inicial, tope total y fallos seguidos de la API que se toleran. El tope es el
+# BACKUP_TIMEOUT_MAX_SEC de wrapper_state mas el plazo de arranque (el auxiliar
+# no puede importar wrapper_state; tests/test_revision_2026-10-21 lo compara).
+RESUME_START_SEC = 180
+RESUME_MAX_SEC = 3600 + RESUME_START_SEC
+RESUME_MAX_ERRORS = 10
+
+
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -85,17 +97,33 @@ def launch_gui(root, request, token):
         interpreter = Path(request["old_python"])
     env = os.environ.copy()
     env.update(GUI_PORT=str(request["port"]), GUI_OPEN_BROWSER="0", SUITE_UPDATE_BOOT_TOKEN=token)
-    with (root / "data/suite_updates/recovery/gui.log").open("ab") as log:
+    # El log va FUERA de recovery/: la GUI lo mantiene abierto como stdout toda
+    # su vida y la siguiente actualizacion no podia archivar recovery/ en
+    # previous_* (WinError 32) (2026-10-21). Ya no se archiva con cada
+    # actualizacion: se rota al pasar de GUI_LOG_MAX_BYTES.
+    log_path = root / GUI_LOG
+    try:
+        if log_path.stat().st_size > GUI_LOG_MAX_BYTES:
+            os.replace(log_path, log_path.with_name(log_path.name + ".1"))
+    except OSError:
+        pass
+    with log_path.open("ab") as log:
         return subprocess.Popen([str(interpreter), "-B", str(root / "server_gui_server.py")], cwd=root, env=env,
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+# Llamadas a la GUI local sin proxy: urlopen usa el proxy del entorno o del
+# sistema y, sin una excepcion para 127.0.0.1, cada sonda de salud fallaba y
+# toda actualizacion terminaba en rollback (2026-10-21).
+_LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def get_json(port, route, body=None):
     request = urllib.request.Request(f"http://127.0.0.1:{port}{route}",
                                      data=None if body is None else json.dumps(body).encode(),
                                      headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=3) as response:
+    with _LOCAL.open(request, timeout=3) as response:
         return json.loads(response.read(65536))
 
 
@@ -111,13 +139,13 @@ def wait_healthy(process, port, version, token, timeout=60, legacy=False, root=N
                 status = get_json(port, "/api/suite_update/health")
                 healthy = status.get("version") == version and status.get("boot_token") == token
             if healthy:
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as response:
+                with _LOCAL.open(f"http://127.0.0.1:{port}/", timeout=3) as response:
                     html = response.read(1024 * 1024).decode("utf-8")
                 assets = set(re.findall(r'(?:src|href)="(/assets/[^"?#]+)"', html))
                 if assets:
                     inventory = read_manifest(root)["files"] if root and (Path(root) / "suite_release_manifest.json").exists() else None
                     for asset in assets:
-                        with urllib.request.urlopen(f"http://127.0.0.1:{port}{asset}", timeout=3) as response:
+                        with _LOCAL.open(f"http://127.0.0.1:{port}{asset}", timeout=3) as response:
                             content = response.read(4 * 1024 * 1024 + 1)
                         if not content or len(content) > 4 * 1024 * 1024:
                             raise ValueError("Asset de GUI vacío o excesivo")
@@ -160,16 +188,41 @@ def confirm_handoff(port, attempts=10, delay=.5):
 
 
 def resume_minecraft(request):
+    """Arranca Minecraft en la GUI nueva y espera a que BDS este en marcha.
+
+    Antes esperaba 75 s fijos y una sola respuesta fallida de /api/status
+    contaba como "Minecraft no se reinicio" (2026-10-21). Ahora el plazo de
+    arranque no corre mientras el wrapper hace su backup inicial (la GUI lo
+    publica como initial_backup_in_progress y le da el mismo margen al
+    detenerlo), se toleran fallos sueltos de la API y se da por fallido en
+    cuanto el wrapper deja de correr.
+    """
     if not request["restart_bds"]:
         return True
     result = get_json(request["port"], "/api/action/start", {})
     if result.get("status") not in {"starting", "already_running"}:
         return False
-    end = time.monotonic() + 75
-    while time.monotonic() < end:
-        status = get_json(request["port"], "/api/status")
+    start = time.monotonic()
+    deadline = start + RESUME_START_SEC
+    errors = 0
+    while time.monotonic() - start < RESUME_MAX_SEC:
+        try:
+            status = get_json(request["port"], "/api/status")
+        except (OSError, ValueError):
+            errors += 1
+            if errors >= RESUME_MAX_ERRORS:
+                return False
+            time.sleep(.5)
+            continue
+        errors = 0
         if status.get("running") and status.get("installed_version"):
             return True
+        if not status.get("running"):
+            return False  # el wrapper ya termino: el arranque fallo
+        if status.get("initial_backup_in_progress"):
+            deadline = time.monotonic() + RESUME_START_SEC
+        elif time.monotonic() >= deadline:
+            return False
         time.sleep(.5)
     return False
 
@@ -211,7 +264,7 @@ def run_job(job):
             rollback_update(job, journal)
             process = launch_gui(root, request, os.urandom(24).hex())
             if not wait_healthy(process, request["port"], request["from_version"], "", legacy=True, root=root):
-                raise ValueError("Código recuperado, pero la GUI anterior no arrancó; revisa gui.log.")
+                raise ValueError("Código recuperado, pero la GUI anterior no arrancó; revisa " + GUI_LOG + ".")
             try:
                 restarted = resume_minecraft(request)
             except Exception:
@@ -236,6 +289,16 @@ def recover(root):
     root = Path(root).absolute()
     job = root / "data/suite_updates/recovery"
     if not (job / "journal.json").exists():
+        return 0
+    # Una actualizacion terminada o revertida no deja nada que recuperar: se
+    # mira ANTES de validar las rutas. El diario guarda la ruta absoluta de la
+    # instalacion y, si la carpeta se movia o copiaba, validate_job fallaba y
+    # los lanzadores no arrancaban ni la GUI ni el servidor (2026-10-21).
+    try:
+        phase = read_json(job / "journal.json").get("phase")
+    except (OSError, ValueError, AttributeError):
+        phase = None
+    if phase in {"complete", "rolled_back"}:
         return 0
     journal = validate_job(job, root)
     if journal["phase"] in {"complete", "rolled_back"}:

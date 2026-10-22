@@ -227,7 +227,7 @@ def run_wrapper_thread(process=None):
                     # flag quedaba en True tras un backup fallido y el boton de
                     # backup en frio quedaba bloqueado hasta reiniciar la GUI.
                     manager.backup_in_progress = False
-                    manager.update_status()
+                    manager.note_backups_changed()
 
             manager.add_log(line_str, log_type)
 
@@ -246,9 +246,11 @@ def run_wrapper_thread(process=None):
         # sesion en lifecycle._launch_wrapper. wrapper_process None (spawn
         # fallido del flujo legacy) tambien cierra: nadie mas es dueno.
         owns_session = False
+        gone = []
         with manager.lock:
             if manager.wrapper_process is process or manager.wrapper_process is None:
                 owns_session = True
+                gone = [(n, manager.players_xuid.get(n)) for n in manager.players_online]
                 manager.players_online.clear()
                 manager.is_running = False
                 manager.backup_in_progress = False
@@ -259,8 +261,14 @@ def run_wrapper_thread(process=None):
                 # G8: respaldo: si el hilo muere, BDS ya no corre.
                 manager.server_stopped_event.set()
         if owns_session:
+            # Quien seguia conectado sale con la sesion: sin linea de
+            # desconexion (caida de BDS o del wrapper), el historial dejaba la
+            # sesion abierta y la reconexion siguiente la pisaba (2026-10-21).
+            for name, xuid in gone:
+                _notify_player_event(name, xuid, False)
             manager.add_log(L("[GUI Backend] Servidor de Minecraft detenido.", "[GUI Backend] Minecraft server stopped."), "system")
-            manager.update_status()
+            # El backup final de cierre (y su rotacion) ya termino o fallo.
+            manager.note_backups_changed()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -283,6 +291,8 @@ def _apply_event(ev):
         manager.events_alive = True
     elif event == "bds_launched":
         manager.wrapper_pre_bds = False
+        # El backup inicial (y su rotacion) termino antes de lanzar BDS.
+        manager.note_backups_changed()
     elif event == "version_captured":
         manager.installed_version = ev.get("version")
         manager.wrapper_pre_bds = False  # BDS ya imprime: esta lanzado
@@ -335,10 +345,11 @@ def _apply_event(ev):
         # H3: fin incondicional del ciclo (success/failed/timeout/watchdog/
         # launch_error/exception viaja en ev["outcome"])
         manager.backup_in_progress = False
-        manager.update_status()
+        manager.note_backups_changed()
     elif event == "final_backup_finished":
         with manager.lock:
             manager.final_backup_result = {"success": ev.get("success") is True, "zip": ev.get("zip")}
+        manager.note_backups_changed()
     # eventos desconocidos: ignorados (compatibilidad futura)
 
 
@@ -421,6 +432,19 @@ def load_known_players():
         return raw if isinstance(raw, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def _notify_player_event(name, xuid, online):
+    """Registro de jugadores conocidos + sinks (historial). Nunca lanza."""
+    try:
+        record_player_event(name, xuid if online else None)
+    except Exception:
+        pass
+    for sink in list(manager.player_event_sinks):
+        try:
+            sink(name, xuid, online)
+        except Exception:
+            pass
 
 
 def record_player_event(name, xuid=None):

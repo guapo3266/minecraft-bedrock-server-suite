@@ -27,6 +27,11 @@ class ServerManager:
         self._log_seq = 0  # id secuencial estable para React keys (filtros/streaming)
         self.start_time = None
         self.last_backup_time = "Ninguno"
+        # Sube cada vez que la lista de backups pudo cambiar (backup terminado,
+        # rotacion, borrado, otra carpeta): el frontend la vuelve a pedir al
+        # verlo cambiar. Antes solo la pedia al conectar y tras pulsar un
+        # boton, y los backups nuevos o rotados no aparecian (2026-10-21).
+        self.backups_revision = 0
         self.backup_in_progress = False
         self.update_in_progress = False
         self.suite_update_in_progress = False
@@ -97,6 +102,12 @@ class ServerManager:
             except Exception:
                 pass
 
+    def note_backups_changed(self):
+        """La lista de backups pudo cambiar: sube backups_revision y lo publica."""
+        with self.lock:
+            self.backups_revision += 1
+        self.update_status()
+
     def update_status(self):
         status_payload = {
             "type": "status",
@@ -154,6 +165,8 @@ def build_public_status(manager, players=None):
         # (lecturas rasgadas en cada poll /api/status e init de WS).
         running = manager.is_running
         last_backup = manager.last_backup_time
+        backups_rev = manager.backups_revision
+        initial_backup = manager.wrapper_pre_bds
         backup_prog = manager.backup_in_progress
         update_prog = manager.update_in_progress
         suite_update_prog = manager.suite_update_in_progress
@@ -167,7 +180,11 @@ def build_public_status(manager, players=None):
         "players": players,
         "player_count": len(players),
         "last_backup": last_backup,
+        "backups_revision": backups_rev,
         "backup_in_progress": backup_prog,
+        # El wrapper hace su backup inicial y aun no lanzo BDS (el auxiliar de
+        # actualizacion de la suite no cuenta ese tiempo como arranque fallido).
+        "initial_backup_in_progress": initial_backup,
         "update_in_progress": update_prog,
         "suite_update_in_progress": suite_update_prog,
         "external_instance": ext_inst,

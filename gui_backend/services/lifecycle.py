@@ -307,6 +307,18 @@ def cold_backup(trigger="gui_manual"):
                 "error",
             )
             return
+        # Re-chequeo bajo op_lock (el endpoint ya lo hizo; el watchdog diario
+        # llega directo aqui): con un servidor externo vivo el mundo se esta
+        # escribiendo y un backup en frio lo copiaria a medias (2026-10-21).
+        from gui_backend.services import external_probe
+        is_ext, _reason = external_probe.detect_external_bds()
+        if is_ext:
+            manager.add_log(
+                L("[GUI Backend] Hay una instancia externa del servidor en ejecución; backup en frío cancelado (ese servidor hace sus propios backups).",
+                  "[GUI Backend] An external server instance is running; cold backup cancelled (that server makes its own backups)."),
+                "error",
+            )
+            return
         manager.backup_in_progress = True
         manager.update_status()
         manager.add_log(L("[GUI Backend] Ejecutando backup en frío...", "[GUI Backend] Running cold backup..."), "backup")
@@ -321,4 +333,4 @@ def cold_backup(trigger="gui_manual"):
             manager.add_log(L(f"[GUI Backend] Error en backup: {e}", f"[GUI Backend] Backup error: {e}"), "error")
         finally:
             manager.backup_in_progress = False
-            manager.update_status()
+            manager.note_backups_changed()

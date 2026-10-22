@@ -258,3 +258,26 @@ describe('regresiones de filtros y dependencias por mundo', () => {
     expect(noEvaluada.packs[0].dependency_resolution[0].world_resolutions).toEqual([]);
   });
 });
+
+// Fixture generado con el analizador real (tests/fixtures/addons_tipo_cruzado.json,
+// compartido con tests/test_revision_2026-10-21.py): un pack de comportamiento
+// listado en world_resource_packs.json.
+const tipoCruzado = JSON.parse(readFileSync(join(RAIZ, 'tests', 'fixtures', 'addons_tipo_cruzado.json'), 'utf8'));
+
+describe('diagnostico de referencia de tipo cruzado (2026-10-21)', () => {
+  it('filtrando por el tipo del archivo de referencias se ve junto a su referencia', () => {
+    const vista = filtrarInventario(tipoCruzado, { kind: 'resource' });
+    expect(ids(vista)).toEqual(['resource_packs/RP']);
+    expect(codigos(vista)).toEqual(['WORLD_REF_KIND_MISMATCH', 'SCOPE_ROOT_MISSING']);
+    expect(vista.worlds[0].references.map((r) => r.status)).toEqual(['kind_mismatch', 'resolved']);
+    expect(codigos(filtrarInventario(tipoCruzado, { world: 'Alfa', kind: 'resource' })))
+      .toEqual(['WORLD_REF_KIND_MISMATCH', 'SCOPE_ROOT_MISSING']);
+  });
+
+  it('filtrando por el tipo del pack no aparece (la referencia tampoco)', () => {
+    const vista = filtrarInventario(tipoCruzado, { kind: 'behavior' });
+    expect(ids(vista)).toEqual(['behavior_packs/BP']);
+    expect(codigos(vista)).toEqual(['SCOPE_ROOT_MISSING']);
+    expect(vista.worlds[0].references).toEqual([]);
+  });
+});

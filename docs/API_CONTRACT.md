@@ -38,7 +38,9 @@ la coincidencia de Origin con el host del propio request.
   "players": ["NombreJugador"],
   "player_count": 0,
   "last_backup": "HH:MM:SS | Ninguno",
+  "backups_revision": 0,
   "backup_in_progress": false,
+  "initial_backup_in_progress": false,
   "update_in_progress": false,
   "suite_update_in_progress": false,
   "external_instance": false,
@@ -58,6 +60,10 @@ Está disponible aunque BDS esté detenido y coincide con `info.version` de Open
 El frontend incorpora esa misma fuente al compilar y la muestra en Acerca de.
 
 `installed_version`: versión de BDS capturada al arrancar el servidor (evento NDJSON `version_captured`, fallback stdout). `null` mientras no haya arranque en esta sesión de GUI.
+
+`backups_revision` (2026-10-21): contador que sube cada vez que la lista de backups pudo cambiar (fin de un backup en caliente, inicial o de cierre, y su rotación; backup en frío; backup previo a actualizar BDS; borrado; cambio de carpeta; fin de la sesión del wrapper). El frontend vuelve a pedir `GET /api/backups` al verlo cambiar y al abrir la pestaña Backups. Su valor no tiene significado propio y vuelve a 0 al reiniciar la GUI.
+
+`initial_backup_in_progress` (2026-10-21): el wrapper hace su backup inicial y todavía no lanzó BDS (`manager.wrapper_pre_bds`). El auxiliar de actualización de la suite no cuenta ese tiempo en el plazo de arranque al reanudar Minecraft.
 
 `external_instance`/`external_instance_reason`: solo con el servidor fuera del control de la GUI. Motivos: `"wrapper_mutex"` (un wrapper de esta instalación retiene su mutex), `"installation_busy"` (otro proceso restaura o aplica una actualización de BDS en esta instalación, p. ej. la CLI de restore; 2026-10-20) o `"bedrock_server_pid_<pid>"` (un `bedrock_server.exe` de esta instalación que no es hijo de la GUI). Con cualquiera de ellos, start/update/restore/instalación responden 409.
 
@@ -117,7 +123,7 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 
 ### `POST /api/server_properties`
 - Body: `{"values": {"clave": "<str>", ...}}`.
-- 400 `"Cuerpo JSON invalido"` / `"No hay campos para guardar"` / `"Valores deben ser texto"` / detalle de validación por campo.
+- 400 `"Cuerpo JSON invalido"` / `"cuerpo debe ser un objeto"` (JSON válido que no es un objeto: `[1]`, `"x"`, `5`; antes 500) / `"No hay campos para guardar"` / `"Valores deben ser texto"` / detalle de validación por campo.
 - 200: `{"status": "ok", "written": [<claves>], "restart_required": true}` + log de sistema.
 
 ### `GET /api/schedule`
@@ -126,7 +132,7 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 
 ### `POST /api/schedule`
 - Body: subset de las claves anteriores. Las no enviadas conservan el valor guardado, o el default si nunca se guardó (2026-10-20: antes volvían al default y un guardado parcial apagaba el watchdog). La combinación con lo guardado y la escritura van bajo el mismo lock.
-- 400 `"Cuerpo JSON invalido"` / validación (`backup_interval_min debe estar entre 5 y 1440`, `<campo> debe ser "HH:MM" o null`, etc.).
+- 400 `"Cuerpo JSON invalido"` / `"cuerpo debe ser un objeto"` (2026-10-21: `[]` o `0` ya no se guardan como un objeto vacío) / validación (`backup_interval_min debe estar entre 5 y 1440`, `backup_interval_min debe ser entero` —también con `Infinity` o `1e400`, que daban 500—, `<campo> debe ser "HH:MM" o null`, etc.).
 - 200: `{"status": "ok", "config": <config normalizada>}` + log de sistema.
 - Efecto inmediato: el wrapper relee `data/schedule_config.json` por mtime en
   cada tick de su scheduler (sin reiniciar).
@@ -212,7 +218,7 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 | `start` | `{"status": "starting"}` / `{"status": "already_running"}` / `{"status": "busy", "message": "Operación en curso (restauración/actualización)"}` / `{"status": "error", "message": "<e>"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (sonda externa) |
 | `stop` | `{"status": "stopping"}` / `{"status": "not_running"}` | 500 `"Error al detener: <e>"` (fallo de entrega a stdin; no marca stop_requested) |
 | `restart` | `{"status": "restarting"}` (progreso solo por logs) | — |
-| `backup` | `{"status": "hot_backup_dispatched"}` (caliente) / `{"status": "backup_dispatched"}` (frío) / `{"status": "busy", "message": "Ya hay un backup en curso"}` | 500 `"Error al iniciar backup: <e>"` (caliente) |
+| `backup` | `{"status": "hot_backup_dispatched"}` (caliente) / `{"status": "backup_dispatched"}` (frío) / `{"status": "busy", "message": "Ya hay un backup en curso"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (frío: sonda externa, también re-chequeada bajo `op_lock` en `lifecycle.cold_backup`, 2026-10-21) / 500 `"Error al iniciar backup: <e>"` (caliente) |
 | `update_bds` | `{"status": "update_dispatched"}` / `{"status": "already_updating"}` | 409 `"Hay una instancia externa del servidor en ejecución"` (sonda externa, solo con `is_running == false`) |
 | `rollback_bds` | `{"status": "rollback_dispatched"}` / `{"status": "already_updating"}` | 409 instancia externa / 409 `"No hay una versión anterior guardada para restaurar"` |
 | otra | — | 400 `"Acción no válida"` |
@@ -226,7 +232,8 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 - Excluye nombres que contengan `_CORRUPTO`, `_EXCEDIDO`, `_CRASH` o `_crash` (misma capa que `auto_backup.rotate_backups`; restaurar un backup marcado siempre falla).
 
 ### `GET /api/backups/location` (2026-10-20)
-- 200: `{"backup_dir": <str>, "root": <str>, "custom": <bool>, "portable": <bool>, "default_root": <str>, "default_backup_dir": <str>, "server_name": <str>, "exists": <bool>, "setting_error": <str|null>}`.
+- 200: `{"backup_dir": <str>, "root": <str>, "custom": <bool>, "portable": <bool>, "default_root": <str>, "default_backup_dir": <str>, "server_name": <str>, "shared_name": <bool>, "exists": <bool>, "setting_error": <str|null>}`.
+- `shared_name` (2026-10-21): `root\<server_name>` pertenece a otra instalación con el mismo nombre de carpeta (su archivo `.bedrock_suite_owner.json` lleva otro dueño) y esta usa `root\<server_name>-<id8>` (`backup_location.resolve_backup_dir`). La carpeta la reclama la primera instalación que hace un backup en ella.
 - `backup_dir` = `root\<server_name>`: carpeta donde esta instalación escribe, lista y rota sus backups. Sin ajuste, `root` = `default_root` (`..\..\Backups_Minecraft\auto_backups`). `portable`: la raíz está dentro de la instalación (bajo `backups\`) y se guarda relativa. `setting_error`: el ajuste de `data/backup_location.json` se ignora (`unreadable_setting` o un código de validación de abajo) y rige la carpeta predeterminada.
 
 ### `POST /api/backups/location` (2026-10-20)
@@ -243,13 +250,13 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 
 ### `POST /api/restore`
 - Body: `{"filename": "<str>"}`.
-- 400 `"Cuerpo JSON invalido"` / `"Nombre de backup invalido"` (basename != nombre).
+- 400 `"Cuerpo JSON invalido"` / `"cuerpo debe ser un objeto"` (antes 500) / `"Nombre de backup invalido"` (basename != nombre).
 - 409 `"Debes apagar el servidor antes de reestablecer un backup"` / `"El servidor se encendió durante la restauración; operación cancelada"` (recheck bajo `op_lock`) / `"Hay una instancia externa del servidor en ejecución; restauración cancelada"` (sonda externa bajo `op_lock`) / `"Otra operación está modificando esta instalación…"` (otro proceso — la CLI, otra GUI o el recovery del wrapper — retiene el mutex de operación de la instalación, `windows_process_guard.installation_operation`; los rechecks anteriores corren bajo ese mutex, que se mantiene durante todo el restore; 2026-10-20).
 - 404: `FileNotFoundError` (texto del error).
 - 500: error genérico (extracción/swap). Un ZIP sin `level.dat` en el staging — vacío o solo-packs — se rechaza con `RuntimeError` SIN tocar el mundo (ronda 2026-09-11).
 - Restaura el mundo y los addons de `server_resource_packs/` y `server_behavior_packs/`; los packs que distribuye BDS se quedan en su versión instalada (`zip_safety.is_bds_pack`, 2026-10-20). Tampoco se restauran los packs cuyo destino (la carpeta del pack o la raíz `resource_packs/`/`behavior_packs/`) es un enlace o junction (`zip_safety.is_redirected_path`): el mundo sí se restaura y el log lo indica.
 - 500: `level-name` inválido o destino fuera de `worlds/`/redirigido por enlaces; se rechaza antes de abrir el ZIP. Si falla el rollback por rename y se recurre a copiar, el `.bak` se conserva para recuperación exacta manual.
-- 200: `{"status": "ok", "backup": "<filename>"}` + log.
+- 200: `{"status": "ok", "backup": "<filename>"}` + log. No cambia `last_backup` (2026-10-21: antes pasaba a la hora actual y aparentaba un backup reciente).
 
 ### `GET /api/backups/{filename}/download`
 - 400 `"Nombre de backup invalido"`; 404 `"Backup no encontrado"`.
@@ -259,12 +266,13 @@ Detalles y límites: [ACTUALIZACIONES_SUITE.md](ACTUALIZACIONES_SUITE.md).
 - 400 `"Nombre de backup invalido"`; 404 `"Backup no encontrado"`.
 - 409 `"Hay un backup en curso; espera a que termine antes de eliminar"` — si `backup_in_progress`.
 - 500: error OSError.
-- 200: `{"status": "ok", "backup": "<filename>"}` + log.
+- 200: `{"status": "ok", "backup": "<filename>"}` + log. Sube `backups_revision`.
 
 ### `POST /api/backups/{filename}/verify`
-- 400 `"Nombre de backup invalido"`; 404 `"Backup no encontrado"`; 500 error genérico.
-- 200 `{"status": "ok", "filename": "<filename>"}` — CRC correcto.
-- 200 `{"status": "corrupt", "filename": "<filename>", "entry": "<str>"}` — `testzip` o `BadZipFile` (no es error HTTP).
+- 400 `"Nombre de backup invalido"`; 404 `"Backup no encontrado"`.
+- 200 `{"status": "ok", "filename": "<filename>"}` — todas las entradas se leen y descomprimen bien.
+- 200 `{"status": "corrupt", "filename": "<filename>", "entry": "<entrada> (<Excepción>: <detalle>)"}` — cabecera inválida, CRC distinto, deflate dañado, datos truncados o método no soportado (`zip_safety.check_zip_integrity`, fuente única con `tools/verify_backups.py`; 2026-10-21: un deflate dañado daba 500). No es error HTTP.
+- 500: el archivo no se pudo leer (bloqueado, error de disco): no prueba que el backup esté roto.
 
 ## WebSocket `/ws`
 
@@ -308,12 +316,15 @@ Cliente → servidor:
 ## Arranque (no modificar)
 
 - Si existe un diario de actualización, `iniciar_gui.bat` ejecuta primero
-  `Recuperar_suite.bat` con el Python auxiliar; un error impide abrir otra GUI.
+  `Recuperar_suite.bat --sin-pausa` con el Python auxiliar; un error impide
+  abrir otra GUI y queda a la vista con una pausa. Un diario terminado
+  (`complete`/`rolled_back`) no ejecuta el auxiliar (2026-10-21).
 - El ZIP usa `runtime\python.exe -B server_gui_server.py`. Una instalación de
   scripts sin ese runtime conserva el bootstrap de `.venv` + `requirements.txt`
   y el fallback a `python` del PATH.
-- Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_puerto_libre`).
-- El entrypoint ejecuta `uvicorn.Server(uvicorn.Config(app, ...))` y registra
+- Puerto `GUI_PORT` (default 8000), salto al siguiente libre (`_resolver_puerto`
+  devuelve el socket enlazado); con `GUI_PORT_STRICT=1` (modo LAN) sin salto.
+- El entrypoint ejecuta `uvicorn.Server(uvicorn.Config(app, ...)).run(sockets=[sock])` y registra
   `suite_update.configure_runtime` con el puerto real y un callback de
   `server.should_exit`; el auxiliar puede solicitar un cierre coordinado.
 - `GUI_OPEN_BROWSER=0` evita abrir otra pestaña al relanzar tras una actualización.

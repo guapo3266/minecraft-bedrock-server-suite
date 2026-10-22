@@ -4,6 +4,7 @@ import Stepper, { Step } from './reactbits/Stepper';
 import GlassSelect from './GlassSelect';
 import { FIELDS } from '../propsFields';
 import { useI18n } from '../i18n.jsx';
+import { pasoMaximo, ultimoPaso } from '../setupLogic';
 
 // Subconjunto de campos para el setup inicial (los esenciales de primera puesta en marcha)
 const WIZARD_KEYS = ['server-name', 'gamemode', 'difficulty', 'server-port', 'max-players'];
@@ -176,6 +177,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
     setInstalling(true);
     setInstallResult(null);
     setInstallSlow(false);
+    setCompleteError(null);
     try {
       const res = await fetch('/api/setup/install_bds', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
@@ -216,14 +218,21 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
     }
   };
 
+  // Vuelve a montar el Stepper en `paso` (tras "Finalizar" queda completado y
+  // sin contenido). `step` se fija a la vez: el Stepper nuevo no avisa de su
+  // paso inicial y nextDisabled se calculaba con el paso anterior (2026-10-21).
+  const volverAPaso = (paso) => {
+    setResetStep(paso);
+    setStep(paso);
+    setAttempt((a) => a + 1);
+  };
+
   const handleComplete = async () => {
-    // Pre-chequeo local: sin BDS instalado no hay nada que finalizar. Evita
-    // una llamada inutil a la API (409) y el salto de pasos por los
-    // indicadores: vuelve al paso 2 (instalacion) con mensaje claro.
+    // Pre-chequeo local (defensa: los indicadores ya no dejan llegar aqui sin
+    // BDS): vuelve al paso de instalacion con el aviso visible.
     if (!installed) {
       setCompleteError(t('setupNeedInstall'));
-      setResetStep(2);
-      setAttempt((a) => a + 1);
+      volverAPaso(2);
       return;
     }
     setCompleting(true);
@@ -235,25 +244,32 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
         onDone();
       } else {
         setCompleteError(data.detail || t('setupCompleteError'));
-        setResetStep(1);
-        setAttempt((a) => a + 1);
+        volverAPaso(ultimoPaso(bdsInstalled));
       }
     } catch {
       setCompleteError(t('setupNetError'));
-      setResetStep(1);
-      setAttempt((a) => a + 1);
+      volverAPaso(ultimoPaso(bdsInstalled));
     } finally {
       setCompleting(false);
     }
   };
 
   const busy = installing || completing || saving;
-  const nextDisabled = (step === 1 && !saved) || (step === 2 && !installed);
+  const nextDisabled = (step === 1 && !saved) || (step === 2 && !bdsInstalled && !installed);
+  const maxStep = pasoMaximo({ saved, installed, bdsInstalled: !!bdsInstalled });
   const wizardFields = FIELDS.filter((f) => WIZARD_KEYS.includes(f.key));
 
   return (
     <div className="setup-view legacy-ui">
       <div className="panel setup-panel">
+        {/* Fuera de los pasos: "Finalizar" puede devolver a otro paso y el
+            aviso antes solo existia en el paso final (no se veia nunca). */}
+        {completeError && (
+          <div role="alert" className="mb-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300">
+            <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />
+            {completeError}
+          </div>
+        )}
         <Stepper
           key={attempt}
           initialStep={resetStep}
@@ -263,6 +279,7 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
           nextButtonText={t('setupNext')}
           completeButtonText={t('setupCompleteButton')}
           disableStepIndicators={busy}
+          canSelectStep={(s) => s <= maxStep}
           nextButtonProps={{ disabled: nextDisabled || busy }}
           stepCircleContainerClassName="bg-slate-900/60"
         >
@@ -415,12 +432,6 @@ export default function SetupWizard({ bdsInstalled, logs, onDone }) {
           <Step>
             <div className="space-y-3 text-center">
               <p className="text-xs text-slate-300">{t('setupFinalText')}</p>
-              {completeError && (
-                <div aria-live="polite" className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-300">
-                  <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />
-                  {completeError}
-                </div>
-              )}
             </div>
           </Step>
         </Stepper>
