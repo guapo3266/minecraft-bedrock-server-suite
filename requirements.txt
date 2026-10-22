@@ -7,3 +7,7 @@ uvicorn>=0.29,<0.53
 websockets>=12.0,<18
 psutil>=5.9,<8
 requests>=2.31,<3
+# Piso de seguridad, sin tope: 2026.10.19 retira la raiz emSign ECC G3
+# (incidente eMudhra). Cambiar este archivo hace que los lanzadores refresquen
+# un .venv antiguo.
+certifi>=2026.10.19

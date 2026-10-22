@@ -28,6 +28,7 @@ versión común fue 2.0.0 y conservó el número previamente declarado por el ba
 La entrega 2.1.0 añadió el ZIP con Python incluido y el actualizador de la suite; la 2.1.1 es su primera corrección.
 La 2.2.0 añade la carpeta de backups configurable, por eso sube el número MENOR.
 La 2.2.1 corrige los 31 hallazgos de la revisión del 21 de octubre de 2026.
+La 2.2.2 actualiza `certifi` por el incidente de los certificados de eMudhra/emSign.
 Ver [descarga, seguridad y recuperación](ACTUALIZACIONES_SUITE.md).
 
 La [Release pública v2.1.0](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.1.0)
@@ -42,20 +43,19 @@ y la local de TESTTEST `b83d172`. La
 [Release v2.2.1](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.1)
 se publicó el 22 de octubre de 2026: su etiqueta pública identifica `95cbb9b`
 y la local de TESTTEST `cc9846a`. No mover ninguna etiqueta publicada para
-incluir commits posteriores de documentación o CI. Estos commits pueden
-conservar la versión 2.2.1 mientras no se prepare otro paquete; la siguiente
-corrección distribuible partiría de 2.2.2.
+incluir commits posteriores de documentación o CI. La siguiente entrega es
+2.2.2.
 
 ## Preparar una entrega local
 
 En la raíz de **cada** repositorio, con el mismo número elegido:
 
 ```powershell
-python tools/set_version.py 2.2.1
+python tools/set_version.py 2.2.2
 ```
 
 Mover los cambios de `[Sin publicar]` a una sección como
-`## [2.2.1] - AAAA-MM-DD` en `CHANGELOG.md`, con la fecha real de preparación.
+`## [2.2.2] - AAAA-MM-DD` en `CHANGELOG.md`, con la fecha real de preparación.
 Documentar solo los cambios incluidos en ese árbol. Comprobar los manifiestos:
 
 ```powershell
@@ -73,8 +73,8 @@ commit aprobado de cada repositorio, con el árbol limpio:
 ```powershell
 git diff --check
 git status --short
-git commit -m "chore: preparar versión 2.2.1"
-git tag -a v2.2.1 -m "Versión 2.2.1 de Minecraft Bedrock Server Suite"
+git commit -m "chore: preparar versión 2.2.2"
+git tag -a v2.2.2 -m "Versión 2.2.2 de Minecraft Bedrock Server Suite"
 ```
 
 Seleccionar explícitamente los archivos que se incluirán antes del commit.

@@ -382,7 +382,7 @@ arranque. Usar una carpeta de salida **nueva y corta** en cada intento, fuera de
 una instalación real (rechaza una carpeta que ya tenga escenarios):
 
 ```powershell
-python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.2.1
+python tools/verify_release.py output/releases/BedrockSuite-Windows-x64.zip --output C:\SuiteQA\2.2.2
 ```
 
 Genera `VERIFICACION.json` y logs por escenario. Descarga un Python anterior

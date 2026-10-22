@@ -5,7 +5,43 @@ es independiente de la versión de Minecraft Bedrock Dedicated Server (BDS).
 Este historial empieza en 2.0.0; el desarrollo anterior se conserva en Git y en
 los informes de `docs/`, sin asignarle versiones retrospectivas.
 
-## [Sin publicar]
+## [2.2.2] - 2026-10-22
+
+Actualización de seguridad sobre 2.2.1 por el
+[incidente de los certificados de eMudhra/emSign](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576).
+Solo cambia el almacén de certificados con el que la suite valida HTTPS; el
+código es el de 2.2.1. Se instala desde **Más acciones → Actualizar la suite**
+(siempre con confirmación) o con el ZIP de la Release. Mundos, propiedades,
+packs, backups y configuración quedan fuera del reemplazo.
+
+### Seguridad
+
+- El ZIP lleva `certifi` 2026.10.19. Hasta 2.2.1 llevaba 2026.7.22, que aún
+  confiaba en la raíz `emSign ECC Root CA - G3`. Con las claves comprometidas de
+  sus intermedias, alguien con control de la red (MITM) podía hacerse pasar por
+  GitHub o por Mojang ante la suite: la comprobación y descarga de
+  actualizaciones de la suite y la descarga de BDS. No se encontró evidencia de
+  explotación.
+- `requirements.txt` exige `certifi>=2026.10.19`: en una instalación desde
+  código, el lanzador refresca el `.venv` la próxima vez que se abre.
+
+**Si actualizas desde 2.2.1 o anterior**: la descarga de 2.2.2 la hace todavía
+la versión instalada, con el certifi antiguo. Si sospechas de tu red, descarga
+el ZIP con un navegador actualizado y compara su SHA-256
+(`Get-FileHash BedrockSuite-Windows-x64.zip`) con el de la página de la Release.
+
+**Instalación desde código (`.venv`)**: ese refresco lo descarga el pip del
+propio `.venv`. Si es anterior a 26.2.2 (Python 3.11 crea los entornos con pip
+24.0), actualízalo antes de abrir el lanzador, con el comando del aviso de
+Python (el wheel va fijado por hash):
+
+```powershell
+.venv\Scripts\python.exe -m pip install "pip @ https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl#sha256=fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+```
+
+Lo mismo al recrear un `.venv`: créalo con `python -m venv .venv`, aplica ese
+comando y solo después abre el lanzador. Si lo crea el lanzador, descarga las
+dependencias con el pip antiguo.
 
 ### Documentación y mantenimiento
 
