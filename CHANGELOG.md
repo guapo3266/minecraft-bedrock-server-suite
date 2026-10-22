@@ -15,8 +15,14 @@ los informes de `docs/`, sin asignarle versiones retrospectivas.
   reinicio veía el wrapper ya terminado, no enviaba `stop` y relanzaba directo.
   Ahora los plazos se cuentan desde que el `stop` llega al wrapper. El código
   de producción no cambia.
+- Registro de la publicación de 2.2.1 (hash, procedencia y evidencia), con la
+  prueba de actualización real desde el ZIP publicado de 2.2.0.
 
 ## [2.2.1] - 2026-10-21
+
+[Publicada el 22 de octubre de 2026](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.1)
+con ZIP Windows x64 y checksum. Procedencia, hash y alcance de la validación
+en [ACTUALIZACIONES_SUITE.md](docs/ACTUALIZACIONES_SUITE.md).
 
 Correcciones sobre 2.2.0: los 31 hallazgos de la revisión del 21 de octubre de
 2026 (detalle en [INFORME_FIXES_2026-10-21.md](docs/INFORME_FIXES_2026-10-21.md)).

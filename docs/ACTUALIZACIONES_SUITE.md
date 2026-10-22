@@ -19,6 +19,57 @@ Se recomienda una ruta corta, por ejemplo `C:\BedrockSuite`. Si Windows rechaza
 las rutas largas del staging o del auxiliar, la preparación se cancela antes de
 reemplazar el programa; extraer la instalación en una ruta corta permite repetirla.
 
+## Entrega 2.2.1 publicada
+
+La [Release v2.2.1](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.1)
+se publicó el **22 de octubre de 2026** como estable y Latest. Corrige los 31
+hallazgos de la revisión del 21 de octubre. El ZIP incluye CPython **3.13.16**,
+ocupa **16 524 788 bytes** y contiene 759 archivos: los 758 que inventaría su
+manifiesto más el propio `suite_release_manifest.json`. El manifiesto
+identifica el commit público `95cbb9b2469926702f87627e29a0fb29ccb1afee`
+(etiqueta `v2.2.1`; en TESTTEST apunta a `cc9846a`). Su SHA-256 es:
+
+```text
+203ef98debd54e80711f3b6eece748e8290285b45e0c8e01cc69cc546b7526e4
+```
+
+La etiqueta está en el commit que construyó el ZIP, no en el último de `main`:
+los commits posteriores (`93e1bb1` público, `c294334` en TESTTEST) solo
+corrigen un test intermitente y el CHANGELOG, y no están en el paquete.
+
+Evidencia del 21 y 22 de octubre:
+
+- Se construyó desde un checkout limpio (`dirty: false`) y pasó
+  `tools/verify_release.py` en una carpeta nueva: actualización, migración desde
+  scripts y rollback, con los seis testigos intactos. Como en las entregas
+  anteriores, esos escenarios ejercitan el auxiliar de la propia 2.2.1.
+- La ruta real desde 2.2.0 se probó con un script de QA que no está en el repo:
+  una instalación extraída del ZIP publicado de 2.2.0, con su GUI y su
+  auxiliar, recibió el ZIP 2.2.1 sin reempaquetar (GitHub simulado, sin BDS ni
+  Minecraft encendido). Terminó en `complete` en 34 s; la GUI nueva respondió
+  2.2.1 con Python 3.13.16, el árbol coincidió con el manifiesto, el wrapper y
+  la CLI importaron con el Python incluido y los siete testigos quedaron
+  intactos.
+- El problema conocido de 2.2.0 se reprodujo: si el auxiliar de 2.2.0 relanzó
+  la GUI (su log queda abierto en `recovery/`), la siguiente actualización se
+  detiene al prepararse, antes de tocar nada (`WinError 32`), y la instalación
+  sigue en 2.2.0 con sus datos intactos. Ver «Qué corrección rige en cada
+  actualización».
+- Ya con 2.2.1 instalada, una segunda actualización (a un paquete 2.2.2 de QA)
+  desde una GUI con `recovery/gui.log` abierto terminó en `complete`, archivó
+  `recovery/` y dejó el log nuevo en `data/suite_updates/gui.log`. Una copia de
+  la instalación con el diario terminado se recupera con `Recuperar_suite.bat`
+  (código 0), mientras que el auxiliar de 2.2.0 por sí solo falla.
+- Tests sin e2e: 1259 en TESTTEST y 1257 en el perfil público (2 omitidos);
+  125 tests frontend, lint y build. Una corrida completa del público falló una
+  vez en `test_restart_fase2_espera_backup_final_y_arranca` (temporizadores de
+  reloj armados antes del cliente); su arreglo (`93e1bb1`) es posterior a la
+  etiqueta, no cambia el código del paquete y la suite completa del público
+  pasó con él.
+- Los assets publicados se descargaron de GitHub y sus bytes coincidieron con
+  los del ZIP probado y con el digest de la API. La GUI de una 2.2.0, contra la
+  API real, detectó 2.2.1 con su SHA-256. No se instaló en el servidor real.
+
 ## Entrega 2.2.0 publicada
 
 La [Release v2.2.0](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.0)
