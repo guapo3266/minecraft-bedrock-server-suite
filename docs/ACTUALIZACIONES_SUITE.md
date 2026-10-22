@@ -19,6 +19,65 @@ Se recomienda una ruta corta, por ejemplo `C:\BedrockSuite`. Si Windows rechaza
 las rutas largas del staging o del auxiliar, la preparación se cancela antes de
 reemplazar el programa; extraer la instalación en una ruta corta permite repetirla.
 
+## Entrega 2.2.2 publicada
+
+La [Release v2.2.2](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.2)
+se publicó el **22 de octubre de 2026** como estable y Latest. Es una
+actualización de seguridad por el
+[incidente de los certificados de eMudhra/emSign](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576):
+`certifi` 2026.10.19 en lugar de 2026.7.22, que aún confiaba en la raíz
+`emSign ECC Root CA - G3`. El ZIP incluye CPython **3.13.16**, ocupa
+**16 525 357 bytes** y contiene 759 archivos: los 758 que inventaría su
+manifiesto más el propio `suite_release_manifest.json`. El manifiesto
+identifica el commit público `caa2b450d4183d558bd2dc4d927c8911af07b301`
+(etiqueta `v2.2.2`; en TESTTEST apunta a `2e30a80`). Su SHA-256 es:
+
+```text
+122e054bd565da07c95d8076705d62417566b9679b700117fca09ddf75231b6e
+```
+
+Evidencia del 22 de octubre:
+
+- Frente al ZIP de 2.2.1 cambian `certifi` (paquete y `dist-info`),
+  `version.json`, `requirements.txt`, el `CHANGELOG.md`, el bundle del frontend
+  y el manifiesto. También los lanzadores `bin/*.exe` de site-packages y los
+  `RECORD` que los listan: pip los genera al instalar y el de 2.2.2 (26.2.2)
+  usa otra plantilla que el de 2.2.1 (24.0). Los archivos de los 19 paquetes
+  coinciden con los hashes de los wheels de PyPI, igual que los de 2.2.0 y
+  2.2.1.
+- Cadena comprometida, sin forjar nada: `openssl verify -no-CApath -no-CAstore`
+  de la cadena `dv-g3b-emudhra` publicada por los investigadores da `OK` con el
+  `cacert.pem` de 2.2.1 y el error 20 (`unable to get local issuer
+  certificate`) con el de 2.2.2. Con el runtime del ZIP, Requests rechaza por
+  certificado `https://dv-g3b-emudhra.we-have-a-problem.com/` (con 2.2.0
+  conectaba) y conecta con GitHub y Mojang.
+- Se construyó desde un checkout limpio (`dirty: false`) con pip 26.2.2 y pasó
+  `tools/verify_release.py` en una carpeta nueva: actualización, migración desde
+  scripts y rollback, con los seis testigos intactos y sin ejecutar BDS.
+- Tests sin e2e: 1259 en TESTTEST y 1257 en el perfil público (2 omitidos);
+  125 tests frontend, lint y build.
+- Los assets publicados se descargaron de GitHub y sus bytes coincidieron con
+  los del ZIP probado y con el digest de la API. Una 2.2.1 extraída del ZIP
+  publicado, contra la API real, detectó 2.2.2 con su SHA-256. No se instaló en
+  el servidor real.
+
+No verificado: la actualización real 2.2.1 → 2.2.2 con este ZIP (compatibilidad
+de actualización no verificada; el auxiliar de 2.2.1 completó antes una
+actualización a un paquete 2.2.2 de QA, ver 2.2.1) y el transporte TLS de `gh`,
+con el que se publicó.
+
+Lo que 2.2.2 no cambia:
+
+- La actualización desde 2.2.1 o anterior la descarga la versión instalada,
+  con su certifi antiguo. Ante una red sospechosa, descargar el ZIP con un
+  navegador actualizado y comparar su SHA-256 con el de esta sección.
+- El contexto predeterminado de `ssl` de Python con el almacén de Windows
+  (`urllib`) acepta la cadena cruzada por `AAA Certificate Services`, que sigue
+  en ese almacén: Python no comprueba revocación. certifi no lo corrige. La
+  suite lo usa en `tools/build_release.py` y `tools/verify_release.py`, cuyas
+  descargas verifican un SHA-256 fijado en el repositorio, y en el auxiliar
+  contra 127.0.0.1. La corrección es de CPython (gh-160040).
+
 ## Entrega 2.2.1 publicada
 
 La [Release v2.2.1](https://github.com/guapo3266/minecraft-bedrock-server-suite/releases/tag/v2.2.1)
